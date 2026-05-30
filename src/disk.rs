@@ -20,6 +20,24 @@ pub fn is_ship_magic(magic: u64) -> bool {
     (magic & 0xffff_ffff_0000_0000) == 0xc35d_5000_0000_0000
 }
 
+/// Read a checkpoint file: the block up to which the scan is contiguously complete.
+fn read_checkpoint(path: &str) -> Option<u64> {
+    std::fs::read_to_string(path)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+/// Atomically persist the resume watermark (write-temp-then-rename, so a crash mid-write
+/// never leaves a torn checkpoint).
+fn write_checkpoint(path: &str, resume_block: u64) {
+    let tmp = format!("{path}.tmp");
+    if std::fs::write(&tmp, resume_block.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
 /// Does the log's second indexed entry carry the ship magic? Used to recognise a
 /// snapshot-restored log, whose first entry (the init delta) has a distinct magic.
 fn second_entry_is_ship(log_path: &str, idx_path: &str) -> Result<bool> {
@@ -151,11 +169,13 @@ pub fn scan_disk<W: Write + Send>(
     start: u32,
     end: u32,
     threads: u32,
+    checkpoint: Option<&str>,
     out: &mut W,
 ) -> Result<()> {
+    use std::collections::BTreeSet;
     use std::io::Read;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{mpsc, Arc};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::{Duration, Instant};
 
     let log_path = format!("{dir}/chain_state_history.log");
@@ -184,6 +204,22 @@ pub fn scan_disk<W: Write + Send>(
     if start > end {
         bail!("empty range after clamp to log [{first_block}..{last_block}]");
     }
+    // Resume: a checkpoint records the block up to which the scan is contiguously done.
+    // Re-running the same command continues from there (the output is opened in append mode
+    // by the caller). Blocks above the checkpoint that were scanned before an interruption
+    // get re-scanned — harmless, since abi-index docs are keyed by (block, account).
+    let start = match checkpoint.and_then(read_checkpoint) {
+        Some(resume) if resume > end as u64 => {
+            eprintln!("[disk] checkpoint says [{start}..{end}] already complete — nothing to do");
+            return Ok(());
+        }
+        Some(resume) => {
+            let r = (resume as u32).max(start);
+            eprintln!("[disk] resuming from checkpoint at block {r}");
+            r
+        }
+        None => start,
+    };
     let threads = threads.max(1);
     let total = (end - start + 1) as u64;
     // Dynamic work-stealing: hand out many small contiguous chunks from a shared cursor
@@ -193,6 +229,8 @@ pub fn scan_disk<W: Write + Send>(
     // threads, idling cores. Small chunks keep every thread busy right to the end.
     const CHUNK: u64 = 20_000;
     let cursor = Arc::new(AtomicU64::new(start as u64));
+    // Completed chunk start-offsets, for computing the contiguous resume watermark.
+    let completed = Arc::new(Mutex::new(BTreeSet::<u64>::new()));
     eprintln!("[disk] log [{first_block}..{last_block}]; scanning [{start}..{end}] ({total} blocks) with {threads} threads");
     let t0 = Instant::now();
 
@@ -211,10 +249,17 @@ pub fn scan_disk<W: Write + Send>(
             }
             let _ = out.flush();
         });
-        // progress monitor
-        let (scanned_m, found_m, done_m) = (scanned.clone(), found.clone(), done.clone());
+        // progress monitor + checkpoint writer
+        let (scanned_m, found_m, done_m, completed_m) = (
+            scanned.clone(),
+            found.clone(),
+            done.clone(),
+            completed.clone(),
+        );
+        let ckpt = checkpoint.map(String::from);
         s.spawn(move || {
             let (mut last, mut last_t) = (0u64, Instant::now());
+            let mut wm = start as u64; // contiguous resume watermark (first not-yet-done chunk)
             while !done_m.load(Relaxed) {
                 std::thread::sleep(Duration::from_secs(3));
                 let sc = scanned_m.load(Relaxed);
@@ -225,13 +270,30 @@ pub fn scan_disk<W: Write + Send>(
                     found_m.load(Relaxed)
                 );
                 (last, last_t) = (sc, Instant::now());
+                if let Some(cp) = &ckpt {
+                    {
+                        let c = completed_m.lock().unwrap();
+                        while c.contains(&wm) {
+                            wm += CHUNK;
+                        }
+                    }
+                    // cap at end+1: the final chunk is clamped to `end`, so the watermark
+                    // must not advance past it (else a later resume with a grown chain skips
+                    // the [end..chunk_boundary] tail).
+                    write_checkpoint(cp, wm.min(end as u64 + 1));
+                }
             }
         });
         // workers — each pulls the next chunk from the shared cursor until the range is done
         let mut handles = Vec::new();
         for i in 0..threads {
             let (lp, ip) = (log_path.clone(), idx_path.clone());
-            let (txc, scc, cur) = (tx.clone(), scanned.clone(), cursor.clone());
+            let (txc, scc, cur, cmp) = (
+                tx.clone(),
+                scanned.clone(),
+                cursor.clone(),
+                completed.clone(),
+            );
             handles.push(s.spawn(move || loop {
                 let cs64 = cur.fetch_add(CHUNK, Relaxed);
                 if cs64 > end as u64 {
@@ -239,8 +301,12 @@ pub fn scan_disk<W: Write + Send>(
                 }
                 let cs = cs64 as u32;
                 let ce = (cs64 + CHUNK - 1).min(end as u64) as u32;
-                if let Err(e) = worker_scan(&lp, &ip, first_block, cs, ce, log_len, &txc, &scc) {
-                    eprintln!("[disk] worker {i} [{cs}..{ce}] FAILED: {e:#}");
+                match worker_scan(&lp, &ip, first_block, cs, ce, log_len, &txc, &scc) {
+                    // mark the chunk done only on success, so a failed chunk is re-scanned on resume
+                    Ok(()) => {
+                        cmp.lock().unwrap().insert(cs64);
+                    }
+                    Err(e) => eprintln!("[disk] worker {i} [{cs}..{ce}] FAILED: {e:#}"),
                 }
             }));
         }
@@ -250,6 +316,18 @@ pub fn scan_disk<W: Write + Send>(
         }
         done.store(true, Relaxed); // stop the monitor; writer ends when rx drains
     });
+
+    // Final watermark: a clean run pushes it past `end`, so re-running is a no-op; if any
+    // chunk failed, it stops at that chunk so the re-run picks up exactly the gap.
+    if let Some(cp) = checkpoint {
+        let mut wm = start as u64;
+        let c = completed.lock().unwrap();
+        while c.contains(&wm) {
+            wm += CHUNK;
+        }
+        drop(c);
+        write_checkpoint(cp, wm.min(end as u64 + 1));
+    }
 
     let secs = t0.elapsed().as_secs_f64();
     eprintln!(
@@ -294,12 +372,9 @@ mod tests {
         assert!(decode_payload(&[1, 2]).unwrap().is_empty()); // too short
     }
 
-    /// A snapshot-restored log opens with a non-ship-magic init-delta entry that
-    /// omits the trailing position suffix; the second entry is a normal ship block.
-    /// scan_disk must accept it (via the 2nd-entry magic) and stay byte-aligned
-    /// across the suffix-less first entry.
-    #[test]
-    fn snapshot_log_is_accepted_and_aligned() {
+    /// Build a synthetic 2-entry state-history log in `dir`: a snapshot-style init entry
+    /// (non-ship magic, NO trailing suffix) at block 10, then a normal ship block at 11.
+    fn write_synth_log(dir: &std::path::Path) {
         use std::io::Write as _;
         fn entry(magic: u64, block_num: u32, payload: &[u8]) -> Vec<u8> {
             let mut e = magic.to_le_bytes().to_vec();
@@ -318,9 +393,8 @@ mod tests {
         let mut index = 0u64.to_le_bytes().to_vec();
         index.extend_from_slice(&e2.to_le_bytes());
 
-        let dir = std::env::temp_dir().join(format!("abi-scanner-snap-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).unwrap();
         std::fs::File::create(dir.join("chain_state_history.log"))
             .unwrap()
             .write_all(&log)
@@ -329,11 +403,49 @@ mod tests {
             .unwrap()
             .write_all(&index)
             .unwrap();
+    }
 
+    /// A snapshot-restored log opens with a non-ship-magic init-delta entry that omits the
+    /// trailing position suffix; the second entry is a normal ship block. scan_disk must
+    /// accept it (via the 2nd-entry magic) and stay byte-aligned across the suffix-less entry.
+    #[test]
+    fn snapshot_log_is_accepted_and_aligned() {
+        let dir = std::env::temp_dir().join(format!("abi-scanner-snap-{}", std::process::id()));
+        write_synth_log(&dir);
         let mut out = Vec::new();
-        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, &mut out);
+        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, None, &mut out);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(r.is_ok(), "snapshot-restored log should be accepted: {r:?}");
         assert!(out.is_empty(), "empty payloads -> no ABIs emitted");
+    }
+
+    /// A checkpoint records the contiguous-done watermark; once the scan completes it sits
+    /// past `end`, so re-running the same command with that checkpoint is a clean no-op.
+    #[test]
+    fn checkpoint_makes_completed_scan_a_noop() {
+        let dir = std::env::temp_dir().join(format!("abi-scanner-ckpt-{}", std::process::id()));
+        write_synth_log(&dir);
+        let ckpt = dir.join("scan.ckpt");
+        let cp = ckpt.to_str().unwrap();
+
+        // first run: scans [10..11] and writes a watermark past the end
+        let mut out1 = Vec::new();
+        scan_disk(dir.to_str().unwrap(), 10, 11, 1, Some(cp), &mut out1).unwrap();
+        let wm: u64 = std::fs::read_to_string(&ckpt)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            wm > 11,
+            "watermark should be past end after a complete scan, got {wm}"
+        );
+
+        // second run: checkpoint says complete -> no work, returns Ok with no output
+        let mut out2 = Vec::new();
+        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, Some(cp), &mut out2);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(r.is_ok());
+        assert!(out2.is_empty(), "resume of a complete scan emits nothing");
     }
 }

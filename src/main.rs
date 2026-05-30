@@ -42,12 +42,28 @@ struct Args {
     /// Request irreversible blocks only (safe for historical ranges)
     #[arg(long, default_value_t = true)]
     irreversible_only: bool,
+    /// Checkpoint file for resumable --from-disk scans. Records how far the scan is
+    /// contiguously done; re-run the same command to continue (the output is appended).
+    #[arg(long)]
+    checkpoint: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    // Resume when the checkpoint already exists: append to the prior output, don't truncate it.
+    let resuming = args
+        .checkpoint
+        .as_deref()
+        .is_some_and(|c| std::path::Path::new(c).exists());
     let out: Box<dyn Write + Send> = match &args.out {
+        Some(path) if resuming => Box::new(BufWriter::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .context("open out file (append/resume)")?,
+        )),
         Some(path) => Box::new(BufWriter::new(
             File::create(path).context("create out file")?,
         )),
@@ -58,9 +74,19 @@ async fn main() -> Result<()> {
     if let Some(dir) = &args.from_disk {
         let threads = args.threads.unwrap_or(args.connections);
         let mut out = out;
-        return disk::scan_disk(dir, args.start, args.end, threads, &mut out);
+        return disk::scan_disk(
+            dir,
+            args.start,
+            args.end,
+            threads,
+            args.checkpoint.as_deref(),
+            &mut out,
+        );
     }
 
+    if args.checkpoint.is_some() {
+        eprintln!("[abi-scanner] note: --checkpoint is only supported with --from-disk; ignoring");
+    }
     let ship = args
         .ship
         .clone()

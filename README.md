@@ -44,9 +44,22 @@ abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
   --threads 12 --out wax-abi-snapshot.ndjson
 ```
 
-- `--threads N` parallel readers (each scans a contiguous block range). Throughput scales ~linearly to the core count; don't exceed physical cores.
+- `--threads N` parallel readers pull small chunks from a shared cursor (work-stealing), so every thread stays busy to the end even though recent blocks are far denser than early ones. Throughput scales ~linearly to the core count; don't exceed physical cores.
 - Reads only `chain_state_history.{log,index}` (`trace_history.*` is not needed). **Opens read-only**, and the range is clamped to indexed (committed) blocks, so it never races the entry nodeos is appending — it cannot corrupt anything.
-- Resume after an interruption by re-running with a higher `--start`.
+
+#### Resumable scans (`--checkpoint`)
+
+For long full-chain scans, pass `--checkpoint <file>` to make the scan **stop-and-continue from any block**. The scanner records how far it is *contiguously* done; if it's interrupted (Ctrl-C, crash, reboot), **re-run the exact same command** and it picks up where it left off, appending to the same output:
+
+```bash
+abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
+  --threads 12 --out wax-abi.ndjson --checkpoint wax.ckpt
+# ...interrupted... just run the same line again — it resumes from the checkpoint:
+abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
+  --threads 12 --out wax-abi.ndjson --checkpoint wax.ckpt
+```
+
+Once complete, re-running is a no-op. To **catch up new blocks** later (the chain advanced), re-run the same command: it resumes from the prior end and indexes only the new blocks. Blocks scanned-but-not-yet-checkpointed at the moment of an interruption are re-scanned on resume — harmless, since abi-index docs are keyed by `block + account` (idempotent on `_bulk`).
 
 #### Snapshot-restored nodes → instant current-ABI snapshot
 
@@ -100,7 +113,7 @@ Dense WAX era (~478 deltas/block), single live node:
 
 - `@timestamp` is omitted; the Hyperion abi lookup keys on `block`. Can be added from the block header if needed.
 - A direct `--es` bulk sink (instead of NDJSON) is a planned add-on.
-- Checkpoint file for fully-automatic resume on very large chains.
+- `--checkpoint` resume is `--from-disk` only; SHiP-mode resume is not yet wired up.
 
 ## License
 
