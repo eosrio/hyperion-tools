@@ -1,5 +1,7 @@
 /target
 /target-linux
 *.ndjson
+*.ckpt
+*.ckpt.tmp
 # local state-history copies used for testing
 /sh-*/
