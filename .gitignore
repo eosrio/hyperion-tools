@@ -1,3 +1,5 @@
 /target
 /target-linux
 *.ndjson
+# local state-history copies used for testing
+/sh-*/
