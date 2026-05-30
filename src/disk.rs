@@ -186,7 +186,13 @@ pub fn scan_disk<W: Write + Send>(
     }
     let threads = threads.max(1);
     let total = (end - start + 1) as u64;
-    let chunk = total.div_ceil(threads as u64) as u32;
+    // Dynamic work-stealing: hand out many small contiguous chunks from a shared cursor
+    // rather than one fixed 1/threads slice each. Real chains get much denser (and their
+    // reads colder, off the ARC cache) toward the head, so static slices finish wildly out
+    // of step — the light early slices drain and leave the dense tail to a shrinking set of
+    // threads, idling cores. Small chunks keep every thread busy right to the end.
+    const CHUNK: u64 = 20_000;
+    let cursor = Arc::new(AtomicU64::new(start as u64));
     eprintln!("[disk] log [{first_block}..{last_block}]; scanning [{start}..{end}] ({total} blocks) with {threads} threads");
     let t0 = Instant::now();
 
@@ -221,17 +227,18 @@ pub fn scan_disk<W: Write + Send>(
                 (last, last_t) = (sc, Instant::now());
             }
         });
-        // workers
+        // workers — each pulls the next chunk from the shared cursor until the range is done
         let mut handles = Vec::new();
         for i in 0..threads {
-            let cs = start.saturating_add(i.saturating_mul(chunk));
-            if cs > end {
-                break;
-            }
-            let ce = ((cs as u64 + chunk as u64 - 1).min(end as u64)) as u32;
             let (lp, ip) = (log_path.clone(), idx_path.clone());
-            let (txc, scc) = (tx.clone(), scanned.clone());
-            handles.push(s.spawn(move || {
+            let (txc, scc, cur) = (tx.clone(), scanned.clone(), cursor.clone());
+            handles.push(s.spawn(move || loop {
+                let cs64 = cur.fetch_add(CHUNK, Relaxed);
+                if cs64 > end as u64 {
+                    break;
+                }
+                let cs = cs64 as u32;
+                let ce = (cs64 + CHUNK - 1).min(end as u64) as u32;
                 if let Err(e) = worker_scan(&lp, &ip, first_block, cs, ce, log_len, &txc, &scc) {
                     eprintln!("[disk] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
