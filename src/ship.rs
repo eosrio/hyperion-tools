@@ -13,9 +13,15 @@ use rs_abieos::Abieos;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
+use tokio_tungstenite::tungstenite::Error as WsError;
 
 use crate::abi::build_abi_doc;
 use crate::delta::{account_setabi, for_each_account_row, parse_result};
+
+/// Per-message/frame ceiling for the SHiP websocket. A snapshot-restored node's
+/// full-state init delta exceeds any single-frame limit; that case is served by
+/// `--from-disk`, and a frame over this size yields a hint pointing there.
+const FRAME_LIMIT_BYTES: usize = 1_073_741_824; // 1 GiB
 
 /// Build a get_blocks_request_v0 (variant byte `1`). The variant index of
 /// get_blocks_request_v0 is stable across every Leap/Spring SHiP ABI.
@@ -58,8 +64,8 @@ async fn scan_range(
     sink: mpsc::Sender<String>,
 ) -> Result<(u32, u64)> {
     let mut config = WebSocketConfig::default();
-    config.max_message_size = Some(1_073_741_824);
-    config.max_frame_size = Some(1_073_741_824);
+    config.max_message_size = Some(FRAME_LIMIT_BYTES);
+    config.max_frame_size = Some(FRAME_LIMIT_BYTES);
 
     let (ws, _) = connect_async_with_config(&ship, Some(config), true)
         .await
@@ -84,7 +90,19 @@ async fn scan_range(
     let mut processed = 0u32;
     let mut found = 0u64;
     while let Some(msg) = rx.next().await {
-        let Message::Binary(bin) = msg.with_context(|| format!("[c{id}] stream"))? else {
+        let msg = match msg {
+            Ok(m) => m,
+            // A frame over the websocket limit is, in practice, the full-state init delta a
+            // snapshot-restored node emits on its first block — it can't fit in one frame.
+            Err(WsError::Capacity(c)) => bail!(
+                "[c{id}] SHiP frame exceeded the {} GiB websocket limit ({c}). This is the \
+                 full-state init delta a snapshot-restored node emits on its first block; it \
+                 cannot fit in a single websocket frame. Read it with --from-disk instead.",
+                FRAME_LIMIT_BYTES >> 30
+            ),
+            Err(e) => return Err(anyhow!("[c{id}] stream: {e}")),
+        };
+        let Message::Binary(bin) = msg else {
             continue;
         };
         let Some((block_num, deltas)) = parse_result(&bin) else {
