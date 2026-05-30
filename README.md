@@ -48,6 +48,17 @@ abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
 - Reads only `chain_state_history.{log,index}` (`trace_history.*` is not needed). **Opens read-only**, and the range is clamped to indexed (committed) blocks, so it never races the entry nodeos is appending — it cannot corrupt anything.
 - Resume after an interruption by re-running with a higher `--start`.
 
+#### Snapshot-restored nodes → instant current-ABI snapshot
+
+When a node is started **from a chain snapshot**, the state-history plugin emits the *entire chain state as one delta* on the first block after the snapshot (the `Placing initial state in block N` log line). That single block's `account` table holds **every** contract's current ABI — so scanning just that one block yields a complete current-ABI set in seconds, without walking the chain's history:
+
+```bash
+# N = the snapshot's head block (from the nodeos "Placing initial state in block N" log line)
+abi-scanner --from-disk /data/nodeos/state-history --start N --end N --out current-abis.ndjson
+```
+
+Measured on **Telos (Spring 1.2.2)**: a node restored from a ~1.6 GB snapshot produced a ~1.95 GB init-delta entry; abi-scanner extracted **796 contract ABIs from that one block in ~27 s**. That init-delta entry uses a distinct magic and omits the per-entry position suffix — both handled transparently, so snapshot-restored logs read just like genesis-synced ones.
+
 ### SHiP (remote node or fleet-router)
 
 ```bash
