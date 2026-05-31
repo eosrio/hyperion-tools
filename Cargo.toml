@@ -26,6 +26,9 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 hex = "0.4"
 flate2 = "1"
+# Blocking, dependency-light HTTP for the prototypes (no async runtime, no TLS for local ES):
+minreq = { version = "2", default-features = false }   # action-proto ES `_bulk` sink (POST to local ES)
+tiny_http = "0.12"                                      # archive-server: on-demand act.data over HTTP
 
 [profile.release]
 lto = true
