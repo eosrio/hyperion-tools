@@ -7,9 +7,12 @@
 //! ABI extraction — the `account` table was just table 0 of ~19. Throughput + memory are
 //! the point; this is a prototype, not the shipped tool.
 //!
-//! Decode path (per rs_abieos): set_abi_hex_native(code, hex) -> get_type_for_table_native
-//! (code, table) -> bin_to_json(code, type, value). One ABI per account per context
-//! (insert-no-overwrite), so a version change is delete_contract_native + set_abi_hex_native.
+//! Decode path (rs_abieos 0.6 `AbiHandle`, rust-backend): every (account, valid_from) ABI
+//! version is parsed once into a standalone `AbiHandle` and kept in a per-worker registry —
+//! no `abieos_context`, no `set_abi`/`delete_contract` churn, and the per-row decode
+//! (`decode_table_row_into`) is pure Rust with **zero FFI** and a reused output buffer.
+//! The shared ABI index is keyed by `u64` account, so the hot path needs no `name_to_string`
+//! at all; names are resolved only to format the emitted doc (or a failure sample).
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -20,7 +23,7 @@ use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use rs_abieos::Abieos;
+use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
 use abi_scanner::delta::read_varuint;
 use abi_scanner::disk::{decode_payload, is_ship_magic};
@@ -45,10 +48,12 @@ struct Args {
     out: Option<String>,
 }
 
-/// account name -> versions sorted by the block the ABI took effect (valid_from).
-type AbiIndex = HashMap<String, Vec<(u32, String)>>;
+/// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
+/// Keyed by `u64` so the per-row decode path never needs `name_to_string`.
+type AbiIndex = HashMap<u64, Vec<(u32, String)>>;
 
 fn load_abi_index(path: &str) -> Result<AbiIndex> {
+    let names = Abieos::new(); // string_to_name only; no ABI loaded
     let f = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
     let mut idx: AbiIndex = HashMap::new();
     let mut skipped = 0u64;
@@ -72,7 +77,11 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
         if hex.is_empty() {
             continue;
         }
-        idx.entry(acct.to_string())
+        let Ok(code) = names.string_to_name(acct) else {
+            skipped += 1;
+            continue;
+        };
+        idx.entry(code)
             .or_default()
             .push((block as u32, hex.to_string()));
     }
@@ -153,7 +162,7 @@ fn parse_contract_row(row: &[u8]) -> Option<ContractRow<'_>> {
 #[derive(Default)]
 struct Stats {
     blocks: AtomicU64,
-    rows: AtomicU64,   // contract_row present==1 seen
+    rows: AtomicU64,    // contract_row present==1 seen
     decoded: AtomicU64, // value -> JSON ok
     no_abi: AtomicU64,    // (subset of raw) no ABI version at all for (code, block)
     raw: AtomicU64,       // undecodable -> raw `value` preserved (e.g. table not in the ABI)
@@ -168,7 +177,8 @@ enum Fail {
 }
 
 /// Shared failure breakdown: (reason, code, table) -> (count, a sample error).
-type Failures = std::sync::Mutex<std::collections::BTreeMap<(&'static str, String, String), (u64, String)>>;
+type Failures =
+    std::sync::Mutex<std::collections::BTreeMap<(&'static str, String, String), (u64, String)>>;
 
 fn record_failure(failures: &Failures, reason: &'static str, code: &str, table: &str, sample: &str) {
     let mut m = failures.lock().unwrap();
@@ -181,65 +191,61 @@ fn record_failure(failures: &Failures, reason: &'static str, code: &str, table: 
     }
 }
 
-/// Ensure the abieos context holds the ABI version of `code` active at `block`.
-/// Returns false if no version is known for this contract at/before `block`.
-fn ensure_abi(
-    abieos: &Abieos,
-    loaded: &mut HashMap<u64, u32>,
-    idx: &AbiIndex,
-    code: u64,
-    code_str: &str,
-    block: u32,
-) -> bool {
-    let Some(versions) = idx.get(code_str) else {
-        return false;
-    };
-    // greatest valid_from <= block
-    let pos = versions.partition_point(|(vf, _)| *vf <= block);
-    if pos == 0 {
-        return false;
-    }
-    let (valid_from, abi_hex) = &versions[pos - 1];
-    if loaded.get(&code) != Some(valid_from) {
-        let _ = abieos.delete_contract_native(code); // no-op if absent
-        if abieos.set_abi_hex_native(code, abi_hex).is_err() {
-            return false;
-        }
-        loaded.insert(code, *valid_from);
-    }
-    true
+/// Per-worker cache of parsed ABIs, backed by the shared (immutable) version index.
+///
+/// Each `(account, valid_from)` ABI version is parsed into an [`AbiHandle`] on first use and
+/// kept — a version change is then a map lookup, not a re-parse, and there is no
+/// single-slot-per-account context to evict. `None` marks a version whose ABI failed to parse
+/// so we don't retry it every row.
+struct Registry<'a> {
+    idx: &'a AbiIndex,
+    handles: HashMap<(u64, u32), Option<AbiHandle>>,
 }
 
-/// One decode attempt: resolve the table type against the ABI version active at `block`
-/// and deserialize `value` -> JSON.
-#[allow(clippy::too_many_arguments)]
+impl<'a> Registry<'a> {
+    fn new(idx: &'a AbiIndex) -> Self {
+        Self {
+            idx,
+            handles: HashMap::new(),
+        }
+    }
+
+    /// The `AbiHandle` for the version of `code` active at `block` (greatest `valid_from <=
+    /// block`), parsing it on first use. `None` if no version applies or the ABI won't parse.
+    fn active(&mut self, code: u64, block: u32) -> Option<&mut AbiHandle> {
+        let Registry { idx, handles } = self;
+        let versions = idx.get(&code)?;
+        let pos = versions.partition_point(|(vf, _)| *vf <= block);
+        if pos == 0 {
+            return None;
+        }
+        let valid_from = versions[pos - 1].0;
+        handles
+            .entry((code, valid_from))
+            .or_insert_with(|| AbiHandle::from_hex(&versions[pos - 1].1).ok())
+            .as_mut()
+    }
+}
+
+/// One decode attempt: deserialize `value` for `table` against the ABI version active at
+/// `block`, writing the JSON into `out`. Pure Rust — no abieos context, no FFI.
 fn decode_at(
-    abieos: &Abieos,
-    loaded: &mut HashMap<u64, u32>,
-    type_cache: &mut HashMap<(u32, u64), String>,
-    idx: &AbiIndex,
+    reg: &mut Registry,
+    out: &mut String,
     code: u64,
-    code_str: &str,
     table: u64,
     value: &[u8],
     block: u32,
-) -> std::result::Result<String, Fail> {
-    if !ensure_abi(abieos, loaded, idx, code, code_str, block) {
+) -> std::result::Result<(), Fail> {
+    let Some(handle) = reg.active(code, block) else {
         return Err(Fail::NoAbi);
-    }
-    let vf = loaded[&code];
-    let ttype = match type_cache.entry((vf, table)) {
-        std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
-        std::collections::hash_map::Entry::Vacant(e) => {
-            match abieos.get_type_for_table_native(code, table) {
-                Ok(t) => e.insert(t).clone(),
-                Err(_) => return Err(Fail::NoType),
-            }
-        }
     };
-    abieos
-        .bin_to_json(code_str, &ttype, value)
-        .map_err(|e| Fail::Decode(format!("{e:?}")))
+    handle
+        .decode_table_row_into(table, value, out)
+        .map_err(|e| match e {
+            AbieosError::GetTypeForTable(_) => Fail::NoType,
+            other => Fail::Decode(format!("{other:?}")),
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -254,10 +260,9 @@ fn worker(
     failures: &Failures,
     sink: Option<&mpsc::Sender<String>>,
 ) -> Result<()> {
-    let abieos = Abieos::new();
-    let mut loaded: HashMap<u64, u32> = HashMap::new();
-    // resolved struct type cache, keyed by (loaded_valid_from, table) so it invalidates on ABI change
-    let mut type_cache: HashMap<(u32, u64), String> = HashMap::new();
+    let names = Abieos::new(); // name_to_string only — for the emitted doc / failure samples
+    let mut reg = Registry::new(abi_index);
+    let mut buf = String::new(); // reused decode target
 
     let mut idx = File::open(idx_path)?;
     idx.seek(SeekFrom::Start((cs - first_block) as u64 * 8))?;
@@ -303,30 +308,28 @@ fn worker(
                 return Ok(());
             };
             stats.rows.fetch_add(1, Relaxed);
-            let code_str = match abieos.name_to_string(r.code) {
-                Ok(s) => s,
-                Err(_) => return Ok(()),
-            };
             // Decode against the ABI active at this block; on failure retry against block-1's
             // ABI (same-block setabi+write boundary), à la Hyperion. If still undecodable
             // (e.g. the contract writes a table it never declares in its ABI — legal in
-            // Antelope, ~0.15% of WAX rows), preserve the raw `value` hex instead of `data`,
-            // exactly as Hyperion does — so EVERY present row still produces a doc.
-            let json = match decode_at(&abieos, &mut loaded, &mut type_cache, abi_index, r.code, &code_str, r.table, r.value, block_num) {
-                Ok(j) => Some(j),
+            // Antelope, ~0.15% of WAX rows), preserve the raw `value` hex below, exactly as
+            // Hyperion does — so EVERY present row still produces a doc. On success `buf`
+            // holds the decoded JSON.
+            let decoded = match decode_at(&mut reg, &mut buf, r.code, r.table, r.value, block_num) {
+                Ok(()) => true,
                 Err(first) => {
                     let retry = if !matches!(first, Fail::NoAbi) && block_num > 1 {
-                        decode_at(&abieos, &mut loaded, &mut type_cache, abi_index, r.code, &code_str, r.table, r.value, block_num - 1)
+                        decode_at(&mut reg, &mut buf, r.code, r.table, r.value, block_num - 1)
                     } else {
                         Err(first)
                     };
                     match retry {
-                        Ok(j) => {
+                        Ok(()) => {
                             stats.recovered.fetch_add(1, Relaxed);
-                            Some(j)
+                            true
                         }
                         Err(f) => {
-                            let table_str = abieos.name_to_string(r.table).unwrap_or_default();
+                            let code_str = names.name_to_string(r.code).unwrap_or_default();
+                            let table_str = names.name_to_string(r.table).unwrap_or_default();
                             let (reason, sample) = match f {
                                 Fail::NoType => ("no_type", String::new()),
                                 Fail::Decode(e) => ("decode", e),
@@ -336,24 +339,26 @@ fn worker(
                                 stats.no_abi.fetch_add(1, Relaxed);
                             }
                             record_failure(failures, reason, &code_str, &table_str, &sample);
-                            None
+                            false
                         }
                     }
                 }
             };
-            if json.is_some() {
+            if decoded {
                 stats.decoded.fetch_add(1, Relaxed);
             } else {
                 stats.raw.fetch_add(1, Relaxed);
             }
             // every present row produces a doc: decoded `data`, or raw `value` if undecodable
             if let Some(tx) = sink {
-                let scope = abieos.name_to_string(r.scope).unwrap_or_default();
-                let table = abieos.name_to_string(r.table).unwrap_or_default();
-                let payer = abieos.name_to_string(r.payer).unwrap_or_default();
-                let body = match &json {
-                    Some(j) => format!("\"data\":{j}"),
-                    None => format!("\"value\":\"{}\"", hex::encode(r.value)),
+                let code_str = names.name_to_string(r.code).unwrap_or_default();
+                let scope = names.name_to_string(r.scope).unwrap_or_default();
+                let table = names.name_to_string(r.table).unwrap_or_default();
+                let payer = names.name_to_string(r.payer).unwrap_or_default();
+                let body = if decoded {
+                    format!("\"data\":{buf}")
+                } else {
+                    format!("\"value\":\"{}\"", hex::encode(r.value))
                 };
                 let doc = format!(
                     "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\",{body}}}",
@@ -400,9 +405,7 @@ fn main() -> Result<()> {
     let mut out: Option<Box<dyn Write + Send>> = args
         .out
         .as_ref()
-        .map(|p| -> Result<Box<dyn Write + Send>> {
-            Ok(Box::new(BufWriter::new(File::create(p)?)))
-        })
+        .map(|p| -> Result<Box<dyn Write + Send>> { Ok(Box::new(BufWriter::new(File::create(p)?))) })
         .transpose()?;
     let emit = out.is_some();
     let t0 = Instant::now();
