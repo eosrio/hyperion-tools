@@ -15,6 +15,8 @@ envfile() { [ -f "$root/.env" ] && grep -E "^$1=" "$root/.env" | tail -1 | cut -
 
 ES="${ES:-$(envfile ES)}"; ES="${ES:-http://localhost:9200}"
 CHAIN="${CHAIN:-$(envfile CHAIN)}"; CHAIN="${CHAIN:-wax}"
+# Optional index.mode (e.g. INDEX_MODE=logsdb for ~6% extra storage savings on ES >= 8.17 / 9.x).
+MODE="${INDEX_MODE:-$(envfile INDEX_MODE)}"
 
 host="$(printf '%s' "$ES" | sed -E 's#^https?://##; s#[:/].*$##')"
 case "$host" in
@@ -26,11 +28,12 @@ case "$host" in
      fi ;;
 esac
 
-echo "Applying templates for chain '$CHAIN' -> $ES"
+echo "Applying composable index templates for chain '$CHAIN' -> $ES${MODE:+ (index.mode=$MODE)}"
 for t in action delta abi; do
   body="$(sed "s/{{CHAIN}}/$CHAIN/g" "$root/templates/$t.json")"
+  [ -n "$MODE" ] && body="$(printf '%s' "$body" | sed "s/\"index\": {/\"index\": {\n          \"mode\": \"$MODE\",/")"
   code="$(printf '%s' "$body" | curl -fsS -o /tmp/ds-bench-tmpl.out -w '%{http_code}' \
-            -XPUT "$ES/_template/${CHAIN}-${t}" -H 'Content-Type: application/json' --data-binary @-)" \
+            -XPUT "$ES/_index_template/${CHAIN}-${t}" -H 'Content-Type: application/json' --data-binary @-)" \
     && echo "  ${CHAIN}-${t}: HTTP $code $(cat /tmp/ds-bench-tmpl.out)" \
     || { echo "  ${CHAIN}-${t}: FAILED $(cat /tmp/ds-bench-tmpl.out)" >&2; exit 1; }
 done

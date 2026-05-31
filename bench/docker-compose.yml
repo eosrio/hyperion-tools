@@ -12,7 +12,7 @@ name: ds-indexer-bench
 
 services:
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-8.15.3}
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-9.4.2}
     container_name: ds-bench-es
     environment:
       - discovery.type=single-node
@@ -38,7 +38,7 @@ services:
       start_period: 30s
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-8.15.3}
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-9.4.2}
     container_name: ds-bench-kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200

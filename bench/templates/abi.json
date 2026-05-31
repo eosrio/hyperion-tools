@@ -1,22 +1,41 @@
 {
-  "index_patterns": ["{{CHAIN}}-abi-*"],
-  "settings": {
-    "index": {
-      "number_of_shards": 2,
-      "refresh_interval": "1s",
-      "number_of_replicas": 0,
-      "codec": "best_compression"
-    }
-  },
-  "mappings": {
-    "properties": {
-      "@timestamp": { "type": "date" },
-      "block": { "type": "long" },
-      "account": { "type": "keyword" },
-      "abi": { "enabled": false },
-      "abi_hex": { "enabled": false },
-      "actions": { "type": "keyword" },
-      "tables": { "type": "keyword" }
+  "index_patterns": [
+    "{{CHAIN}}-abi-*"
+  ],
+  "priority": 500,
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 2,
+        "refresh_interval": "1s",
+        "number_of_replicas": 0,
+        "codec": "best_compression"
+      }
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "block": {
+          "type": "long"
+        },
+        "account": {
+          "type": "keyword"
+        },
+        "abi": {
+          "enabled": false
+        },
+        "abi_hex": {
+          "enabled": false
+        },
+        "actions": {
+          "type": "keyword"
+        },
+        "tables": {
+          "type": "keyword"
+        }
+      }
     }
   }
 }

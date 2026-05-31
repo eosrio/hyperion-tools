@@ -1,9 +1,13 @@
 # Local benchmark stack — direct-from-disk indexer → Elasticsearch
 
 A self-contained, **local** environment to load the output of the direct-from-disk indexer
-(`action-proto` / `delta-proto`, and the `abi-scanner` ABI snapshot) into Elasticsearch using the
-**exact Hyperion index mappings + `_id`/`_index` rules**, and to **measure the ES write-side
-throughput** — the ceiling that ultimately governs backfill speed.
+(`action-proto` / `delta-proto`, and the `abi-scanner` ABI snapshot) into Elasticsearch with
+Hyperion-compatible index mappings + `_id`/`_index` rules, and to **measure the ES write-side
+throughput and storage** — the ceilings that ultimately govern backfill cost.
+
+Templates are **composable index templates** (`_index_template`), so they work on **Elasticsearch
+8.x and 9.x**. The action template is also **storage-tuned** (~−39% vs the stock Hyperion mapping —
+see *Storage efficiency* below), and `logsdb` index mode is an opt-in for a bit more on ES ≥ 8.17/9.x.
 
 > ⚠️ **LOCAL ONLY.** This is meant to run on a machine **you** control, against a **throwaway**
 > Elasticsearch. The loader creates and fills indices and tunes index settings. **Never point it at
@@ -100,11 +104,48 @@ python scripts/bulk-load.py --mode action --chain telos /tmp/telos-actions.ndjso
 You need an abi-index for that chain — run `abi-scanner` against the chain once to build it (see the
 main README), or reuse a published snapshot if one exists.
 
+## Storage efficiency (field tuning + `logsdb`)
+
+Storage is the dominant long-term cost of a full history index, so the **action template is tuned**
+beyond Hyperion's stock mapping. Measured on a dense WAX range (412k action docs, 1 shard,
+`best_compression`, force-merged):
+
+| mapping | bytes/doc | vs stock Hyperion | ES |
+|---|---|---|---|
+| faithful (Hyperion stock) | 392 | — | 8.x / 9.x |
+| **field-tuned (this template)** | **239** | **−39%** | 8.x / 9.x |
+| **field-tuned + `logsdb`** | **224** | **−43%** | ≥ 8.17 / 9.x |
+
+**Where the win comes from** (via ES `_disk_usage`): the biggest cost in the stock mapping is the
+`doc_values` of high-cardinality hex/sequence fields that are never sorted or aggregated — `act_digest`
+alone was ~27% of the index. The template therefore:
+
+- `act_digest` → `index:false, doc_values:false` (kept in `_source`, still **retrievable**, just not searchable);
+- `trx_id` → `doc_values:false` (still **searchable** for `get_transaction`, just not sortable/aggregatable);
+- `receipts.{global_sequence,recv_sequence,auth_sequence.sequence}` → `doc_values:false`.
+
+Everything the real queries need is preserved (sort by `global_sequence`, `act.account`/`act.name`,
+`@transfer.*`, `receipts.receiver`, `trx_id` search). This is a **mapping** change — works on ES 8.x
+and 9.x alike. *(The delta template is still the faithful Hyperion mapping; tuning it is a TODO once
+measured.)*
+
+**`logsdb` index mode** (ES ≥ 8.17 / 9.x): set `INDEX_MODE=logsdb` in `.env` (or env). It adds a few
+more storage points and indexes slightly faster, and is **fully query-compatible** — `act.data` is
+retained (ES stores `enabled:false` fields even under synthetic source) and the `global_sequence`
+sort is kept. It's opt-in because it requires ES ≥ 8.17. *(Synthetic `_source`'s headline savings
+don't apply here because `act.data`/`signatures` are `enabled:false`; that's why the field tuning,
+not the mode, is the main lever.)*
+
+Numbers are data-dependent (repetitive, sorted event data compresses better) — **measure on your
+chain/range**; the loader prints `MB` and you can compare `_cat/indices?bytes=b&h=index,pri.store.size`.
+
 ## Write-benchmark tuning
 
-The templates ship with Hyperion's defaults (`refresh_interval: 1s`, `number_of_replicas: 0`,
-`best_compression`, `number_of_shards: 4` for action/delta). For a **catch-up / backfill** write
-benchmark, the textbook wins (Elastic's own guidance) are:
+The templates ship with Hyperion-style settings (`refresh_interval: 1s`, `number_of_replicas: 0`,
+`best_compression`, `number_of_shards: 4` for action/delta) and the storage tuning above. For a
+**catch-up / backfill** write benchmark, the textbook wins (Elastic's own guidance) are:
+
+- **`INDEX_MODE=logsdb`** (ES ≥ 8.17/9.x) — smaller + slightly faster indexing; re-run `apply-templates.sh`.
 
 - **Heap:** `ES_JAVA_OPTS=-Xmx16g -Xms16g` in `.env` (≤ ~50% RAM, ≤ 31g).
 - **Disable refresh during load:** edit `templates/*.json` → `"refresh_interval": "-1"`, re-apply,
