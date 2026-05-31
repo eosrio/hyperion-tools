@@ -65,6 +65,26 @@ struct Args {
     /// into `@transfer.memo` (default: keep `memo` in `act.data`).
     #[arg(long, default_value_t = false)]
     index_transfer_memo: bool,
+    /// direct Elasticsearch `_bulk` sink (e.g. http://localhost:9200). When set, decoded docs are
+    /// POSTed straight to ES (the `--out` NDJSON path is ignored) to find the true ES write ceiling
+    /// without the GIL-bound Python loader.
+    #[arg(long)]
+    es: Option<String>,
+    /// chain name for the ES `_index` (`<chain>-action-<version>-<partition>`).
+    #[arg(long, default_value = "wax")]
+    chain: String,
+    /// index version for the ES `_index` (`<chain>-action-<version>-<partition>`).
+    #[arg(long, default_value = "v1")]
+    index_version: String,
+    /// `INDEX_PARTITION_SIZE`: partition = ceil(block_num / partition_size), zero-padded to 6 digits.
+    #[arg(long, default_value_t = 10_000_000)]
+    partition_size: u64,
+    /// docs per `_bulk` request (per poster thread).
+    #[arg(long, default_value_t = 4000)]
+    es_batch: usize,
+    /// concurrent `_bulk` poster threads pulling from the doc channel.
+    #[arg(long, default_value_t = 8)]
+    es_workers: usize,
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
@@ -196,10 +216,21 @@ fn decode_action(
         .map_err(|e| Fail::Decode(format!("{e:?}")))
 }
 
+/// One emitted action document flowing over the channel to the sink (NDJSON writer or ES posters).
+/// Carries `block_num` + `global_sequence` alongside the serialized `doc` so the ES posters can
+/// build the `_bulk` meta line (`_index` partition + `_id`) WITHOUT re-parsing the doc JSON.
+struct DocMsg {
+    block_num: u32,
+    global_sequence: u64,
+    doc: String,
+}
+
 /// A processed action_trace, held until the whole transaction is grouped. The doc fields are
 /// pre-serialized into `body` (with a trailing comma); `receipt_json` is the receipt object for
 /// `receipts[]` (without the hoisted act_digest/code_sequence/abi_sequence).
 struct Proc {
+    block_num: u32,
+    global_sequence: u64,
     action_ordinal: u64,
     creator_action_ordinal: u64,
     act_digest: String,
@@ -494,7 +525,7 @@ fn is_at_handled(account: &str, name: &str) -> bool {
 /// doc as a JSON string. `act_digest`/`code_sequence`/`abi_sequence` are hoisted onto the doc and
 /// the group's receipts go in `receipts[]`. Per-field `cleanActionTrace` pruning already happened
 /// while building `Proc.body`.
-fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<String>>, stats: &Stats) {
+fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<DocMsg>>, stats: &Stats) {
     if procs.is_empty() {
         return;
     }
@@ -540,7 +571,7 @@ fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<String>>, stats: &St
 }
 
 /// Assemble one grouped action doc: `{ <body> "act_digest":.., "code_sequence":.., "abi_sequence":.., "receipts":[..] }`.
-fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<String>>, stats: &Stats) {
+fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<DocMsg>>, stats: &Stats) {
     stats.docs.fetch_add(1, Relaxed);
     let Some(tx) = sink else { return };
     let rlen: usize = receipts.iter().map(|r| r.len() + 1).sum();
@@ -561,7 +592,11 @@ fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<String>>, stats: &
         s.push_str(r);
     }
     s.push_str("]}");
-    let _ = tx.send(s);
+    let _ = tx.send(DocMsg {
+        block_num: p.block_num,
+        global_sequence: p.global_sequence,
+        doc: s,
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -576,7 +611,7 @@ fn worker(
     index_transfer_memo: bool,
     stats: &Stats,
     failures: &Failures,
-    sink: Option<&Sender<String>>,
+    sink: Option<&Sender<DocMsg>>,
 ) -> Result<()> {
     let mut reg = Registry::new(abi_index);
     let mut blocklog = match blocks_dir {
@@ -860,6 +895,8 @@ fn worker(
                 receipt_json.push_str("]}");
 
                 procs.push(Proc {
+                    block_num,
+                    global_sequence: receipt.global_sequence,
                     action_ordinal: act.action_ordinal as u64,
                     creator_action_ordinal: act.creator_action_ordinal as u64,
                     act_digest: hex::encode_upper(receipt.act_digest),
@@ -884,6 +921,98 @@ fn worker(
         );
     }
     Ok(())
+}
+
+/// Shared counters for the direct-ES `_bulk` sink (Arc'd across all poster threads).
+#[derive(Default)]
+struct EsStats {
+    docs: AtomicU64,     // docs accepted into a posted _bulk body
+    bytes: AtomicU64,    // total _bulk request body bytes
+    requests: AtomicU64, // _bulk requests issued
+    errors: AtomicU64,   // bulk responses whose body contained `"errors":true` (or transport errors)
+}
+
+/// Config the ES posters need to build each `_bulk` meta line. (Cheap to clone — only the URL +
+/// chain/version are owned strings.)
+#[derive(Clone)]
+struct EsCfg {
+    url: String, // `<es>/_bulk`
+    chain: String,
+    version: String,
+    partition_size: u64,
+    batch: usize,
+}
+
+/// `<chain>-action-<version>-<partition>`, partition = ceil(block_num / partition_size) zero-padded
+/// to 6 digits (>= 1) — mirrors Hyperion's index naming (see bench/scripts/bulk-load.py).
+fn action_index(cfg: &EsCfg, block_num: u32) -> String {
+    let partition = (block_num as u64).div_ceil(cfg.partition_size).max(1);
+    format!("{}-action-{}-{:06}", cfg.chain, cfg.version, partition)
+}
+
+/// One ES poster thread: pull up to `cfg.batch` docs from the shared channel (locking only while
+/// draining, never while POSTing), accumulate them into an `application/x-ndjson` `_bulk` body
+/// (`{"index":{"_index":..,"_id":..}}\n<doc>\n` per doc), POST to `<es>/_bulk`, and fold the
+/// outcome into the shared `EsStats`. The action `_id` is the doc's `global_sequence`.
+fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: &EsStats) {
+    let mut body = String::new();
+    loop {
+        // Drain a batch under the lock, then release it before the (slow) network round-trip.
+        let mut batch: Vec<DocMsg> = Vec::with_capacity(cfg.batch);
+        {
+            let guard = rx.lock().unwrap();
+            // Block for the first item; once we have one, greedily take whatever is ready.
+            match guard.recv() {
+                Ok(msg) => batch.push(msg),
+                Err(_) => return, // all senders dropped and channel drained
+            }
+            while batch.len() < cfg.batch {
+                match guard.try_recv() {
+                    Ok(msg) => batch.push(msg),
+                    Err(_) => break,
+                }
+            }
+        }
+        if batch.is_empty() {
+            continue;
+        }
+
+        body.clear();
+        for m in &batch {
+            let index = action_index(cfg, m.block_num);
+            body.push_str("{\"index\":{\"_index\":\"");
+            body.push_str(&index);
+            body.push_str("\",\"_id\":\"");
+            body.push_str(&m.global_sequence.to_string());
+            body.push_str("\"}}\n");
+            body.push_str(&m.doc);
+            body.push('\n');
+        }
+        let n = batch.len() as u64;
+        let nbytes = body.len() as u64;
+
+        match minreq::post(cfg.url.as_str())
+            .with_header("Content-Type", "application/x-ndjson")
+            .with_body(body.as_str())
+            .send()
+        {
+            Ok(resp) => {
+                // Cheap error check: the bulk response sets `"errors":true` iff any item failed.
+                let failed = resp.as_str().map(|s| s.contains("\"errors\":true")).unwrap_or(true)
+                    || resp.status_code < 200
+                    || resp.status_code >= 300;
+                if failed {
+                    stats.errors.fetch_add(1, Relaxed);
+                }
+            }
+            Err(_) => {
+                stats.errors.fetch_add(1, Relaxed);
+            }
+        }
+        stats.docs.fetch_add(n, Relaxed);
+        stats.bytes.fetch_add(nbytes, Relaxed);
+        stats.requests.fetch_add(1, Relaxed);
+    }
 }
 
 fn main() -> Result<()> {
@@ -915,29 +1044,64 @@ fn main() -> Result<()> {
 
     let stats = Arc::new(Stats::default());
     let failures = Arc::new(Failures::default());
-    let (tx, rx) = mpsc::channel::<String>();
-    let mut out: Option<Box<dyn Write + Send>> = args
-        .out
-        .as_ref()
-        .map(|p| -> Result<Box<dyn Write + Send>> { Ok(Box::new(BufWriter::new(File::create(p)?))) })
-        .transpose()?;
-    let emit = out.is_some();
+    let (tx, rx) = mpsc::channel::<DocMsg>();
+
+    // Output mode: --es (direct ES `_bulk`) takes precedence over --out (NDJSON); with neither set
+    // we just drain the channel (pure-decode benchmark). Only build the NDJSON writer when ES is
+    // NOT in play, so `--es` cleanly ignores `--out`.
+    let es_cfg = args.es.as_ref().map(|url| EsCfg {
+        url: format!("{}/_bulk", url.trim_end_matches('/')),
+        chain: args.chain.clone(),
+        version: args.index_version.clone(),
+        partition_size: args.partition_size.max(1),
+        batch: args.es_batch.max(1),
+    });
+    let es_workers = args.es_workers.max(1);
+    let es_stats = Arc::new(EsStats::default());
+    let mut out: Option<Box<dyn Write + Send>> = if es_cfg.is_some() {
+        None
+    } else {
+        args.out
+            .as_ref()
+            .map(|p| -> Result<Box<dyn Write + Send>> {
+                Ok(Box::new(BufWriter::new(File::create(p)?)))
+            })
+            .transpose()?
+    };
+    // Workers send docs whenever there is a consumer (ES posters or the NDJSON writer).
+    let emit = es_cfg.is_some() || out.is_some();
+    if let Some(c) = &es_cfg {
+        eprintln!(
+            "[action-proto] direct-ES sink -> {} | index={}-action-{}-<part> partition_size={} batch={} posters={}",
+            c.url, c.chain, c.version, c.partition_size, c.batch, es_workers
+        );
+    }
     let t0 = Instant::now();
 
     std::thread::scope(|s| {
-        let written = s.spawn(move || {
-            let mut n = 0u64;
-            if let Some(w) = out.as_mut() {
-                for line in rx {
-                    let _ = writeln!(w, "{line}");
-                    n += 1;
-                }
-                let _ = w.flush();
-            } else {
-                for _ in rx {}
+        // Consumer side: either N ES `_bulk` posters sharing the Receiver, or the single NDJSON
+        // writer thread, or a lone drain thread.
+        let rx_shared = Arc::new(std::sync::Mutex::new(rx));
+        let mut consumers = Vec::new();
+        if let Some(cfg) = es_cfg.clone() {
+            for _ in 0..es_workers {
+                let (rxc, cfgc, est) = (rx_shared.clone(), cfg.clone(), es_stats.clone());
+                consumers.push(s.spawn(move || {
+                    es_poster(&rxc, &cfgc, &est);
+                }));
             }
-            n
-        });
+        } else {
+            consumers.push(s.spawn(move || {
+                if let Some(w) = out.as_mut() {
+                    for msg in rx_shared.lock().unwrap().iter() {
+                        let _ = writeln!(w, "{}", msg.doc);
+                    }
+                    let _ = w.flush();
+                } else {
+                    for _ in rx_shared.lock().unwrap().iter() {}
+                }
+            }));
+        }
         let mut handles = Vec::new();
         for i in 0..threads {
             let cs = start.saturating_add(i.saturating_mul(chunk));
@@ -959,7 +1123,9 @@ fn main() -> Result<()> {
         for h in handles {
             let _ = h.join();
         }
-        let _ = written.join();
+        for c in consumers {
+            let _ = c.join();
+        }
     });
 
     let secs = t0.elapsed().as_secs_f64();
@@ -976,6 +1142,21 @@ fn main() -> Result<()> {
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
+    if es_cfg.is_some() {
+        let posted = es_stats.docs.load(Relaxed);
+        let bytes = es_stats.bytes.load(Relaxed);
+        let requests = es_stats.requests.load(Relaxed);
+        let errors = es_stats.errors.load(Relaxed);
+        let mb = bytes as f64 / 1e6;
+        eprintln!(
+            "[action-proto] ES sink: posted {posted} docs in {secs:.1}s ({:.0} docs/s) | {mb:.1} MB ({:.1} MB/s) | {requests} bulk reqs | errors={errors}",
+            posted as f64 / secs.max(1e-9),
+            mb / secs.max(1e-9),
+        );
+        if errors > 0 {
+            eprintln!("[action-proto] WARNING: {errors} bulk request(s) reported errors — inspect ES response / mapping conflicts.");
+        }
+    }
     let f = failures.lock().unwrap();
     if !f.is_empty() {
         let mut by_reason: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
