@@ -20,9 +20,12 @@ _id / _index (mirrors Hyperion):
 SAFETY: refuses a non-loopback ES host unless BENCH_ALLOW_EXTERNAL_ES=1. Local benchmarking only.
 """
 import argparse
+import concurrent.futures
+import json
 import math
 import os
 import sys
+import threading
 import time
 import urllib.request
 
@@ -79,6 +82,67 @@ def guard_local(es: str):
              "(set BENCH_ALLOW_EXTERNAL_ES=1 to override — you almost certainly should not).")
 
 
+def build_batch(lines, args):
+    """Turn raw NDJSON byte-lines into a _bulk payload; returns (payload, doc_count)."""
+    buf = bytearray()
+    n = 0
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        doc = json.loads(s)
+        index, _id = doc_meta(args.mode, doc, args.chain, args.version, args.partition_size)
+        buf += b'{"index":{"_index":"%s","_id":"%s"}}\n' % (index.encode(), _id.encode())
+        buf += s + b"\n"
+        n += 1
+    return bytes(buf), n
+
+
+def run_parallel(args):
+    """N worker threads each read a batch of lines (under a lock), build + POST it. Parallelizes
+    both JSON parsing and the _bulk POSTs so the loader can saturate ES."""
+    f = open(args.file, "rb")
+    rlock = threading.Lock()
+    alock = threading.Lock()
+    agg = {"docs": 0, "bytes": 0, "errors": 0, "batches": 0}
+    stop = threading.Event()
+
+    def worker():
+        while not stop.is_set():
+            with rlock:
+                lines = []
+                for _ in range(args.batch):
+                    ln = f.readline()
+                    if not ln:
+                        break
+                    lines.append(ln)
+            if not lines:
+                return
+            payload, n = build_batch(lines, args)
+            if n == 0:
+                continue
+            errs = post_bulk(args.es, payload)
+            with alock:
+                agg["docs"] += n
+                agg["bytes"] += len(payload)
+                agg["errors"] += errs
+                agg["batches"] += 1
+                if args.limit and agg["docs"] >= args.limit:
+                    stop.set()
+
+    t0 = time.monotonic()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
+        for fut in [ex.submit(worker) for _ in range(args.workers)]:
+            fut.result()
+    dt = max(time.monotonic() - t0, 1e-9)
+    mb = agg["bytes"] / 1e6
+    print(f"[bulk-load] {agg['docs']} docs in {dt:.1f}s -> {agg['docs']/dt:,.0f} docs/s | "
+          f"{mb:.1f} MB ({mb/dt:.1f} MB/s) | {agg['batches']} bulk reqs | {args.workers} workers | "
+          f"errors={agg['errors']}", file=sys.stderr)
+    if agg["errors"]:
+        sys.exit(f"  {agg['errors']} bulk item error(s).")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file", nargs="?", help="NDJSON file (default: stdin)")
@@ -88,11 +152,15 @@ def main():
     ap.add_argument("--mode", choices=["action", "delta"], required=True)
     ap.add_argument("--partition-size", type=int, default=int(cfg("INDEX_PARTITION_SIZE", "10000000")))
     ap.add_argument("--batch", type=int, default=4000, help="docs per _bulk request")
+    ap.add_argument("--workers", type=int, default=1, help="concurrent _bulk posters (needs a file, not stdin)")
     ap.add_argument("--limit", type=int, default=0, help="stop after N docs (0 = all)")
     args = ap.parse_args()
     guard_local(args.es)
 
-    import json
+    if args.workers > 1 and args.file:
+        run_parallel(args)
+        return
+
     src = open(args.file, "rb") if args.file else sys.stdin.buffer
     t0 = time.monotonic()
     docs = bytes_sent = errors = batches = 0

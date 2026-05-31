@@ -72,6 +72,18 @@ services:
     volumes:
       - redisdata:/data
 
+  # Hyperion keeps *current state* (latest table rows) in MongoDB — bounded by live row count, it
+  # does not grow with history, so it is not part of the storage problem. Here for the full pipeline.
+  mongo:
+    image: mongo:7
+    container_name: ds-bench-mongo
+    profiles: ["full"]
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodata:/data/db
+
 volumes:
   esdata:
   redisdata:
+  mongodata:
