@@ -70,7 +70,7 @@ When a node is started **from a chain snapshot**, the state-history plugin emits
 abi-scanner --from-disk /data/nodeos/state-history --start N --end N --out current-abis.ndjson
 ```
 
-Measured on **Telos (Spring 1.2.2)**: a node restored from a ~1.6 GB snapshot produced a ~1.95 GB init-delta entry; abi-scanner extracted **796 contract ABIs from that one block in ~27 s**. That init-delta entry uses a distinct magic and omits the per-entry position suffix — both handled transparently, so snapshot-restored logs read just like genesis-synced ones.
+Measured on **Telos (Spring 1.2.2)**: a node restored from a ~1.6 GB snapshot produced a ~1.95 GB init-delta entry; abi-scanner extracted **all 796 contract ABIs from that one block**. Entries this large (≥ `--stream-threshold`, default 16 MiB) are **stream-inflated only up to the account table and then skipped**, so the scan uses **bounded memory (~13 MB instead of ~3.7 GB)** and, on a cold read, fetches only the account-table prefix instead of the whole 1.95 GB. The init-delta entry also uses a distinct magic and omits the per-entry position suffix — both handled transparently, so snapshot-restored logs read just like genesis-synced ones.
 
 ### SHiP (remote node or fleet-router)
 
