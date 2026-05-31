@@ -153,9 +153,23 @@ The templates ship with Hyperion-style settings (`refresh_interval: 1s`, `number
 - **Replicas already 0** (single node). Keep it.
 - **Bigger bulk requests:** `--batch 8000` (and give the loader a beefier box if it becomes the
   limiter — watch the `docs/s` vs ES CPU).
+- **Use the Rust loader, not Python, for the ceiling.** `bulk-load.py` is fine for quick checks but
+  GIL-bound (~137k docs/s single-process). For the actual write ceiling, build + use the in-repo
+  `es-load` (no GIL, parallel posters, same `_id`/`_index` rules):
+  ```bash
+  cargo build --release --bin es-load
+  ./target/release/es-load --file actions.ndjson --es http://localhost:9200 \
+    --mode action --chain wax --workers 32 --batch 4000
+  ```
+  Co-locate it with the ES under test (same box / LAN — NOT over a WAN link, which measures the
+  network, not ES). Reference point: on a 32-core box, ES 9.4.2 (16g heap, logsdb, `refresh=-1`),
+  `es-load` plateaus at **~384k docs/s / ~400 MB/s** at 32 workers (80% box CPU, 0 write rejections)
+  vs ~328k for 6 Python processes. The reader decodes ~3–4× faster than that, so **ES `_bulk` is the
+  system write ceiling** — exactly why the cold-tier metadata trimming matters.
 
 Report the `docs/s` **and** whether ES or the loader is the bottleneck (ES CPU near 100% → ES-bound,
-which is the number we care about).
+which is the number we care about). With the loader co-located it shares the box's CPU with ES;
+ES on dedicated hardware (loader/reader on a separate LAN host) will go higher.
 
 ## Full write path (opt-in, for the ingestor integration)
 
