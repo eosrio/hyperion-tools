@@ -647,17 +647,248 @@ fn handle_block(w: &mut Worker, info: &LogInfo, n: u32) -> Reply {
     Reply::json(200, body)
 }
 
-/// Route + handle one request, never panicking the worker thread.
-fn handle(w: &mut Worker, info: &LogInfo, req: &Request) -> Reply {
-    let raw = req.url().to_string();
-    // Only GET is supported.
-    if req.method() != &tiny_http::Method::Get {
-        return Reply::err(405, "method not allowed");
+/// One parsed batch request item: which (block, global_sequence) pair to hydrate.
+struct BatchItem {
+    block_num: u64,
+    global_sequence: u64,
+}
+
+/// A resolved batch entry, captured during the per-block pass so the cache borrow can be released
+/// before decoding (which borrows the registry — a disjoint Worker field). `data` is the owned
+/// act.data slice copied out of the inflated block.
+struct ResolvedAction {
+    block_num: u32,
+    global_sequence: u64,
+    code: u64,
+    name: u64,
+    data: Vec<u8>,
+}
+
+/// Maximum number of items accepted in a single `POST /actions` batch.
+const MAX_BATCH_ITEMS: usize = 20_000;
+/// Hard cap on the request body we will buffer (defends against an oversized/garbage POST before we
+/// even parse). 64 MiB comfortably holds 20k small JSON items.
+const MAX_BATCH_BODY_BYTES: u64 = 64 * 1024 * 1024;
+/// Defense-in-depth bounds on the per-request DECODE work — distinct from the item/body caps above,
+/// which bound only *parsing*. The expensive axis of `POST /actions` is the number of DISTINCT
+/// blocks it must seek + inflate + parse, and a caller controls that almost independently of body
+/// size (up to MAX_BATCH_ITEMS distinct blocks in a ~1 MB body). Without a bound, one cheap request
+/// could pin a worker thread for minutes (uncancellable — nothing observes a dropped client socket).
+/// So we cap both the number of distinct blocks resolved per request and the wall-clock time spent
+/// resolving them; any positions not reached simply stay `found:false`. That is contract-safe and
+/// best-effort: the client treats a short / `found:false` entry exactly as "no payload available".
+const MAX_BLOCKS_PER_BATCH: usize = 4096;
+const BATCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Extract a u64 from a JSON value that may be a number or a decimal string (global_sequence arrives
+/// either way over the wire). Returns `None` for anything else.
+fn json_u64(v: &serde_json::Value) -> Option<u64> {
+    if let Some(n) = v.as_u64() {
+        return Some(n);
     }
+    v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
+}
+
+/// Parse the JSON array request body into `BatchItem`s. `Err(Reply)` carries the right status code:
+/// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds `MAX_BATCH_ITEMS`.
+fn parse_batch_body(req: &mut Request) -> std::result::Result<Vec<BatchItem>, Reply> {
+    // Read the body, bounded so a runaway POST can't exhaust memory. `Content-Length` is advisory;
+    // we cap the actual read regardless.
+    let mut buf = Vec::new();
+    let reader = req.as_reader();
+    if reader
+        .take(MAX_BATCH_BODY_BYTES + 1)
+        .read_to_end(&mut buf)
+        .is_err()
+    {
+        return Err(Reply::err(400, "failed to read request body"));
+    }
+    if buf.len() as u64 > MAX_BATCH_BODY_BYTES {
+        return Err(Reply::err(413, "request body too large"));
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&buf).map_err(|_| Reply::err(400, "malformed JSON body"))?;
+    let serde_json::Value::Array(arr) = value else {
+        return Err(Reply::err(400, "request body must be a JSON array"));
+    };
+    if arr.len() > MAX_BATCH_ITEMS {
+        return Err(Reply::err(
+            413,
+            &format!("too many items (max {MAX_BATCH_ITEMS})"),
+        ));
+    }
+
+    let mut items = Vec::with_capacity(arr.len());
+    for el in &arr {
+        let (Some(bn), Some(gs)) = (
+            el.get("block_num").and_then(|x| x.as_u64()),
+            el.get("global_sequence").and_then(json_u64),
+        ) else {
+            return Err(Reply::err(
+                400,
+                "each item needs numeric block_num and number-or-string global_sequence",
+            ));
+        };
+        items.push(BatchItem {
+            block_num: bn,
+            global_sequence: gs,
+        });
+    }
+    Ok(items)
+}
+
+/// `POST /actions` — hydrate act.data for many cold-tier actions in one round-trip. The request body
+/// is a JSON array of `{block_num, global_sequence}`; the response is `{"actions":[...]}` in the
+/// SAME order as the request. Each distinct block is read + decoded ONCE (shared per-thread cache),
+/// then every requested global_sequence within it is resolved.
+fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
+    let items = match parse_batch_body(req) {
+        Ok(v) => v,
+        Err(reply) => return reply,
+    };
+
+    // Slot per input position; `None` until resolved (and left `None` => not-found).
+    let mut resolved: Vec<Option<ResolvedAction>> = Vec::with_capacity(items.len());
+    resolved.resize_with(items.len(), || None);
+
+    // Group input positions by block so we decode each distinct block exactly once. Items whose
+    // block is out of the archived range are simply never grouped -> stay not-found.
+    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
+            continue; // out of range -> not found
+        }
+        by_block
+            .entry(it.block_num as u32)
+            .or_default()
+            .push(i);
+    }
+
+    // Bound the per-request decode work (see MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE): stop resolving
+    // once either the distinct-block cap or the wall-clock deadline is hit. Positions in any block
+    // we don't reach stay `None` -> emitted as `found:false` below — best-effort and contract-safe.
+    let started = Instant::now();
+    let mut blocks_done = 0usize;
+    for (&block_num, positions) in &by_block {
+        if blocks_done >= MAX_BLOCKS_PER_BATCH || started.elapsed() >= BATCH_DEADLINE {
+            break;
+        }
+        blocks_done += 1;
+        // Read (or hit cache) the block once.
+        let slot = match w.cache.get_or_read(block_num, &mut w.reader) {
+            Ok(s) => s,
+            // A genuine I/O/format fault on one block must not abort the whole batch; leave those
+            // positions not-found and carry on.
+            Err(_) => continue,
+        };
+        let Some(_block) = w.cache.slots[slot].1.as_ref() else {
+            continue; // block had no traces -> all its positions stay not-found
+        };
+
+        // Build global_sequence -> action descriptor for THIS block, once, then satisfy every
+        // requested gs from it. (Copy the act.data slice out so the cache borrow ends before the
+        // decode, which needs the disjoint reg/scratch fields.)
+        let mut by_gs: HashMap<u64, (u64, u64, usize, usize)> = HashMap::new();
+        {
+            let block = w.cache.slots[slot].1.as_ref().unwrap();
+            for tx in &block.txs {
+                for act in &tx.actions {
+                    if act.except {
+                        continue;
+                    }
+                    let Some(receipt) = &act.receipt else { continue };
+                    // First receipt wins for a given global_sequence (global_sequence is unique).
+                    by_gs
+                        .entry(receipt.global_sequence)
+                        .or_insert((act.account, act.name, act.data.0, act.data.1));
+                }
+            }
+        }
+
+        for &i in positions {
+            let gs = items[i].global_sequence;
+            let Some(&(code, name, off, len)) = by_gs.get(&gs) else {
+                continue; // no action with that global_sequence in this block -> not found
+            };
+            let data: Vec<u8> =
+                w.cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
+            resolved[i] = Some(ResolvedAction {
+                block_num,
+                global_sequence: gs,
+                code,
+                name,
+                data,
+            });
+        }
+    }
+
+    // Emit in INPUT order. Decode each resolved action's act.data here (borrowing reg/scratch).
+    let mut body = String::with_capacity(64 + items.len() * 96);
+    body.push_str("{\"actions\":[");
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            body.push(',');
+        }
+        match &resolved[i] {
+            Some(r) => {
+                body.push_str("{\"block_num\":");
+                body.push_str(&r.block_num.to_string());
+                body.push_str(",\"global_sequence\":");
+                body.push_str(&r.global_sequence.to_string());
+                body.push_str(",\"account\":");
+                push_json_str(&mut body, &name_str(&w.names, r.code));
+                body.push_str(",\"name\":");
+                push_json_str(&mut body, &name_str(&w.names, r.name));
+                body.push_str(",\"data\":");
+                {
+                    let Worker { reg, scratch, .. } = w;
+                    append_data_value(
+                        &mut body,
+                        scratch,
+                        reg,
+                        r.code,
+                        r.name,
+                        &r.data,
+                        r.block_num,
+                    );
+                }
+                body.push_str(",\"found\":true}");
+            }
+            None => {
+                body.push_str("{\"block_num\":");
+                body.push_str(&item.block_num.to_string());
+                body.push_str(",\"global_sequence\":");
+                body.push_str(&item.global_sequence.to_string());
+                body.push_str(",\"found\":false}");
+            }
+        }
+    }
+    body.push_str("]}");
+    Reply::json(200, body)
+}
+
+/// Route + handle one request, never panicking the worker thread.
+fn handle(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
+    let raw = req.url().to_string();
     let (path, query) = match raw.split_once('?') {
         Some((p, q)) => (p, q),
         None => (raw.as_str(), ""),
     };
+    let method = req.method().clone();
+
+    // POST /actions — batch hydration (reads the request body).
+    if method == tiny_http::Method::Post {
+        return match path {
+            "/actions" => handle_actions_batch(w, info, req),
+            _ => Reply::err(404, "unknown endpoint"),
+        };
+    }
+
+    // Everything else is GET-only.
+    if method != tiny_http::Method::Get {
+        return Reply::err(405, "method not allowed");
+    }
     match path {
         "/health" => Reply::text(200, "ok"),
         "/action" => handle_action(w, info, query),
@@ -695,14 +926,14 @@ fn worker_loop(server: Arc<Server>, info: Arc<LogInfo>, abi_index: Arc<AbiIndex>
         scratch: String::new(),
     };
     loop {
-        let req = match server.recv() {
+        let mut req = match server.recv() {
             Ok(r) => r,
             Err(_) => break, // server shutting down
         };
         // Defensive: a handler should never panic, but if one ever does, catch it so the worker
         // thread survives and keeps serving.
         let reply = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            handle(&mut w, &info, &req)
+            handle(&mut w, &info, &mut req)
         })) {
             Ok(r) => r,
             Err(_) => Reply::err(500, "internal error"),
