@@ -1,0 +1,68 @@
+{
+  "index_patterns": ["{{CHAIN}}-delta-*"],
+  "settings": {
+    "index": {
+      "codec": "best_compression",
+      "refresh_interval": "1s",
+      "number_of_shards": 4,
+      "number_of_replicas": 0,
+      "sort.field": ["block_num", "scope", "primary_key"],
+      "sort.order": ["desc", "asc", "asc"]
+    }
+  },
+  "mappings": {
+    "properties": {
+      "@timestamp": { "type": "date" },
+      "present": { "type": "byte" },
+      "ds_error": { "type": "boolean" },
+      "block_id": { "type": "keyword" },
+      "block_num": { "type": "long" },
+      "deleted_at": { "type": "long" },
+      "code": { "type": "keyword" },
+      "scope": { "type": "keyword" },
+      "table": { "type": "keyword" },
+      "payer": { "type": "keyword" },
+      "primary_key": { "type": "keyword" },
+      "data": { "enabled": false },
+      "value": { "enabled": false },
+
+      "@approvals.proposal_name": { "type": "keyword" },
+      "@approvals.provided_approvals": { "type": "object" },
+      "@approvals.requested_approvals": { "type": "object" },
+
+      "@proposal.proposal_name": { "type": "keyword" },
+      "@proposal.transaction": { "enabled": false },
+
+      "@accounts.amount": { "type": "float" },
+      "@accounts.symbol": { "type": "keyword" },
+
+      "@voters.is_proxy": { "type": "boolean" },
+      "@voters.producers": { "type": "keyword" },
+      "@voters.last_vote_weight": { "type": "double" },
+      "@voters.proxied_vote_weight": { "type": "double" },
+      "@voters.staked": { "type": "float" },
+      "@voters.proxy": { "type": "keyword" },
+
+      "@producers.total_votes": { "type": "double" },
+      "@producers.is_active": { "type": "boolean" },
+      "@producers.unpaid_blocks": { "type": "long" },
+
+      "@global": {
+        "properties": {
+          "last_name_close": { "type": "date" },
+          "last_pervote_bucket_fill": { "type": "date" },
+          "last_producer_schedule_update": { "type": "date" },
+          "perblock_bucket": { "type": "double" },
+          "pervote_bucket": { "type": "double" },
+          "total_activated_stake": { "type": "double" },
+          "total_voteshare_change_rate": { "type": "double" },
+          "total_unpaid_voteshare": { "type": "double" },
+          "total_producer_vote_weight": { "type": "double" },
+          "total_ram_bytes_reserved": { "type": "long" },
+          "total_ram_stake": { "type": "long" },
+          "total_unpaid_blocks": { "type": "long" }
+        }
+      }
+    }
+  }
+}
