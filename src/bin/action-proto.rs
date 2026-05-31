@@ -30,18 +30,14 @@ use std::sync::mpsc::Sender;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
 use abi_scanner::blocks::{slot_to_iso, BlockLog};
 use abi_scanner::disk::{decode_payload, is_ship_magic};
-
-/// The state-history PROTOCOL ABI (transaction_trace / action_trace / action_receipt / ...),
-/// captured once from a WAX SHiP handshake. nodeos emits it only over the websocket, so for
-/// offline disk decoding we embed it. It is stable per nodeos protocol family (eosio::abi/1.1).
-const SHIP_ABI_JSON: &str = include_str!("../../abis/ship.abi.json");
+use abi_scanner::trace;
 
 #[derive(Parser, Debug)]
 #[command(about = "PROTOTYPE: decode action_traces directly from the trace_history log.")]
@@ -207,15 +203,6 @@ struct Proc {
     act_digest: String,
     receipt: Value, // action_receipt_v0 object
     doc: Map<String, Value>,
-}
-
-/// `delta !== '0'` for an account_ram_deltas entry's delta (int64 may be number or string).
-fn nonzero_delta(v: &Value) -> bool {
-    match v.get("delta") {
-        Some(Value::String(s)) => s != "0",
-        Some(Value::Number(n)) => n.as_i64() != Some(0),
-        _ => true,
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -600,17 +587,13 @@ fn worker(
     failures: &Failures,
     sink: Option<&Sender<String>>,
 ) -> Result<()> {
-    let names = Abieos::new(); // string_to_name + name_to_string (producer)
-    let mut h_ship = AbiHandle::from_json(SHIP_ABI_JSON)
-        .map_err(|e| anyhow!("embedded SHiP ABI failed to parse: {e:?}"))?;
     let mut reg = Registry::new(abi_index);
     let mut blocklog = match blocks_dir {
         Some(d) => Some(BlockLog::open(d)?),
         None => None,
     };
     let profile = std::env::var("ACTION_PROFILE").is_ok();
-    let (mut d_l1, mut d_parse, mut d_act) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
-    let mut trace_buf = String::new();
+    let (mut d_l1, mut d_act) = (Duration::ZERO, Duration::ZERO);
     let mut data_buf = String::new();
 
     let mut idx = File::open(idx_path)?;
@@ -646,7 +629,7 @@ fn worker(
 
         // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
         let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num)) {
-            Some((prod, slot)) => (names.name_to_string(prod).ok(), Some(slot_to_iso(slot))),
+            Some((prod, slot)) => (Some(trace::name_to_string(prod)), Some(slot_to_iso(slot))),
             None => (None, None),
         };
 
@@ -654,81 +637,44 @@ fn worker(
             Ok(d) if !d.is_empty() => d,
             _ => continue,
         };
-        // L1: decode the whole block's traces against the SHiP ABI in one call.
+        // L1 (hand-walk): parse the block's transaction_trace[] binary directly — no full-JSON
+        // materialization, no serde re-parse; act.data stays a raw byte range.
         let l1_t = if profile { Some(Instant::now()) } else { None };
-        if h_ship
-            .bin_to_json_into("transaction_trace[]", &inflated, &mut trace_buf)
-            .is_err()
-        {
+        let Some(txs) = trace::parse_block(&inflated) else {
             continue;
-        }
+        };
         if let Some(t) = l1_t {
             d_l1 += t.elapsed();
         }
-        let p_t = if profile { Some(Instant::now()) } else { None };
-        let Ok(Value::Array(txs)) = serde_json::from_str::<Value>(&trace_buf) else {
-            continue;
-        };
-        if let Some(t) = p_t {
-            d_parse += t.elapsed();
-        }
         let a_t = if profile { Some(Instant::now()) } else { None };
         for tx in &txs {
-            // tx is ["transaction_trace_v0", {..}]
-            let Some(txv) = tx.get(1) else { continue };
             stats.txs.fetch_add(1, Relaxed);
-            let trx_id = txv
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_lowercase();
-            let cpu = txv.get("cpu_usage_us").cloned();
-            let net = txv.get("net_usage_words").cloned();
-            let Some(action_traces) = txv.get("action_traces").and_then(|v| v.as_array()) else {
-                continue;
-            };
-
+            let trx_id = hex::encode(tx.id);
             let mut procs: Vec<Proc> = Vec::new();
             let mut usage_included = false;
-            for at in action_traces {
-                let tag = at.get(0).and_then(|v| v.as_str()).unwrap_or_default();
-                if !tag.starts_with("action_trace_") {
+            for act in &tx.actions {
+                // Hyperion only indexes actions with except===null and a receipt.
+                if act.except {
                     continue;
                 }
-                let Some(av) = at.get(1) else { continue };
-                // Hyperion only indexes actions with except===null; receipt must be present.
-                if !av.get("except").map(|v| v.is_null()).unwrap_or(true) {
-                    continue;
-                }
-                let Some(receipt_obj) = av
-                    .get("receipt")
-                    .and_then(|r| r.get(1))
-                    .filter(|r| r.is_object())
-                    .cloned()
-                else {
-                    continue;
-                };
-                let Some(act) = av.get("act") else { continue };
-                let account = act.get("account").and_then(|v| v.as_str()).unwrap_or_default();
-                let name = act.get("name").and_then(|v| v.as_str()).unwrap_or_default();
-                let data_hex = act.get("data").and_then(|v| v.as_str()).unwrap_or_default();
-                let (Ok(code), Ok(action_u64)) =
-                    (names.string_to_name(account), names.string_to_name(name))
-                else {
-                    continue;
-                };
+                let Some(receipt) = &act.receipt else { continue };
+                let code = act.account;
+                let action_u64 = act.name;
+                let account = trace::name_to_string(code);
+                let name = trace::name_to_string(action_u64);
+                let data_bytes = &inflated[act.data.0..act.data.0 + act.data.1];
                 stats.actions.fetch_add(1, Relaxed);
 
-                // L2: decode act.data against the contract ABI active at the block; retry at
-                // block-1 (same-block setabi boundary); else preserve raw hex (ds_error).
+                // L2: decode act.data (raw bytes) against the contract ABI active at the block;
+                // retry at block-1 (same-block setabi boundary); else preserve raw hex (ds_error).
                 let mut data_value: Option<Value> = None;
-                if let Ok(bin) = hex::decode(data_hex) {
-                    let r1 = decode_action(&mut reg, &mut data_buf, code, action_u64, &bin, block_num);
+                {
+                    let r1 = decode_action(&mut reg, &mut data_buf, code, action_u64, data_bytes, block_num);
                     let outcome = match r1 {
                         Ok(()) => Ok(false),
                         Err(first) => {
                             let retry = if !matches!(first, Fail::NoAbi) && block_num > 1 {
-                                decode_action(&mut reg, &mut data_buf, code, action_u64, &bin, block_num - 1)
+                                decode_action(&mut reg, &mut data_buf, code, action_u64, data_bytes, block_num - 1)
                             } else {
                                 Err(first)
                             };
@@ -756,12 +702,12 @@ fn worker(
                             if reason == "no_abi" {
                                 stats.no_abi.fetch_add(1, Relaxed);
                             }
-                            record_failure(failures, reason, account, name, &sample);
+                            record_failure(failures, reason, &account, &name, &sample);
                         }
                     }
                 }
 
-                // Build the action doc (block-context fields, flattened act, ordinals).
+                // Build the action doc.
                 let mut doc = Map::new();
                 doc.insert("block_num".into(), Value::from(block_num));
                 doc.insert("block_id".into(), Value::from(block_id.clone()));
@@ -772,42 +718,52 @@ fn worker(
                 if let Some(p) = &block_producer {
                     doc.insert("producer".into(), Value::from(p.clone()));
                 }
-                if let Some(gs) = receipt_obj
-                    .get("global_sequence")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse::<u64>().ok())
-                {
-                    doc.insert("global_sequence".into(), Value::from(gs));
+                doc.insert("global_sequence".into(), Value::from(receipt.global_sequence));
+                doc.insert("action_ordinal".into(), Value::from(act.action_ordinal));
+                doc.insert(
+                    "creator_action_ordinal".into(),
+                    Value::from(act.creator_action_ordinal),
+                );
+                doc.insert("context_free".into(), Value::Bool(act.context_free));
+                doc.insert("elapsed".into(), Value::from(act.elapsed.to_string()));
+                if let Some(rv) = act.return_value {
+                    doc.insert(
+                        "return_value".into(),
+                        Value::from(hex::encode_upper(&inflated[rv.0..rv.0 + rv.1])),
+                    );
                 }
-                if let Some(o) = av.get("action_ordinal").cloned() {
-                    doc.insert("action_ordinal".into(), o);
-                }
-                if let Some(o) = av.get("creator_action_ordinal").cloned() {
-                    doc.insert("creator_action_ordinal".into(), o);
-                }
-                if let Some(cf) = av.get("context_free").cloned() {
-                    doc.insert("context_free".into(), cf);
-                }
-                if let Some(el) = av.get("elapsed").cloned() {
-                    doc.insert("elapsed".into(), el);
-                }
-                if let Some(rv) = av.get("return_value").cloned() {
-                    doc.insert("return_value".into(), rv);
-                }
-                if let Some(deltas) = av.get("account_ram_deltas").and_then(|v| v.as_array()) {
-                    let filtered: Vec<Value> =
-                        deltas.iter().filter(|d| nonzero_delta(d)).cloned().collect();
-                    if !filtered.is_empty() {
-                        doc.insert("account_ram_deltas".into(), Value::Array(filtered));
-                    }
+                let ram: Vec<Value> = act
+                    .account_ram_deltas
+                    .iter()
+                    .filter(|(_, d)| *d != 0)
+                    .map(|(a, d)| {
+                        let mut m = Map::new();
+                        m.insert("account".into(), Value::from(trace::name_to_string(*a)));
+                        m.insert("delta".into(), Value::from(d.to_string()));
+                        Value::Object(m)
+                    })
+                    .collect();
+                if !ram.is_empty() {
+                    doc.insert("account_ram_deltas".into(), Value::Array(ram));
                 }
                 // flattened act
                 let mut act_out = Map::new();
-                act_out.insert("account".into(), Value::from(account));
-                act_out.insert("name".into(), Value::from(name));
-                if let Some(auth) = act.get("authorization").cloned() {
-                    act_out.insert("authorization".into(), auth);
-                }
+                act_out.insert("account".into(), Value::from(account.clone()));
+                act_out.insert("name".into(), Value::from(name.clone()));
+                let auth: Vec<Value> = act
+                    .authorization
+                    .iter()
+                    .map(|(actor, perm)| {
+                        let mut m = Map::new();
+                        m.insert("actor".into(), Value::from(trace::name_to_string(*actor)));
+                        m.insert(
+                            "permission".into(),
+                            Value::from(trace::name_to_string(*perm)),
+                        );
+                        Value::Object(m)
+                    })
+                    .collect();
+                act_out.insert("authorization".into(), Value::Array(auth));
                 let was_decoded = data_value.is_some();
                 match data_value {
                     Some(v) => {
@@ -815,7 +771,7 @@ fn worker(
                         stats.decoded.fetch_add(1, Relaxed);
                     }
                     None => {
-                        act_out.insert("data".into(), Value::from(data_hex.to_lowercase()));
+                        act_out.insert("data".into(), Value::from(hex::encode(data_bytes)));
                         doc.insert("ds_error".into(), Value::Bool(true));
                         stats.raw.fetch_add(1, Relaxed);
                     }
@@ -823,35 +779,52 @@ fn worker(
                 doc.insert("act".into(), Value::Object(act_out));
                 // usage on the first action of the transaction (extendFirstAction)
                 if !usage_included {
-                    if let Some(c) = cpu.clone() {
-                        doc.insert("cpu_usage_us".into(), c);
-                    }
-                    if let Some(n) = net.clone() {
-                        doc.insert("net_usage_words".into(), n);
-                    }
+                    doc.insert("cpu_usage_us".into(), Value::from(tx.cpu_usage_us));
+                    doc.insert("net_usage_words".into(), Value::from(tx.net_usage_words));
                     usage_included = true;
                 }
-                // computed @-fields (@transfer/@newaccount/...) — only on decoded act.data, as
-                // Hyperion skips them on ds_error.
+                // computed @-fields — only on decoded act.data, as Hyperion skips them on ds_error.
                 if was_decoded {
-                    process_action_data(&mut doc, account, name, index_transfer_memo);
+                    process_action_data(&mut doc, &account, &name, index_transfer_memo);
                 }
 
-                let action_ordinal = av.get("action_ordinal").and_then(|v| v.as_u64()).unwrap_or(0);
-                let creator_action_ordinal = av
-                    .get("creator_action_ordinal")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let act_digest = receipt_obj
-                    .get("act_digest")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
+                // receipt object for grouping (action_receipt_v0 shape, rs_abieos renderings).
+                let mut rcpt = Map::new();
+                rcpt.insert(
+                    "receiver".into(),
+                    Value::from(trace::name_to_string(receipt.receiver)),
+                );
+                rcpt.insert(
+                    "act_digest".into(),
+                    Value::from(hex::encode_upper(receipt.act_digest)),
+                );
+                rcpt.insert(
+                    "global_sequence".into(),
+                    Value::from(receipt.global_sequence.to_string()),
+                );
+                rcpt.insert(
+                    "recv_sequence".into(),
+                    Value::from(receipt.recv_sequence.to_string()),
+                );
+                let authseq: Vec<Value> = receipt
+                    .auth_sequence
+                    .iter()
+                    .map(|(a, s)| {
+                        let mut m = Map::new();
+                        m.insert("account".into(), Value::from(trace::name_to_string(*a)));
+                        m.insert("sequence".into(), Value::from(s.to_string()));
+                        Value::Object(m)
+                    })
+                    .collect();
+                rcpt.insert("auth_sequence".into(), Value::Array(authseq));
+                rcpt.insert("code_sequence".into(), Value::from(receipt.code_sequence));
+                rcpt.insert("abi_sequence".into(), Value::from(receipt.abi_sequence));
+
                 procs.push(Proc {
-                    action_ordinal,
-                    creator_action_ordinal,
-                    act_digest,
-                    receipt: receipt_obj,
+                    action_ordinal: act.action_ordinal as u64,
+                    creator_action_ordinal: act.creator_action_ordinal as u64,
+                    act_digest: hex::encode_upper(receipt.act_digest),
+                    receipt: Value::Object(rcpt),
                     doc,
                 });
             }
@@ -863,9 +836,8 @@ fn worker(
     }
     if profile {
         eprintln!(
-            "[action-proto][profile] worker [{cs}..{ce}]: l1_decode={:.2}s json_parse={:.2}s actions_build={:.2}s",
+            "[action-proto][profile] worker [{cs}..{ce}]: l1_handwalk={:.2}s actions_build={:.2}s",
             d_l1.as_secs_f64(),
-            d_parse.as_secs_f64(),
             d_act.as_secs_f64()
         );
     }
@@ -874,10 +846,6 @@ fn worker(
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    // Fail fast if the embedded SHiP ABI is wrong/unparseable before spawning workers.
-    AbiHandle::from_json(SHIP_ABI_JSON)
-        .map_err(|e| anyhow!("embedded SHiP ABI ({} bytes) failed to parse: {e:?}", SHIP_ABI_JSON.len()))?;
-
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
     eprintln!("[action-proto] {} contracts in ABI index", abi_index.len());
