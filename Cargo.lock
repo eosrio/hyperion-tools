@@ -522,8 +522,9 @@ dependencies = [
 
 [[package]]
 name = "rs_abieos"
-version = "0.4.0"
-source = "git+https://github.com/eosrio/rs-abieos#7d5446baf00f9f150d7a2393de9f401144cf513d"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5395074aa1a04cf96dc8321dd137ad3eb92afebf35fea9d187502931083a1c5"
 
 [[package]]
 name = "scopeguard"

@@ -17,9 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Pure-Rust abieos backend (no C++/bindgen toolchain) — builds anywhere.
-# Uses the git repo because the `rust-backend` feature isn't on crates.io yet;
-# switch to `version = "0.4"` once it's published.
-rs_abieos = { git = "https://github.com/eosrio/rs-abieos", default-features = false, features = ["rust-backend"] }
+rs_abieos = { version = "0.5", default-features = false, features = ["rust-backend"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
 futures = "0.3"

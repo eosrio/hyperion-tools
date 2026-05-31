@@ -32,7 +32,7 @@ cargo build --release
 # binary at target/release/abi-scanner
 ```
 
-> The `rs_abieos` dependency is pulled from git until its `rust-backend` feature is published to crates.io.
+All dependencies (including [`rs_abieos`](https://crates.io/crates/rs_abieos)'s pure-Rust `rust-backend`) come from crates.io — no git dependencies, no C++/clang toolchain.
 
 ## Usage
 
