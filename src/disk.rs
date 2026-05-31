@@ -76,6 +76,78 @@ pub fn decode_payload(payload: &[u8]) -> Result<Vec<u8>> {
     inflate(&payload[zstart..])
 }
 
+/// Read a LEB128 varuint from a streaming reader (for the early-exit path).
+fn read_varuint_r<R: std::io::Read>(r: &mut R) -> Result<u64> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let mut b = [0u8; 1];
+        r.read_exact(&mut b)?;
+        value |= ((b[0] & 0x7f) as u64) << shift;
+        if b[0] & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+        if shift > 63 {
+            bail!("varuint too long");
+        }
+    }
+}
+
+/// Stream-inflate a state-history entry only as far as the `account` table, emitting any
+/// setabi rows, then stop. Used for *huge* entries (a snapshot init-delta spans thousands of
+/// 128K records): we read just the compressed prefix up to the account table and let the
+/// caller seek past the rest, instead of reading + inflating (+ allocating) the whole payload.
+/// `log` must be positioned at the payload start (right after the 48-byte header).
+fn scan_account_streaming_entry<R: std::io::Read>(
+    log: &mut R,
+    abieos: &Abieos,
+    block_num: u32,
+    sink: &std::sync::mpsc::Sender<String>,
+) -> Result<()> {
+    use std::io::{self, Read};
+    // payload prefix: [u32 s][optional u64 decompressed_size when s==1]
+    let mut s4 = [0u8; 4];
+    log.read_exact(&mut s4)?;
+    if u32::from_le_bytes(s4) == 1 {
+        let mut sz = [0u8; 8];
+        log.read_exact(&mut sz)?;
+    }
+    let mut z = flate2::read::ZlibDecoder::new(log);
+    let n_tables = read_varuint_r(&mut z)?;
+    for _ in 0..n_tables {
+        let _variant = read_varuint_r(&mut z)?;
+        let name_len = read_varuint_r(&mut z)? as usize;
+        let mut name = vec![0u8; name_len];
+        z.read_exact(&mut name)?;
+        let n_rows = read_varuint_r(&mut z)?;
+        let is_account = name == b"account";
+        for _ in 0..n_rows {
+            let mut present = [0u8; 1];
+            z.read_exact(&mut present)?;
+            let data_len = read_varuint_r(&mut z)?;
+            if is_account {
+                let mut data = vec![0u8; data_len as usize];
+                z.read_exact(&mut data)?;
+                match account_setabi(abieos, &data) {
+                    Ok(Some((acct, abi_hex))) => {
+                        let _ = sink.send(build_abi_doc(abieos, &acct, block_num, &abi_hex));
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("[disk] block {block_num}: account row: {e}"),
+                }
+            } else {
+                // skip this row's data without materialising it
+                io::copy(&mut z.by_ref().take(data_len), &mut io::sink())?;
+            }
+        }
+        if is_account {
+            return Ok(()); // account table done — caller seeks past the rest of the delta
+        }
+    }
+    Ok(())
+}
+
 /// Scan one contiguous block chunk: seek to the chunk's start offset (via the index),
 /// then read entries sequentially. Found ABI docs are streamed out over `sink`.
 /// Per-block/row errors are logged and skipped — a single bad entry never aborts the scan.
@@ -87,6 +159,7 @@ fn worker_scan(
     cs: u32,
     ce: u32,
     log_len: u64,
+    stream_threshold: u64,
     sink: &std::sync::mpsc::Sender<String>,
     scanned: &AtomicU64,
 ) -> Result<()> {
@@ -117,13 +190,43 @@ fn worker_scan(
                 "payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error"
             ));
         }
-        let mut payload = vec![0u8; payload_size as usize];
-        log.read_exact(&mut payload)?;
-        // Every entry is followed by an 8-byte position suffix == the entry's own start
-        // offset — EXCEPT the snapshot init-delta entry, which omits it. Peek the next 8
-        // bytes: if they equal `pos`, it's the suffix (consume it); otherwise they're the
-        // next entry's header, so rewind. This keeps us aligned across the init entry.
         let entry_end = pos + 48 + payload_size;
+        if payload_size >= stream_threshold {
+            // Huge entry (e.g. a snapshot init-delta spanning thousands of 128K records):
+            // stream-inflate only up to the account table, then seek past the rest — avoids
+            // reading + inflating + allocating the whole multi-GB payload.
+            if let Err(e) = scan_account_streaming_entry(&mut log, &abieos, block_num, sink) {
+                eprintln!("[disk] block {block_num}: streaming scan: {e}");
+            }
+            log.seek(SeekFrom::Start(entry_end))?;
+        } else {
+            let mut payload = vec![0u8; payload_size as usize];
+            log.read_exact(&mut payload)?;
+            match decode_payload(&payload) {
+                Ok(d) if !d.is_empty() => {
+                    let walk = for_each_account_row(&d, |row| {
+                        match account_setabi(&abieos, row) {
+                            Ok(Some((name, abi_hex))) => {
+                                let _ =
+                                    sink.send(build_abi_doc(&abieos, &name, block_num, &abi_hex));
+                            }
+                            Ok(None) => {}
+                            Err(e) => eprintln!("[disk] block {block_num}: account row: {e}"),
+                        }
+                        Ok(())
+                    });
+                    if let Err(e) = walk {
+                        eprintln!("[disk] block {block_num}: delta walk: {e}");
+                    }
+                }
+                Ok(_) => {} // empty delta — nothing to do
+                Err(e) => eprintln!("[disk] block {block_num}: inflate failed: {e}"),
+            }
+        }
+        // Every entry is followed by an 8-byte position suffix == the entry's own start
+        // offset — EXCEPT the snapshot init-delta entry, which omits it. (log is now at
+        // entry_end in both paths.) Peek the next 8 bytes: if they equal `pos` it's the
+        // suffix; otherwise they're the next entry's header, so rewind — keeping alignment.
         let mut suf = [0u8; 8];
         pos = if log.read_exact(&mut suf).is_ok() {
             if u64::from_le_bytes(suf) == pos {
@@ -136,28 +239,6 @@ fn worker_scan(
             entry_end // EOF right after the payload; next header read will end the loop
         };
         scanned.fetch_add(1, Relaxed);
-
-        let deltas = match decode_payload(&payload) {
-            Ok(d) if !d.is_empty() => d,
-            Ok(_) => continue,
-            Err(e) => {
-                eprintln!("[disk] block {block_num}: inflate failed: {e}");
-                continue;
-            }
-        };
-        let walk = for_each_account_row(&deltas, |row| {
-            match account_setabi(&abieos, row) {
-                Ok(Some((name, abi_hex))) => {
-                    let _ = sink.send(build_abi_doc(&abieos, &name, block_num, &abi_hex));
-                }
-                Ok(None) => {}
-                Err(e) => eprintln!("[disk] block {block_num}: account row: {e}"),
-            }
-            Ok(())
-        });
-        if let Err(e) = walk {
-            eprintln!("[disk] block {block_num}: delta walk: {e}");
-        }
     }
     Ok(())
 }
@@ -172,6 +253,7 @@ pub fn scan_disk<W: Write + Send>(
     end: u32,
     threads: u32,
     chunk_size: u64,
+    stream_threshold: u64,
     checkpoint: Option<&str>,
     out: &mut W,
 ) -> Result<()> {
@@ -311,7 +393,17 @@ pub fn scan_disk<W: Write + Send>(
                 }
                 let cs = cs64 as u32;
                 let ce = (cs64 + chunk - 1).min(end as u64) as u32;
-                match worker_scan(&lp, &ip, first_block, cs, ce, log_len, &txc, &scc) {
+                match worker_scan(
+                    &lp,
+                    &ip,
+                    first_block,
+                    cs,
+                    ce,
+                    log_len,
+                    stream_threshold,
+                    &txc,
+                    &scc,
+                ) {
                     // mark the chunk done only on success, so a failed chunk is re-scanned on resume
                     Ok(()) => {
                         cmp.lock().unwrap().insert(cs64);
@@ -423,7 +515,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("abi-scanner-snap-{}", std::process::id()));
         write_synth_log(&dir);
         let mut out = Vec::new();
-        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, 20_000, None, &mut out);
+        let r = scan_disk(
+            dir.to_str().unwrap(),
+            10,
+            11,
+            1,
+            20_000,
+            16 << 20,
+            None,
+            &mut out,
+        );
         let _ = std::fs::remove_dir_all(&dir);
         assert!(r.is_ok(), "snapshot-restored log should be accepted: {r:?}");
         assert!(out.is_empty(), "empty payloads -> no ABIs emitted");
@@ -446,6 +547,7 @@ mod tests {
             11,
             1,
             20_000,
+            16 << 20,
             Some(cp),
             &mut out1,
         )
@@ -468,11 +570,54 @@ mod tests {
             11,
             1,
             20_000,
+            16 << 20,
             Some(cp),
             &mut out2,
         );
         let _ = std::fs::remove_dir_all(&dir);
         assert!(r.is_ok());
         assert!(out2.is_empty(), "resume of a complete scan emits nothing");
+    }
+
+    /// The streaming early-exit path must extract the same setabi rows as the whole-payload
+    /// path: build a zlib delta whose first table is `account` with one setabi row, and verify
+    /// scan_account_streaming_entry emits it (and stops without needing the rest of the stream).
+    #[test]
+    fn streaming_entry_extracts_account_setabi() {
+        use std::io::Write as _;
+        // one account row: [variant 0][name "eosio"][creation_date][abi: len 2, bytes 0e 65]
+        let mut row = vec![0x00];
+        row.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0xea, 0x30, 0x55]); // "eosio"
+        row.extend_from_slice(&[0x80, 0xd6, 0x14, 0x49]); // creation_date
+        row.extend_from_slice(&[0x02, 0x0e, 0x65]); // abi: varuint len 2, bytes 0e 65
+                                                    // table_delta[]: n_tables=1, table0 = account with 1 row
+        let mut deltas = vec![0x01]; // n_tables = 1
+        deltas.push(0x00); // variant
+        deltas.push(0x07); // name_len = 7
+        deltas.extend_from_slice(b"account");
+        deltas.push(0x01); // n_rows = 1
+        deltas.push(0x01); // present = 1
+        deltas.push(row.len() as u8); // data_len (varuint, < 128)
+        deltas.extend_from_slice(&row);
+        // a trailing non-account table the stream should never need to read
+        deltas.extend_from_slice(&[0x00, 0x09]); // (garbage: proves we stop after `account`)
+
+        // compress and frame as a payload: [u32 s=0][zlib]
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&deltas).unwrap();
+        let z = enc.finish().unwrap();
+        let mut payload = 0u32.to_le_bytes().to_vec(); // s = 0
+        payload.extend_from_slice(&z);
+
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let mut cur = std::io::Cursor::new(payload);
+        scan_account_streaming_entry(&mut cur, &Abieos::new(), 49, &tx).unwrap();
+        drop(tx);
+        let docs: Vec<String> = rx.iter().collect();
+        assert_eq!(docs.len(), 1, "exactly one setabi extracted");
+        let v: serde_json::Value = serde_json::from_str(&docs[0]).unwrap();
+        assert_eq!(v["account"], "eosio");
+        assert_eq!(v["block"], 49);
+        assert_eq!(v["abi_hex"], "0e65");
     }
 }

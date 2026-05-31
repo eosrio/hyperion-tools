@@ -51,6 +51,11 @@ struct Args {
     /// ~8 threads with small chunks was the measured sweet spot on a ZFS NVMe array.
     #[arg(long, default_value_t = 20_000)]
     chunk_size: u64,
+    /// Disk: entries whose payload is at least this many bytes are stream-inflated only up to
+    /// the account table (skipping the rest), instead of read + inflated whole. This avoids a
+    /// multi-GB read/allocation on a snapshot init-delta. Default 16 MiB.
+    #[arg(long, default_value_t = 16 << 20)]
+    stream_threshold: u64,
 }
 
 #[tokio::main]
@@ -85,6 +90,7 @@ async fn main() -> Result<()> {
             args.end,
             threads,
             args.chunk_size,
+            args.stream_threshold,
             args.checkpoint.as_deref(),
             &mut out,
         );
