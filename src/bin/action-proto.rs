@@ -35,6 +35,7 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
+use abi_scanner::blocks::{slot_to_iso, BlockLog};
 use abi_scanner::disk::{decode_payload, is_ship_magic};
 
 /// The state-history PROTOCOL ABI (transaction_trace / action_trace / action_receipt / ...),
@@ -60,6 +61,14 @@ struct Args {
     /// output NDJSON (omit to measure pure decode throughput)
     #[arg(long)]
     out: Option<String>,
+    /// nodeos blocks dir (blocks.{log,index}) — supplies the block-header fields `@timestamp`
+    /// and `producer`, which live only in signed_block (Phase B). Omit to leave them out.
+    #[arg(long)]
+    blocks_dir: Option<String>,
+    /// match Hyperion's `features.index_transfer_memo`: move `memo` from a transfer's `act.data`
+    /// into `@transfer.memo` (default: keep `memo` in `act.data`).
+    #[arg(long, default_value_t = false)]
+    index_transfer_memo: bool,
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
@@ -209,6 +218,251 @@ fn nonzero_delta(v: &Value) -> bool {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// @-field handlers — faithful ports of Hyperion's action_data modules (transfer.ts, eosio-*.ts).
+// They run per action AFTER the act.data decode and BEFORE grouping, adding a computed `@<name>`
+// field and (for some) trimming/removing `act.data`. Dispatched by act.name (wildcard) + account.
+// ---------------------------------------------------------------------------------------------
+
+/// JS-`JSON.stringify`-style number: integral floats render without a trailing `.0` (1.0 -> 1),
+/// matching `parseFloat`+`JSON.stringify`. (Very small magnitudes may still differ JS-vs-Rust in
+/// exponential-vs-decimal form — a cosmetic edge on these denormalized `@`-amount fields.)
+fn js_number(f: f64) -> Value {
+    if f.is_finite() && f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0 {
+        Value::from(f as i64)
+    } else {
+        Value::from(f)
+    }
+}
+
+fn act_data_mut(doc: &mut Map<String, Value>) -> Option<&mut Map<String, Value>> {
+    doc.get_mut("act")?.get_mut("data")?.as_object_mut()
+}
+fn act_data(doc: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    doc.get("act")?.get("data")?.as_object()
+}
+fn delete_act_data(doc: &mut Map<String, Value>) {
+    if let Some(act) = doc.get_mut("act").and_then(|a| a.as_object_mut()) {
+        act.remove("data");
+    }
+}
+/// `parseFloat(asset.split(' ')[0])` — the numeric part of an `"1.2345 SYM"` asset string.
+fn asset_amount(v: &Value) -> f64 {
+    v.as_str()
+        .and_then(|s| s.split(' ').next())
+        .and_then(|t| t.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+fn str_of(v: &Value) -> String {
+    v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string())
+}
+
+/// Apply the matching `@`-field handler(s) for this action, mutating `doc` in place.
+fn process_action_data(doc: &mut Map<String, Value>, account: &str, name: &str, memo_in_field: bool) {
+    if name == "transfer" {
+        h_transfer(doc, memo_in_field);
+    }
+    if account != "eosio" {
+        return;
+    }
+    match name {
+        "newaccount" => h_newaccount(doc),
+        "updateauth" => h_updateauth(doc),
+        "delegatebw" => h_delegatebw(doc),
+        "undelegatebw" => h_undelegatebw(doc),
+        "buyram" => h_buyram(doc),
+        "buyrambytes" => h_buyrambytes(doc),
+        "buyrex" => h_buyrex(doc),
+        "unstaketorex" => h_unstaketorex(doc),
+        "voteproducer" => h_voteproducer(doc),
+        _ => {}
+    }
+}
+
+fn h_transfer(doc: &mut Map<String, Value>, memo_in_field: bool) {
+    let xfer = {
+        let Some(data) = act_data_mut(doc) else { return };
+        let qtd = data
+            .get("quantity")
+            .and_then(Value::as_str)
+            .or_else(|| data.get("value").and_then(Value::as_str));
+        let Some(qtd) = qtd else { return };
+        let mut parts = qtd.split(' ');
+        let (Some(amount), Some(symbol)) = (
+            parts.next().and_then(|t| t.parse::<f64>().ok()),
+            parts.next(),
+        ) else {
+            return;
+        };
+        let from = data.get("from").map(str_of).unwrap_or_default();
+        let to = data.get("to").map(str_of).unwrap_or_default();
+        let mut x = Map::new();
+        x.insert("from".into(), Value::from(from));
+        x.insert("to".into(), Value::from(to));
+        x.insert("amount".into(), js_number(amount));
+        x.insert("symbol".into(), Value::from(symbol.to_string()));
+        data.remove("from");
+        data.remove("to");
+        if memo_in_field {
+            if let Some(m) = data.remove("memo") {
+                x.insert("memo".into(), m);
+            }
+        }
+        x
+    };
+    doc.insert("@transfer".into(), Value::Object(xfer));
+}
+
+fn h_newaccount(doc: &mut Map<String, Value>) {
+    let na = {
+        let Some(data) = act_data_mut(doc) else { return };
+        let name = if let Some(n) = data.get("newact").cloned() {
+            n
+        } else if let Some(n) = data.remove("name") {
+            n
+        } else {
+            return;
+        };
+        let mut m = Map::new();
+        m.insert("active".into(), data.get("active").cloned().unwrap_or(Value::Null));
+        m.insert("owner".into(), data.get("owner").cloned().unwrap_or(Value::Null));
+        m.insert("newact".into(), name);
+        m
+    };
+    doc.insert("@newaccount".into(), Value::Object(na));
+}
+
+fn h_updateauth(doc: &mut Map<String, Value>) {
+    let ua = {
+        let Some(data) = act_data_mut(doc) else { return };
+        if let Some(auth) = data.get_mut("auth").and_then(|a| a.as_object_mut()) {
+            for k in ["accounts", "keys", "waits"] {
+                if auth.get(k).and_then(|v| v.as_array()).map(|a| a.is_empty()).unwrap_or(false) {
+                    auth.remove(k);
+                }
+            }
+        }
+        let mut m = Map::new();
+        m.insert("permission".into(), data.get("permission").cloned().unwrap_or(Value::Null));
+        m.insert("parent".into(), data.get("parent").cloned().unwrap_or(Value::Null));
+        m.insert("auth".into(), data.get("auth").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@updateauth".into(), Value::Object(ua));
+}
+
+fn h_delegatebw(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let (cpu, net) = if data.contains_key("stake_cpu_quantity") && data.contains_key("stake_net_quantity") {
+            (asset_amount(&data["stake_cpu_quantity"]), asset_amount(&data["stake_net_quantity"]))
+        } else {
+            (0.0, 0.0)
+        };
+        let mut m = Map::new();
+        m.insert("amount".into(), js_number(cpu + net));
+        m.insert("stake_cpu_quantity".into(), js_number(cpu));
+        m.insert("stake_net_quantity".into(), js_number(net));
+        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
+        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m.insert("transfer".into(), data.get("transfer").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@delegatebw".into(), Value::Object(m));
+    delete_act_data(doc);
+}
+
+fn h_undelegatebw(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let (cpu, net) = if data.contains_key("unstake_cpu_quantity") && data.contains_key("unstake_net_quantity") {
+            (asset_amount(&data["unstake_cpu_quantity"]), asset_amount(&data["unstake_net_quantity"]))
+        } else {
+            (0.0, 0.0)
+        };
+        let mut m = Map::new();
+        m.insert("amount".into(), js_number(cpu + net));
+        m.insert("unstake_cpu_quantity".into(), js_number(cpu));
+        m.insert("unstake_net_quantity".into(), js_number(net));
+        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
+        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@undelegatebw".into(), Value::Object(m));
+    delete_act_data(doc);
+}
+
+fn h_buyram(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let mut m = Map::new();
+        m.insert("payer".into(), data.get("payer").cloned().unwrap_or(Value::Null));
+        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        if let Some(q) = data.get("quant") {
+            m.insert("quant".into(), js_number(asset_amount(q)));
+        }
+        m
+    };
+    doc.insert("@buyram".into(), Value::Object(m));
+    delete_act_data(doc);
+}
+
+fn h_buyrambytes(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let bytes = data
+            .get("bytes")
+            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .unwrap_or(0);
+        let mut m = Map::new();
+        m.insert("bytes".into(), Value::from(bytes));
+        m.insert("payer".into(), data.get("payer").cloned().unwrap_or(Value::Null));
+        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@buyrambytes".into(), Value::Object(m));
+    delete_act_data(doc);
+}
+
+fn h_buyrex(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let mut m = Map::new();
+        m.insert("amount".into(), js_number(data.get("amount").map(asset_amount).unwrap_or(0.0)));
+        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@buyrex".into(), Value::Object(m));
+}
+
+fn h_unstaketorex(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let (cpu, net) = if data.contains_key("from_cpu") && data.contains_key("from_net") {
+            (asset_amount(&data["from_cpu"]), asset_amount(&data["from_net"]))
+        } else {
+            (0.0, 0.0)
+        };
+        let mut m = Map::new();
+        m.insert("amount".into(), js_number(cpu + net));
+        m.insert("owner".into(), data.get("owner").cloned().unwrap_or(Value::Null));
+        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@unstaketorex".into(), Value::Object(m));
+}
+
+fn h_voteproducer(doc: &mut Map<String, Value>) {
+    let m = {
+        let Some(data) = act_data(doc) else { return };
+        let mut m = Map::new();
+        m.insert("proxy".into(), data.get("proxy").cloned().unwrap_or(Value::Null));
+        m.insert("producers".into(), data.get("producers").cloned().unwrap_or(Value::Null));
+        m
+    };
+    doc.insert("@voteproducer".into(), Value::Object(m));
+}
+
 /// Group notification receipts and clean each resulting doc, then send. Faithful port of
 /// Hyperion `groupActionTraces` (action-dedup.ts) + `cleanActionTrace` (ds-pool.ts).
 fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<String>>, stats: &Stats) {
@@ -340,14 +594,20 @@ fn worker(
     cs: u32,
     ce: u32,
     abi_index: &AbiIndex,
+    blocks_dir: Option<&str>,
+    index_transfer_memo: bool,
     stats: &Stats,
     failures: &Failures,
     sink: Option<&Sender<String>>,
 ) -> Result<()> {
-    let names = Abieos::new(); // string_to_name only (act.account/act.name -> u64)
+    let names = Abieos::new(); // string_to_name + name_to_string (producer)
     let mut h_ship = AbiHandle::from_json(SHIP_ABI_JSON)
         .map_err(|e| anyhow!("embedded SHiP ABI failed to parse: {e:?}"))?;
     let mut reg = Registry::new(abi_index);
+    let mut blocklog = match blocks_dir {
+        Some(d) => Some(BlockLog::open(d)?),
+        None => None,
+    };
     let mut trace_buf = String::new();
     let mut data_buf = String::new();
 
@@ -381,6 +641,12 @@ fn worker(
             entry_end
         };
         stats.blocks.fetch_add(1, Relaxed);
+
+        // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
+        let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num)) {
+            Some((prod, slot)) => (names.name_to_string(prod).ok(), Some(slot_to_iso(slot))),
+            None => (None, None),
+        };
 
         let inflated = match decode_payload(&payload) {
             Ok(d) if !d.is_empty() => d,
@@ -489,6 +755,12 @@ fn worker(
                 doc.insert("block_num".into(), Value::from(block_num));
                 doc.insert("block_id".into(), Value::from(block_id.clone()));
                 doc.insert("trx_id".into(), Value::from(trx_id.clone()));
+                if let Some(ts) = &block_ts {
+                    doc.insert("@timestamp".into(), Value::from(ts.clone()));
+                }
+                if let Some(p) = &block_producer {
+                    doc.insert("producer".into(), Value::from(p.clone()));
+                }
                 if let Some(gs) = receipt_obj
                     .get("global_sequence")
                     .and_then(|v| v.as_str())
@@ -525,6 +797,7 @@ fn worker(
                 if let Some(auth) = act.get("authorization").cloned() {
                     act_out.insert("authorization".into(), auth);
                 }
+                let was_decoded = data_value.is_some();
                 match data_value {
                     Some(v) => {
                         act_out.insert("data".into(), v);
@@ -546,6 +819,11 @@ fn worker(
                         doc.insert("net_usage_words".into(), n);
                     }
                     usage_included = true;
+                }
+                // computed @-fields (@transfer/@newaccount/...) — only on decoded act.data, as
+                // Hyperion skips them on ds_error.
+                if was_decoded {
+                    process_action_data(&mut doc, account, name, index_transfer_memo);
                 }
 
                 let action_ordinal = av.get("action_ordinal").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -637,9 +915,10 @@ fn main() -> Result<()> {
             let ce = ((cs as u64 + chunk as u64 - 1).min(end as u64)) as u32;
             let (lp, ip) = (log_path.clone(), idx_path.clone());
             let (ai, st, fl) = (abi_index.clone(), stats.clone(), failures.clone());
+            let bd = args.blocks_dir.clone();
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, &fl, txc.as_ref()) {
+                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, bd.as_deref(), args.index_transfer_memo, &st, &fl, txc.as_ref()) {
                     eprintln!("[action-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));

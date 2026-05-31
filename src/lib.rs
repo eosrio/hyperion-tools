@@ -24,6 +24,7 @@
 //!   * [`ship`]  — the SHiP websocket scanner.
 
 pub mod abi;
+pub mod blocks;
 pub mod delta;
 pub mod disk;
 pub mod ship;
