@@ -28,7 +28,7 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::Sender;
 use std::sync::{mpsc, Arc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
@@ -608,6 +608,8 @@ fn worker(
         Some(d) => Some(BlockLog::open(d)?),
         None => None,
     };
+    let profile = std::env::var("ACTION_PROFILE").is_ok();
+    let (mut d_l1, mut d_parse, mut d_act) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
     let mut trace_buf = String::new();
     let mut data_buf = String::new();
 
@@ -653,15 +655,24 @@ fn worker(
             _ => continue,
         };
         // L1: decode the whole block's traces against the SHiP ABI in one call.
+        let l1_t = if profile { Some(Instant::now()) } else { None };
         if h_ship
             .bin_to_json_into("transaction_trace[]", &inflated, &mut trace_buf)
             .is_err()
         {
             continue;
         }
+        if let Some(t) = l1_t {
+            d_l1 += t.elapsed();
+        }
+        let p_t = if profile { Some(Instant::now()) } else { None };
         let Ok(Value::Array(txs)) = serde_json::from_str::<Value>(&trace_buf) else {
             continue;
         };
+        if let Some(t) = p_t {
+            d_parse += t.elapsed();
+        }
+        let a_t = if profile { Some(Instant::now()) } else { None };
         for tx in &txs {
             // tx is ["transaction_trace_v0", {..}]
             let Some(txv) = tx.get(1) else { continue };
@@ -846,6 +857,17 @@ fn worker(
             }
             finalize_and_emit(procs, sink, stats);
         }
+        if let Some(t) = a_t {
+            d_act += t.elapsed();
+        }
+    }
+    if profile {
+        eprintln!(
+            "[action-proto][profile] worker [{cs}..{ce}]: l1_decode={:.2}s json_parse={:.2}s actions_build={:.2}s",
+            d_l1.as_secs_f64(),
+            d_parse.as_secs_f64(),
+            d_act.as_secs_f64()
+        );
     }
     Ok(())
 }
