@@ -65,6 +65,11 @@ struct Args {
     /// into `@transfer.memo` (default: keep `memo` in `act.data`).
     #[arg(long, default_value_t = false)]
     index_transfer_memo: bool,
+    /// COLD TIER: emit metadata-only docs — drop `act.data` (the on-demand payload that
+    /// `archive-server` reconstructs from the logs), keeping all searchable metadata + the computed
+    /// `@`-fields. `block_num` + `global_sequence` stay, so the API/archive can fetch act.data.
+    #[arg(long, default_value_t = false)]
+    metadata_only: bool,
     /// direct Elasticsearch `_bulk` sink (e.g. http://localhost:9200). When set, decoded docs are
     /// POSTed straight to ES (the `--out` NDJSON path is ignored) to find the true ES write ceiling
     /// without the GIL-bound Python loader.
@@ -609,6 +614,7 @@ fn worker(
     abi_index: &AbiIndex,
     blocks_dir: Option<&str>,
     index_transfer_memo: bool,
+    metadata_only: bool,
     stats: &Stats,
     failures: &Failures,
     sink: Option<&Sender<DocMsg>>,
@@ -773,6 +779,10 @@ fn worker(
                     data_part = Some(hx);
                     stats.raw.fetch_add(1, Relaxed);
                 }
+                // Cold tier: drop act.data (served on-demand by archive-server); the @-fields and
+                // all metadata stay, so the doc is fully searchable and block_num + global_sequence
+                // let the API fetch the payload from the archive.
+                let data_part = if metadata_only { None } else { data_part };
 
                 // Build the doc body directly as JSON; cleanActionTrace pruning = conditional
                 // writes. Ends with a trailing comma. act_digest/code/abi/receipts are appended
@@ -1114,7 +1124,7 @@ fn main() -> Result<()> {
             let bd = args.blocks_dir.clone();
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, bd.as_deref(), args.index_transfer_memo, &st, &fl, txc.as_ref()) {
+                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, bd.as_deref(), args.index_transfer_memo, args.metadata_only, &st, &fl, txc.as_ref()) {
                     eprintln!("[action-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));
