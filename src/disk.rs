@@ -267,28 +267,30 @@ pub fn scan_disk<W: Write + Send>(
         let ckpt = checkpoint.map(String::from);
         s.spawn(move || {
             let (mut last, mut last_t) = (0u64, Instant::now());
-            let mut wm = start as u64; // contiguous resume watermark (first not-yet-done chunk)
+            let mut wm = start as u64; // contiguous watermark: blocks [start..wm-1] are done
             while !done_m.load(Relaxed) {
                 std::thread::sleep(Duration::from_secs(3));
                 let sc = scanned_m.load(Relaxed);
                 let rate = (sc - last) as f64 / last_t.elapsed().as_secs_f64().max(1e-9);
+                // advance the contiguous watermark (the absolute block we're confirmed through)
+                {
+                    let c = completed_m.lock().unwrap();
+                    while c.contains(&wm) {
+                        wm += chunk;
+                    }
+                }
+                let at_block = wm.min(end as u64 + 1); // next absolute block to confirm
                 eprintln!(
-                    "[disk] {sc}/{total} ({:.1}%)  {} ABIs  {rate:.0} blk/s",
+                    "[disk] block {at_block}/{end}  |  {sc}/{total} this run ({:.1}%)  {} ABIs  {rate:.0} blk/s",
                     sc as f64 / total as f64 * 100.0,
                     found_m.load(Relaxed)
                 );
                 (last, last_t) = (sc, Instant::now());
                 if let Some(cp) = &ckpt {
-                    {
-                        let c = completed_m.lock().unwrap();
-                        while c.contains(&wm) {
-                            wm += chunk;
-                        }
-                    }
                     // cap at end+1: the final chunk is clamped to `end`, so the watermark
                     // must not advance past it (else a later resume with a grown chain skips
                     // the [end..chunk_boundary] tail).
-                    write_checkpoint(cp, wm.min(end as u64 + 1));
+                    write_checkpoint(cp, at_block);
                 }
             }
         });
