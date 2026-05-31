@@ -46,9 +46,10 @@ struct Args {
     /// contiguously done; re-run the same command to continue (the output is appended).
     #[arg(long)]
     checkpoint: Option<String>,
-    /// Disk: blocks per work-stealing chunk. Larger = better sequential read locality on a
-    /// cold, I/O-bound full-chain scan; smaller = tighter load balance across threads.
-    #[arg(long, default_value_t = 250_000)]
+    /// Disk: blocks per work-stealing chunk. Smaller keeps the threads' read cursors clustered
+    /// (better shared prefetch/cache locality on a cold, I/O-bound scan); larger scatters them.
+    /// ~8 threads with small chunks was the measured sweet spot on a ZFS NVMe array.
+    #[arg(long, default_value_t = 20_000)]
     chunk_size: u64,
 }
 

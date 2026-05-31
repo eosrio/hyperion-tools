@@ -97,8 +97,7 @@ fn worker_scan(
     let mut ob = [0u8; 8];
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob); // byte offset of the current entry
-                                          // 8 MiB buffer: with large chunks the read is long and sequential, so a big buffer cuts
-                                          // syscalls and lets the filesystem prefetcher stream a cold, I/O-bound log efficiently.
+                                          // 8 MiB buffer to cut read syscalls and feed the filesystem prefetcher on a cold, I/O-bound log.
     let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     log.seek(SeekFrom::Start(pos))?;
 
@@ -230,9 +229,12 @@ pub fn scan_disk<W: Write + Send>(
     // fixed 1/threads slice each. Real chains get much denser (and their reads colder, off the
     // ARC cache) toward the head, so static slices finish wildly out of step — the light early
     // slices drain and leave the dense tail to a shrinking set of threads, idling cores.
-    // Chunk size trades load balance (smaller) against sequential read locality (larger): on a
-    // cold, I/O-bound full-chain scan, large chunks give each thread long sequential runs so the
-    // filesystem prefetcher engages and seeks are rare. `--chunk-size` tunes it.
+    // Chunk size is a tuning knob (`--chunk-size`). Counter-intuitively, *smaller* chunks are
+    // faster on a cold, I/O-bound full-chain scan: they keep the N threads' read cursors
+    // clustered close together so they share filesystem prefetch/cache locality. Large,
+    // widely-spread chunks scatter the streams and seek more; too many threads thrash a shared
+    // array. Measured on WAX over a ZFS NVMe array, ~8 threads with ~20k-block chunks peaked
+    // (4 or 16 threads, and 250k chunks, were all markedly slower).
     let chunk = chunk_size.max(1);
     let cursor = Arc::new(AtomicU64::new(start as u64));
     // Completed chunk start-offsets, for computing the contiguous resume watermark.
