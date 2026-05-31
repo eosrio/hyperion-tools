@@ -155,8 +155,30 @@ struct Stats {
     blocks: AtomicU64,
     rows: AtomicU64,   // contract_row present==1 seen
     decoded: AtomicU64, // value -> JSON ok
-    no_abi: AtomicU64, // no ABI version for (code, block)
-    failed: AtomicU64, // ABI present but decode failed
+    no_abi: AtomicU64,    // (subset of raw) no ABI version at all for (code, block)
+    raw: AtomicU64,       // undecodable -> raw `value` preserved (e.g. table not in the ABI)
+    recovered: AtomicU64, // decoded only after retrying against block-1's ABI
+}
+
+/// Why a row failed to decode at a given block.
+enum Fail {
+    NoAbi,
+    NoType,
+    Decode(String),
+}
+
+/// Shared failure breakdown: (reason, code, table) -> (count, a sample error).
+type Failures = std::sync::Mutex<std::collections::BTreeMap<(&'static str, String, String), (u64, String)>>;
+
+fn record_failure(failures: &Failures, reason: &'static str, code: &str, table: &str, sample: &str) {
+    let mut m = failures.lock().unwrap();
+    let e = m
+        .entry((reason, code.to_string(), table.to_string()))
+        .or_insert((0, String::new()));
+    e.0 += 1;
+    if e.1.is_empty() && !sample.is_empty() {
+        e.1 = sample.chars().take(140).collect();
+    }
 }
 
 /// Ensure the abieos context holds the ABI version of `code` active at `block`.
@@ -188,6 +210,38 @@ fn ensure_abi(
     true
 }
 
+/// One decode attempt: resolve the table type against the ABI version active at `block`
+/// and deserialize `value` -> JSON.
+#[allow(clippy::too_many_arguments)]
+fn decode_at(
+    abieos: &Abieos,
+    loaded: &mut HashMap<u64, u32>,
+    type_cache: &mut HashMap<(u32, u64), String>,
+    idx: &AbiIndex,
+    code: u64,
+    code_str: &str,
+    table: u64,
+    value: &[u8],
+    block: u32,
+) -> std::result::Result<String, Fail> {
+    if !ensure_abi(abieos, loaded, idx, code, code_str, block) {
+        return Err(Fail::NoAbi);
+    }
+    let vf = loaded[&code];
+    let ttype = match type_cache.entry((vf, table)) {
+        std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
+        std::collections::hash_map::Entry::Vacant(e) => {
+            match abieos.get_type_for_table_native(code, table) {
+                Ok(t) => e.insert(t).clone(),
+                Err(_) => return Err(Fail::NoType),
+            }
+        }
+    };
+    abieos
+        .bin_to_json(code_str, &ttype, value)
+        .map_err(|e| Fail::Decode(format!("{e:?}")))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn worker(
     log_path: &str,
@@ -197,6 +251,7 @@ fn worker(
     ce: u32,
     abi_index: &AbiIndex,
     stats: &Stats,
+    failures: &Failures,
     sink: Option<&mpsc::Sender<String>>,
 ) -> Result<()> {
     let abieos = Abieos::new();
@@ -252,40 +307,59 @@ fn worker(
                 Ok(s) => s,
                 Err(_) => return Ok(()),
             };
-            if !ensure_abi(&abieos, &mut loaded, abi_index, r.code, &code_str, block_num) {
-                stats.no_abi.fetch_add(1, Relaxed);
-                return Ok(());
-            }
-            let vf = loaded[&r.code];
-            let ttype = match type_cache.entry((vf, r.table)) {
-                std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    match abieos.get_type_for_table_native(r.code, r.table) {
-                        Ok(t) => e.insert(t).clone(),
-                        Err(_) => {
-                            stats.failed.fetch_add(1, Relaxed);
-                            return Ok(());
+            // Decode against the ABI active at this block; on failure retry against block-1's
+            // ABI (same-block setabi+write boundary), à la Hyperion. If still undecodable
+            // (e.g. the contract writes a table it never declares in its ABI — legal in
+            // Antelope, ~0.15% of WAX rows), preserve the raw `value` hex instead of `data`,
+            // exactly as Hyperion does — so EVERY present row still produces a doc.
+            let json = match decode_at(&abieos, &mut loaded, &mut type_cache, abi_index, r.code, &code_str, r.table, r.value, block_num) {
+                Ok(j) => Some(j),
+                Err(first) => {
+                    let retry = if !matches!(first, Fail::NoAbi) && block_num > 1 {
+                        decode_at(&abieos, &mut loaded, &mut type_cache, abi_index, r.code, &code_str, r.table, r.value, block_num - 1)
+                    } else {
+                        Err(first)
+                    };
+                    match retry {
+                        Ok(j) => {
+                            stats.recovered.fetch_add(1, Relaxed);
+                            Some(j)
+                        }
+                        Err(f) => {
+                            let table_str = abieos.name_to_string(r.table).unwrap_or_default();
+                            let (reason, sample) = match f {
+                                Fail::NoType => ("no_type", String::new()),
+                                Fail::Decode(e) => ("decode", e),
+                                Fail::NoAbi => ("no_abi", String::new()),
+                            };
+                            if reason == "no_abi" {
+                                stats.no_abi.fetch_add(1, Relaxed);
+                            }
+                            record_failure(failures, reason, &code_str, &table_str, &sample);
+                            None
                         }
                     }
                 }
             };
-            match abieos.bin_to_json(&code_str, &ttype, r.value) {
-                Ok(json) => {
-                    stats.decoded.fetch_add(1, Relaxed);
-                    if let Some(tx) = sink {
-                        let scope = abieos.name_to_string(r.scope).unwrap_or_default();
-                        let table = abieos.name_to_string(r.table).unwrap_or_default();
-                        let payer = abieos.name_to_string(r.payer).unwrap_or_default();
-                        let doc = format!(
-                            "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\",\"data\":{json}}}",
-                            r.primary_key
-                        );
-                        let _ = tx.send(doc);
-                    }
-                }
-                Err(_) => {
-                    stats.failed.fetch_add(1, Relaxed);
-                }
+            if json.is_some() {
+                stats.decoded.fetch_add(1, Relaxed);
+            } else {
+                stats.raw.fetch_add(1, Relaxed);
+            }
+            // every present row produces a doc: decoded `data`, or raw `value` if undecodable
+            if let Some(tx) = sink {
+                let scope = abieos.name_to_string(r.scope).unwrap_or_default();
+                let table = abieos.name_to_string(r.table).unwrap_or_default();
+                let payer = abieos.name_to_string(r.payer).unwrap_or_default();
+                let body = match &json {
+                    Some(j) => format!("\"data\":{j}"),
+                    None => format!("\"value\":\"{}\"", hex::encode(r.value)),
+                };
+                let doc = format!(
+                    "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\",{body}}}",
+                    r.primary_key
+                );
+                let _ = tx.send(doc);
             }
             Ok(())
         });
@@ -321,6 +395,7 @@ fn main() -> Result<()> {
     eprintln!("[delta-proto] decoding contract_row deltas [{start}..{end}] ({total} blocks) with {threads} threads");
 
     let stats = Arc::new(Stats::default());
+    let failures = Arc::new(Failures::default());
     let (tx, rx) = mpsc::channel::<String>();
     let mut out: Option<Box<dyn Write + Send>> = args
         .out
@@ -354,10 +429,10 @@ fn main() -> Result<()> {
             }
             let ce = ((cs as u64 + chunk as u64 - 1).min(end as u64)) as u32;
             let (lp, ip) = (log_path.clone(), idx_path.clone());
-            let (ai, st) = (abi_index.clone(), stats.clone());
+            let (ai, st, fl) = (abi_index.clone(), stats.clone(), failures.clone());
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, txc.as_ref()) {
+                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, &fl, txc.as_ref()) {
                     eprintln!("[delta-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));
@@ -371,13 +446,31 @@ fn main() -> Result<()> {
 
     let secs = t0.elapsed().as_secs_f64();
     let b = stats.blocks.load(Relaxed);
+    let rows = stats.rows.load(Relaxed);
+    let decoded = stats.decoded.load(Relaxed);
+    let raw = stats.raw.load(Relaxed);
     eprintln!(
-        "[delta-proto] done: {b} blocks in {secs:.1}s ({:.0} blk/s) | contract_row present={} decoded={} no_abi={} failed={}",
+        "[delta-proto] done: {b} blocks in {secs:.1}s ({:.0} blk/s) | contract_row present={rows} -> docs={} (decoded={decoded} data, {:.2}% + raw={raw} value) recovered_via_block-1={} no_abi={}",
         b as f64 / secs.max(1e-9),
-        stats.rows.load(Relaxed),
-        stats.decoded.load(Relaxed),
+        decoded + raw,
+        if rows > 0 { 100.0 * decoded as f64 / rows as f64 } else { 0.0 },
+        stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
-        stats.failed.load(Relaxed),
     );
+    // breakdown of the raw (undecodable) rows — table not declared in the ABI, etc.
+    let f = failures.lock().unwrap();
+    if !f.is_empty() {
+        let mut by_reason: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+        for ((reason, _, _), (cnt, _)) in f.iter() {
+            *by_reason.entry(reason).or_default() += cnt;
+        }
+        eprintln!("[delta-proto] raw (undecodable) rows by reason: {by_reason:?}");
+        let mut top: Vec<_> = f.iter().collect();
+        top.sort_by_key(|e| std::cmp::Reverse(e.1 .0));
+        eprintln!("[delta-proto] top undecoded contract/table (table not in ABI):");
+        for ((reason, code, table), (cnt, sample)) in top.into_iter().take(25) {
+            eprintln!("  {cnt:>6}  {reason:<8} {code}/{table}  {sample}");
+        }
+    }
     Ok(())
 }
