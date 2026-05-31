@@ -46,6 +46,10 @@ struct Args {
     /// contiguously done; re-run the same command to continue (the output is appended).
     #[arg(long)]
     checkpoint: Option<String>,
+    /// Disk: blocks per work-stealing chunk. Larger = better sequential read locality on a
+    /// cold, I/O-bound full-chain scan; smaller = tighter load balance across threads.
+    #[arg(long, default_value_t = 250_000)]
+    chunk_size: u64,
 }
 
 #[tokio::main]
@@ -79,6 +83,7 @@ async fn main() -> Result<()> {
             args.start,
             args.end,
             threads,
+            args.chunk_size,
             args.checkpoint.as_deref(),
             &mut out,
         );

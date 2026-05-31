@@ -97,7 +97,9 @@ fn worker_scan(
     let mut ob = [0u8; 8];
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob); // byte offset of the current entry
-    let mut log = BufReader::with_capacity(1 << 20, File::open(log_path)?);
+                                          // 8 MiB buffer: with large chunks the read is long and sequential, so a big buffer cuts
+                                          // syscalls and lets the filesystem prefetcher stream a cold, I/O-bound log efficiently.
+    let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
@@ -164,11 +166,13 @@ fn worker_scan(
 /// Read ABIs directly from the append-only state-history log (no nodeos), in parallel,
 /// streaming results to `out`. Bounds the range to the indexed (committed) blocks so it
 /// never races the entry nodeos is currently appending.
+#[allow(clippy::too_many_arguments)]
 pub fn scan_disk<W: Write + Send>(
     dir: &str,
     start: u32,
     end: u32,
     threads: u32,
+    chunk_size: u64,
     checkpoint: Option<&str>,
     out: &mut W,
 ) -> Result<()> {
@@ -222,12 +226,14 @@ pub fn scan_disk<W: Write + Send>(
     };
     let threads = threads.max(1);
     let total = (end - start + 1) as u64;
-    // Dynamic work-stealing: hand out many small contiguous chunks from a shared cursor
-    // rather than one fixed 1/threads slice each. Real chains get much denser (and their
-    // reads colder, off the ARC cache) toward the head, so static slices finish wildly out
-    // of step — the light early slices drain and leave the dense tail to a shrinking set of
-    // threads, idling cores. Small chunks keep every thread busy right to the end.
-    const CHUNK: u64 = 20_000;
+    // Dynamic work-stealing: hand out contiguous chunks from a shared cursor rather than one
+    // fixed 1/threads slice each. Real chains get much denser (and their reads colder, off the
+    // ARC cache) toward the head, so static slices finish wildly out of step — the light early
+    // slices drain and leave the dense tail to a shrinking set of threads, idling cores.
+    // Chunk size trades load balance (smaller) against sequential read locality (larger): on a
+    // cold, I/O-bound full-chain scan, large chunks give each thread long sequential runs so the
+    // filesystem prefetcher engages and seeks are rare. `--chunk-size` tunes it.
+    let chunk = chunk_size.max(1);
     let cursor = Arc::new(AtomicU64::new(start as u64));
     // Completed chunk start-offsets, for computing the contiguous resume watermark.
     let completed = Arc::new(Mutex::new(BTreeSet::<u64>::new()));
@@ -274,7 +280,7 @@ pub fn scan_disk<W: Write + Send>(
                     {
                         let c = completed_m.lock().unwrap();
                         while c.contains(&wm) {
-                            wm += CHUNK;
+                            wm += chunk;
                         }
                     }
                     // cap at end+1: the final chunk is clamped to `end`, so the watermark
@@ -295,12 +301,12 @@ pub fn scan_disk<W: Write + Send>(
                 completed.clone(),
             );
             handles.push(s.spawn(move || loop {
-                let cs64 = cur.fetch_add(CHUNK, Relaxed);
+                let cs64 = cur.fetch_add(chunk, Relaxed);
                 if cs64 > end as u64 {
                     break;
                 }
                 let cs = cs64 as u32;
-                let ce = (cs64 + CHUNK - 1).min(end as u64) as u32;
+                let ce = (cs64 + chunk - 1).min(end as u64) as u32;
                 match worker_scan(&lp, &ip, first_block, cs, ce, log_len, &txc, &scc) {
                     // mark the chunk done only on success, so a failed chunk is re-scanned on resume
                     Ok(()) => {
@@ -323,7 +329,7 @@ pub fn scan_disk<W: Write + Send>(
         let mut wm = start as u64;
         let c = completed.lock().unwrap();
         while c.contains(&wm) {
-            wm += CHUNK;
+            wm += chunk;
         }
         drop(c);
         write_checkpoint(cp, wm.min(end as u64 + 1));
@@ -413,7 +419,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("abi-scanner-snap-{}", std::process::id()));
         write_synth_log(&dir);
         let mut out = Vec::new();
-        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, None, &mut out);
+        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, 20_000, None, &mut out);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(r.is_ok(), "snapshot-restored log should be accepted: {r:?}");
         assert!(out.is_empty(), "empty payloads -> no ABIs emitted");
@@ -430,7 +436,16 @@ mod tests {
 
         // first run: scans [10..11] and writes a watermark past the end
         let mut out1 = Vec::new();
-        scan_disk(dir.to_str().unwrap(), 10, 11, 1, Some(cp), &mut out1).unwrap();
+        scan_disk(
+            dir.to_str().unwrap(),
+            10,
+            11,
+            1,
+            20_000,
+            Some(cp),
+            &mut out1,
+        )
+        .unwrap();
         let wm: u64 = std::fs::read_to_string(&ckpt)
             .unwrap()
             .trim()
@@ -443,7 +458,15 @@ mod tests {
 
         // second run: checkpoint says complete -> no work, returns Ok with no output
         let mut out2 = Vec::new();
-        let r = scan_disk(dir.to_str().unwrap(), 10, 11, 1, Some(cp), &mut out2);
+        let r = scan_disk(
+            dir.to_str().unwrap(),
+            10,
+            11,
+            1,
+            20_000,
+            Some(cp),
+            &mut out2,
+        );
         let _ = std::fs::remove_dir_all(&dir);
         assert!(r.is_ok());
         assert!(out2.is_empty(), "resume of a complete scan emits nothing");
