@@ -196,13 +196,17 @@ fn decode_action(
         .map_err(|e| Fail::Decode(format!("{e:?}")))
 }
 
-/// A processed action_trace, held until the whole transaction is grouped.
+/// A processed action_trace, held until the whole transaction is grouped. The doc fields are
+/// pre-serialized into `body` (with a trailing comma); `receipt_json` is the receipt object for
+/// `receipts[]` (without the hoisted act_digest/code_sequence/abi_sequence).
 struct Proc {
     action_ordinal: u64,
     creator_action_ordinal: u64,
     act_digest: String,
-    receipt: Value, // action_receipt_v0 object
-    doc: Map<String, Value>,
+    code_sequence: u32,
+    abi_sequence: u32,
+    receipt_json: String,
+    body: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -450,30 +454,56 @@ fn h_voteproducer(doc: &mut Map<String, Value>) {
     doc.insert("@voteproducer".into(), Value::Object(m));
 }
 
-/// Group notification receipts and clean each resulting doc, then send. Faithful port of
-/// Hyperion `groupActionTraces` (action-dedup.ts) + `cleanActionTrace` (ds-pool.ts).
+/// Append `s` to `out` as a JSON string literal (quotes + escaping).
+fn push_json_str(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+/// Does this action get a computed `@`-field? (If so its act.data must be parsed + transformed;
+/// otherwise the raw decoded JSON is spliced verbatim.)
+fn is_at_handled(account: &str, name: &str) -> bool {
+    name == "transfer"
+        || (account == "eosio"
+            && matches!(
+                name,
+                "newaccount"
+                    | "updateauth"
+                    | "delegatebw"
+                    | "undelegatebw"
+                    | "buyram"
+                    | "buyrambytes"
+                    | "buyrex"
+                    | "unstaketorex"
+                    | "voteproducer"
+            ))
+}
+
+/// Group notification receipts (port of Hyperion `groupActionTraces`) and assemble + send each
+/// doc as a JSON string. `act_digest`/`code_sequence`/`abi_sequence` are hoisted onto the doc and
+/// the group's receipts go in `receipts[]`. Per-field `cleanActionTrace` pruning already happened
+/// while building `Proc.body`.
 fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<String>>, stats: &Stats) {
     if procs.is_empty() {
         return;
     }
     if procs.len() == 1 {
-        let mut p = procs.into_iter().next().unwrap();
-        let mut receipt = p.receipt;
-        if let Value::Object(m) = &mut receipt {
-            if let Some(cs) = m.remove("code_sequence") {
-                p.doc.insert("code_sequence".into(), cs);
-            }
-            if let Some(asq) = m.remove("abi_sequence") {
-                p.doc.insert("abi_sequence".into(), asq);
-            }
-        }
-        p.doc.insert("receipts".into(), Value::Array(vec![receipt]));
-        clean_and_send(p.doc, sink, stats);
+        let p = &procs[0];
+        emit_doc(p, &[p.receipt_json.as_str()], sink, stats);
         return;
     }
-
-    // Pass 1: action_ordinal -> act_digest, to tell notifications (same digest as creator)
-    // from inline actions (different digest).
+    // action_ordinal -> act_digest, to tell notifications (same digest as creator) from inline.
     let digest_by_ordinal: HashMap<u64, String> = procs
         .iter()
         .map(|p| (p.action_ordinal, p.act_digest.clone()))
@@ -487,90 +517,51 @@ fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<String>>, stats: &St
             p.action_ordinal
         }
     };
-
     let keys: Vec<String> = procs
         .iter()
         .map(|p| format!("{}:{}", p.act_digest, canonical(p)))
         .collect();
-    let mut group_receipts: HashMap<String, Vec<Value>> = HashMap::new();
+    let mut group_receipts: HashMap<&str, Vec<&str>> = HashMap::new();
     for (i, p) in procs.iter().enumerate() {
         group_receipts
-            .entry(keys[i].clone())
+            .entry(keys[i].as_str())
             .or_default()
-            .push(p.receipt.clone());
+            .push(p.receipt_json.as_str());
     }
-
-    // The first proc of each group becomes the head doc; merge the group's receipts into it.
-    let mut emitted: HashSet<String> = HashSet::new();
-    for (i, p) in procs.into_iter().enumerate() {
-        let key = &keys[i];
-        if emitted.contains(key) {
+    // The first proc of each group becomes the head doc.
+    let mut emitted: HashSet<&str> = HashSet::new();
+    for (i, p) in procs.iter().enumerate() {
+        let key = keys[i].as_str();
+        if !emitted.insert(key) {
             continue;
         }
-        let Some(receipts) = group_receipts.remove(key) else {
-            continue;
-        };
-        emitted.insert(key.clone());
-        let mut doc = p.doc;
-        let mut out_receipts = Vec::with_capacity(receipts.len());
-        for mut r in receipts {
-            if let Value::Object(m) = &mut r {
-                if let Some(cs) = m.remove("code_sequence") {
-                    doc.insert("code_sequence".into(), cs);
-                }
-                if let Some(asq) = m.remove("abi_sequence") {
-                    doc.insert("abi_sequence".into(), asq);
-                }
-            }
-            out_receipts.push(r);
-        }
-        doc.insert("receipts".into(), Value::Array(out_receipts));
-        clean_and_send(doc, sink, stats);
+        emit_doc(p, &group_receipts[key], sink, stats);
     }
 }
 
-/// Port of Hyperion `cleanActionTrace`: prune empties, hoist act_digest from receipts[0] to the
-/// doc and strip it from each receipt, drop the singular receiver.
-fn clean_and_send(mut t: Map<String, Value>, sink: Option<&Sender<String>>, stats: &Stats) {
-    if t.get("return_value").and_then(|v| v.as_str()) == Some("") {
-        t.remove("return_value");
-    }
-    if t.get("context_free") == Some(&Value::Bool(false)) {
-        t.remove("context_free");
-    }
-    if matches!(t.get("elapsed"), Some(Value::String(s)) if s == "0")
-        || t.get("elapsed").and_then(|v| v.as_i64()) == Some(0)
-    {
-        t.remove("elapsed");
-    }
-    let has_receipts = t
-        .get("receipts")
-        .and_then(|v| v.as_array())
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
-    if has_receipts {
-        let ad = t["receipts"][0].get("act_digest").cloned();
-        if let Some(ad) = ad {
-            t.insert("act_digest".into(), ad);
-        }
-        if let Some(Value::Array(arr)) = t.get_mut("receipts") {
-            for r in arr.iter_mut() {
-                if let Value::Object(m) = r {
-                    m.remove("act_digest");
-                }
-            }
-        }
-    } else {
-        t.remove("receipts");
-    }
-    t.remove("receiver");
-    if t.get("net_usage_words").and_then(|v| v.as_i64()) == Some(0) {
-        t.remove("net_usage_words");
-    }
+/// Assemble one grouped action doc: `{ <body> "act_digest":.., "code_sequence":.., "abi_sequence":.., "receipts":[..] }`.
+fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<String>>, stats: &Stats) {
     stats.docs.fetch_add(1, Relaxed);
-    if let Some(tx) = sink {
-        let _ = tx.send(Value::Object(t).to_string());
+    let Some(tx) = sink else { return };
+    let rlen: usize = receipts.iter().map(|r| r.len() + 1).sum();
+    let mut s = String::with_capacity(p.body.len() + p.act_digest.len() + rlen + 96);
+    s.push('{');
+    s.push_str(&p.body); // ends with a trailing comma
+    s.push_str("\"act_digest\":");
+    push_json_str(&mut s, &p.act_digest);
+    s.push_str(",\"code_sequence\":");
+    s.push_str(&p.code_sequence.to_string());
+    s.push_str(",\"abi_sequence\":");
+    s.push_str(&p.abi_sequence.to_string());
+    s.push_str(",\"receipts\":[");
+    for (i, r) in receipts.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(r);
     }
+    s.push_str("]}");
+    let _ = tx.send(s);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -593,7 +584,7 @@ fn worker(
         None => None,
     };
     let profile = std::env::var("ACTION_PROFILE").is_ok();
-    let (mut d_l1, mut d_act) = (Duration::ZERO, Duration::ZERO);
+    let (mut d_l1, mut d_act, mut d_l2) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
     let mut data_buf = String::new();
 
     let mut idx = File::open(idx_path)?;
@@ -667,7 +658,8 @@ fn worker(
 
                 // L2: decode act.data (raw bytes) against the contract ABI active at the block;
                 // retry at block-1 (same-block setabi boundary); else preserve raw hex (ds_error).
-                let mut data_value: Option<Value> = None;
+                let l2_t = if profile { Some(Instant::now()) } else { None };
+                let mut decoded = false;
                 {
                     let r1 = decode_action(&mut reg, &mut data_buf, code, action_u64, data_bytes, block_num);
                     let outcome = match r1 {
@@ -689,9 +681,7 @@ fn worker(
                             if recovered {
                                 stats.recovered.fetch_add(1, Relaxed);
                             }
-                            if let Ok(v) = serde_json::from_str::<Value>(&data_buf) {
-                                data_value = Some(v);
-                            }
+                            decoded = true;
                         }
                         Err(f) => {
                             let (reason, sample) = match f {
@@ -706,126 +696,177 @@ fn worker(
                         }
                     }
                 }
+                if let Some(t) = l2_t {
+                    d_l2 += t.elapsed();
+                }
 
-                // Build the action doc.
-                let mut doc = Map::new();
-                doc.insert("block_num".into(), Value::from(block_num));
-                doc.insert("block_id".into(), Value::from(block_id.clone()));
-                doc.insert("trx_id".into(), Value::from(trx_id.clone()));
+                // act.data representation + computed @-fields. Non-@-handled actions splice the
+                // raw decoded JSON verbatim (no parse/reserialize); @-handled ones parse, run the
+                // handler on a tiny temp map, then re-serialize the (possibly trimmed) data.
+                let mut at_fragment = String::new();
+                let data_part: Option<String>;
+                if decoded {
+                    if is_at_handled(&account, &name) {
+                        if let Ok(data_val) = serde_json::from_str::<Value>(&data_buf) {
+                            let mut temp = Map::new();
+                            let mut actm = Map::new();
+                            actm.insert("data".into(), data_val);
+                            temp.insert("act".into(), Value::Object(actm));
+                            process_action_data(&mut temp, &account, &name, index_transfer_memo);
+                            for (k, v) in &temp {
+                                if k.starts_with('@') {
+                                    push_json_str(&mut at_fragment, k);
+                                    at_fragment.push(':');
+                                    at_fragment.push_str(&v.to_string());
+                                    at_fragment.push(',');
+                                }
+                            }
+                            data_part = temp
+                                .get("act")
+                                .and_then(|a| a.get("data"))
+                                .map(|d| d.to_string());
+                        } else {
+                            data_part = Some(data_buf.clone());
+                        }
+                    } else {
+                        data_part = Some(data_buf.clone());
+                    }
+                    stats.decoded.fetch_add(1, Relaxed);
+                } else {
+                    let mut hx = String::new();
+                    push_json_str(&mut hx, &hex::encode(data_bytes));
+                    data_part = Some(hx);
+                    stats.raw.fetch_add(1, Relaxed);
+                }
+
+                // Build the doc body directly as JSON; cleanActionTrace pruning = conditional
+                // writes. Ends with a trailing comma. act_digest/code/abi/receipts are appended
+                // by emit_doc after grouping.
+                let mut body = String::with_capacity(data_part.as_ref().map_or(0, |d| d.len()) + 256);
                 if let Some(ts) = &block_ts {
-                    doc.insert("@timestamp".into(), Value::from(ts.clone()));
+                    body.push_str("\"@timestamp\":");
+                    push_json_str(&mut body, ts);
+                    body.push(',');
                 }
-                if let Some(p) = &block_producer {
-                    doc.insert("producer".into(), Value::from(p.clone()));
+                if let Some(pr) = &block_producer {
+                    body.push_str("\"producer\":");
+                    push_json_str(&mut body, pr);
+                    body.push(',');
                 }
-                doc.insert("global_sequence".into(), Value::from(receipt.global_sequence));
-                doc.insert("action_ordinal".into(), Value::from(act.action_ordinal));
-                doc.insert(
-                    "creator_action_ordinal".into(),
-                    Value::from(act.creator_action_ordinal),
-                );
-                doc.insert("context_free".into(), Value::Bool(act.context_free));
-                doc.insert("elapsed".into(), Value::from(act.elapsed.to_string()));
+                body.push_str("\"block_num\":");
+                body.push_str(&block_num.to_string());
+                body.push_str(",\"block_id\":");
+                push_json_str(&mut body, &block_id);
+                body.push_str(",\"trx_id\":");
+                push_json_str(&mut body, &trx_id);
+                body.push_str(",\"global_sequence\":");
+                body.push_str(&receipt.global_sequence.to_string());
+                body.push_str(",\"action_ordinal\":");
+                body.push_str(&act.action_ordinal.to_string());
+                body.push_str(",\"creator_action_ordinal\":");
+                body.push_str(&act.creator_action_ordinal.to_string());
+                body.push(',');
+                if act.context_free {
+                    body.push_str("\"context_free\":true,");
+                }
+                if act.elapsed != 0 {
+                    body.push_str("\"elapsed\":\"");
+                    body.push_str(&act.elapsed.to_string());
+                    body.push_str("\",");
+                }
                 if let Some(rv) = act.return_value {
-                    doc.insert(
-                        "return_value".into(),
-                        Value::from(hex::encode_upper(&inflated[rv.0..rv.0 + rv.1])),
-                    );
-                }
-                let ram: Vec<Value> = act
-                    .account_ram_deltas
-                    .iter()
-                    .filter(|(_, d)| *d != 0)
-                    .map(|(a, d)| {
-                        let mut m = Map::new();
-                        m.insert("account".into(), Value::from(trace::name_to_string(*a)));
-                        m.insert("delta".into(), Value::from(d.to_string()));
-                        Value::Object(m)
-                    })
-                    .collect();
-                if !ram.is_empty() {
-                    doc.insert("account_ram_deltas".into(), Value::Array(ram));
-                }
-                // flattened act
-                let mut act_out = Map::new();
-                act_out.insert("account".into(), Value::from(account.clone()));
-                act_out.insert("name".into(), Value::from(name.clone()));
-                let auth: Vec<Value> = act
-                    .authorization
-                    .iter()
-                    .map(|(actor, perm)| {
-                        let mut m = Map::new();
-                        m.insert("actor".into(), Value::from(trace::name_to_string(*actor)));
-                        m.insert(
-                            "permission".into(),
-                            Value::from(trace::name_to_string(*perm)),
-                        );
-                        Value::Object(m)
-                    })
-                    .collect();
-                act_out.insert("authorization".into(), Value::Array(auth));
-                let was_decoded = data_value.is_some();
-                match data_value {
-                    Some(v) => {
-                        act_out.insert("data".into(), v);
-                        stats.decoded.fetch_add(1, Relaxed);
-                    }
-                    None => {
-                        act_out.insert("data".into(), Value::from(hex::encode(data_bytes)));
-                        doc.insert("ds_error".into(), Value::Bool(true));
-                        stats.raw.fetch_add(1, Relaxed);
+                    if rv.1 > 0 {
+                        body.push_str("\"return_value\":");
+                        push_json_str(&mut body, &hex::encode_upper(&inflated[rv.0..rv.0 + rv.1]));
+                        body.push(',');
                     }
                 }
-                doc.insert("act".into(), Value::Object(act_out));
-                // usage on the first action of the transaction (extendFirstAction)
+                let mut ram_open = false;
+                for (a, d) in &act.account_ram_deltas {
+                    if *d == 0 {
+                        continue;
+                    }
+                    body.push_str(if ram_open {
+                        ","
+                    } else {
+                        "\"account_ram_deltas\":["
+                    });
+                    ram_open = true;
+                    body.push_str("{\"account\":");
+                    push_json_str(&mut body, &trace::name_to_string(*a));
+                    body.push_str(",\"delta\":\"");
+                    body.push_str(&d.to_string());
+                    body.push_str("\"}");
+                }
+                if ram_open {
+                    body.push_str("],");
+                }
                 if !usage_included {
-                    doc.insert("cpu_usage_us".into(), Value::from(tx.cpu_usage_us));
-                    doc.insert("net_usage_words".into(), Value::from(tx.net_usage_words));
+                    body.push_str("\"cpu_usage_us\":");
+                    body.push_str(&tx.cpu_usage_us.to_string());
+                    body.push(',');
+                    if tx.net_usage_words != 0 {
+                        body.push_str("\"net_usage_words\":");
+                        body.push_str(&tx.net_usage_words.to_string());
+                        body.push(',');
+                    }
                     usage_included = true;
                 }
-                // computed @-fields — only on decoded act.data, as Hyperion skips them on ds_error.
-                if was_decoded {
-                    process_action_data(&mut doc, &account, &name, index_transfer_memo);
+                if !decoded {
+                    body.push_str("\"ds_error\":true,");
                 }
+                body.push_str("\"act\":{\"account\":");
+                push_json_str(&mut body, &account);
+                body.push_str(",\"name\":");
+                push_json_str(&mut body, &name);
+                body.push_str(",\"authorization\":[");
+                for (i, (actor, perm)) in act.authorization.iter().enumerate() {
+                    if i > 0 {
+                        body.push(',');
+                    }
+                    body.push_str("{\"actor\":");
+                    push_json_str(&mut body, &trace::name_to_string(*actor));
+                    body.push_str(",\"permission\":");
+                    push_json_str(&mut body, &trace::name_to_string(*perm));
+                    body.push('}');
+                }
+                body.push(']');
+                if let Some(dp) = &data_part {
+                    body.push_str(",\"data\":");
+                    body.push_str(dp);
+                }
+                body.push_str("},");
+                body.push_str(&at_fragment);
 
-                // receipt object for grouping (action_receipt_v0 shape, rs_abieos renderings).
-                let mut rcpt = Map::new();
-                rcpt.insert(
-                    "receiver".into(),
-                    Value::from(trace::name_to_string(receipt.receiver)),
-                );
-                rcpt.insert(
-                    "act_digest".into(),
-                    Value::from(hex::encode_upper(receipt.act_digest)),
-                );
-                rcpt.insert(
-                    "global_sequence".into(),
-                    Value::from(receipt.global_sequence.to_string()),
-                );
-                rcpt.insert(
-                    "recv_sequence".into(),
-                    Value::from(receipt.recv_sequence.to_string()),
-                );
-                let authseq: Vec<Value> = receipt
-                    .auth_sequence
-                    .iter()
-                    .map(|(a, s)| {
-                        let mut m = Map::new();
-                        m.insert("account".into(), Value::from(trace::name_to_string(*a)));
-                        m.insert("sequence".into(), Value::from(s.to_string()));
-                        Value::Object(m)
-                    })
-                    .collect();
-                rcpt.insert("auth_sequence".into(), Value::Array(authseq));
-                rcpt.insert("code_sequence".into(), Value::from(receipt.code_sequence));
-                rcpt.insert("abi_sequence".into(), Value::from(receipt.abi_sequence));
+                // receipt object for receipts[] (act_digest/code_sequence/abi_sequence hoisted out).
+                let mut receipt_json = String::with_capacity(160);
+                receipt_json.push_str("{\"receiver\":");
+                push_json_str(&mut receipt_json, &trace::name_to_string(receipt.receiver));
+                receipt_json.push_str(",\"global_sequence\":\"");
+                receipt_json.push_str(&receipt.global_sequence.to_string());
+                receipt_json.push_str("\",\"recv_sequence\":\"");
+                receipt_json.push_str(&receipt.recv_sequence.to_string());
+                receipt_json.push_str("\",\"auth_sequence\":[");
+                for (i, (a, sq)) in receipt.auth_sequence.iter().enumerate() {
+                    if i > 0 {
+                        receipt_json.push(',');
+                    }
+                    receipt_json.push_str("{\"account\":");
+                    push_json_str(&mut receipt_json, &trace::name_to_string(*a));
+                    receipt_json.push_str(",\"sequence\":\"");
+                    receipt_json.push_str(&sq.to_string());
+                    receipt_json.push_str("\"}");
+                }
+                receipt_json.push_str("]}");
 
                 procs.push(Proc {
                     action_ordinal: act.action_ordinal as u64,
                     creator_action_ordinal: act.creator_action_ordinal as u64,
                     act_digest: hex::encode_upper(receipt.act_digest),
-                    receipt: Value::Object(rcpt),
-                    doc,
+                    code_sequence: receipt.code_sequence,
+                    abi_sequence: receipt.abi_sequence,
+                    receipt_json,
+                    body,
                 });
             }
             finalize_and_emit(procs, sink, stats);
@@ -836,9 +877,10 @@ fn worker(
     }
     if profile {
         eprintln!(
-            "[action-proto][profile] worker [{cs}..{ce}]: l1_handwalk={:.2}s actions_build={:.2}s",
+            "[action-proto][profile] worker [{cs}..{ce}]: l1_handwalk={:.2}s actions_build={:.2}s (of which l2_decode+parse={:.2}s)",
             d_l1.as_secs_f64(),
-            d_act.as_secs_f64()
+            d_act.as_secs_f64(),
+            d_l2.as_secs_f64()
         );
     }
     Ok(())
