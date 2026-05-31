@@ -46,6 +46,11 @@ struct Args {
     /// output NDJSON (omit to measure pure decode throughput)
     #[arg(long)]
     out: Option<String>,
+    /// COLD TIER: emit metadata-only delta docs — drop the `data`/`value` payload (served on demand
+    /// by `archive-server` from chain_state_history), keeping all searchable metadata + the
+    /// (block_num, code, scope, table, primary_key) key so the API/archive can fetch it back later.
+    #[arg(long, default_value_t = false)]
+    metadata_only: bool,
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
@@ -259,6 +264,7 @@ fn worker(
     stats: &Stats,
     failures: &Failures,
     sink: Option<&mpsc::Sender<String>>,
+    metadata_only: bool,
 ) -> Result<()> {
     let names = Abieos::new(); // name_to_string only — for the emitted doc / failure samples
     let mut reg = Registry::new(abi_index);
@@ -349,21 +355,30 @@ fn worker(
             } else {
                 stats.raw.fetch_add(1, Relaxed);
             }
-            // every present row produces a doc: decoded `data`, or raw `value` if undecodable
+            // every present row produces a doc: decoded `data`, or raw `value` if undecodable.
+            // COLD TIER (--metadata-only): drop the data/value payload entirely (served on demand by
+            // archive-server), keeping the metadata + the (block,code,scope,table,pk) lookup key.
             if let Some(tx) = sink {
                 let code_str = names.name_to_string(r.code).unwrap_or_default();
                 let scope = names.name_to_string(r.scope).unwrap_or_default();
                 let table = names.name_to_string(r.table).unwrap_or_default();
                 let payer = names.name_to_string(r.payer).unwrap_or_default();
-                let body = if decoded {
-                    format!("\"data\":{buf}")
+                let doc = if metadata_only {
+                    format!(
+                        "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\"}}",
+                        r.primary_key
+                    )
                 } else {
-                    format!("\"value\":\"{}\"", hex::encode(r.value))
+                    let body = if decoded {
+                        format!("\"data\":{buf}")
+                    } else {
+                        format!("\"value\":\"{}\"", hex::encode(r.value))
+                    };
+                    format!(
+                        "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\",{body}}}",
+                        r.primary_key
+                    )
                 };
-                let doc = format!(
-                    "{{\"present\":1,\"block_num\":{block_num},\"block_id\":\"{block_id}\",\"code\":\"{code_str}\",\"scope\":\"{scope}\",\"table\":\"{table}\",\"primary_key\":\"{}\",\"payer\":\"{payer}\",{body}}}",
-                    r.primary_key
-                );
                 let _ = tx.send(doc);
             }
             Ok(())
@@ -408,6 +423,7 @@ fn main() -> Result<()> {
         .map(|p| -> Result<Box<dyn Write + Send>> { Ok(Box::new(BufWriter::new(File::create(p)?))) })
         .transpose()?;
     let emit = out.is_some();
+    let metadata_only = args.metadata_only;
     let t0 = Instant::now();
 
     std::thread::scope(|s| {
@@ -435,7 +451,7 @@ fn main() -> Result<()> {
             let (ai, st, fl) = (abi_index.clone(), stats.clone(), failures.clone());
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, &fl, txc.as_ref()) {
+                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, &fl, txc.as_ref(), metadata_only) {
                     eprintln!("[delta-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));
