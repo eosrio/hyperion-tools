@@ -34,6 +34,7 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use tiny_http::{Header, Request, Response, Server};
 
+use abi_scanner::delta::read_varuint;
 use abi_scanner::disk::{decode_payload, is_ship_magic};
 use abi_scanner::trace::{self, Tx};
 
@@ -154,11 +155,89 @@ fn decode_action(
     handle.bin_to_json_into(&ty, data, out).map_err(|_| ())
 }
 
+/// Decode one contract_row `value` (raw bytes) for `table` (u64 name) of contract `code` against
+/// the ABI version active at `block`, writing the row JSON into `out`. `Err(())` on no-ABI /
+/// no-type-for-table / decode-fail. The DELTA analog of `decode_action` (port of delta-proto's
+/// `decode_at`): `decode_table_row_into` looks up the table's row struct type in the ABI and
+/// deserializes against it, with zero FFI on the rs_abieos rust-backend.
+fn decode_delta_row(
+    reg: &mut Registry,
+    out: &mut String,
+    code: u64,
+    table: u64,
+    value: &[u8],
+    block: u32,
+) -> std::result::Result<(), ()> {
+    let handle = reg.active(code, block).ok_or(())?;
+    handle
+        .decode_table_row_into(table, value, out)
+        .map_err(|_| ())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Delta (chain_state_history) row walking — ported verbatim from delta-proto. The inflated
+// payload is a `table_delta[]`; we walk it, parse `contract_row` rows, and key them by
+// (code, scope, table, primary_key) for the /deltas batch lookup.
+// ---------------------------------------------------------------------------------------------
+
+/// Walk every table_delta row, calling `f(table_name, present, row_data)`. (Port of delta-proto.)
+fn for_each_row<F: FnMut(&[u8], u8, &[u8])>(deltas: &[u8], mut f: F) -> Option<()> {
+    let mut off = 0usize;
+    let (n_tables, k) = read_varuint(deltas.get(off..)?)?;
+    off += k;
+    for _ in 0..n_tables {
+        let (_var, k) = read_varuint(deltas.get(off..)?)?;
+        off += k;
+        let (name_len, k) = read_varuint(deltas.get(off..)?)?;
+        off += k;
+        let name = deltas.get(off..off + name_len)?;
+        off += name_len;
+        let (rows, k) = read_varuint(deltas.get(off..)?)?;
+        off += k;
+        for _ in 0..rows {
+            let present = *deltas.get(off)?;
+            off += 1;
+            let (dlen, k) = read_varuint(deltas.get(off..)?)?;
+            off += k;
+            let data = deltas.get(off..off + dlen)?;
+            f(name, present, data);
+            off += dlen;
+        }
+    }
+    Some(())
+}
+
+/// Parse a `contract_row_v0` header to its (code, scope, table, pk, payer) names + the `value`
+/// length, returning the byte offset of `value` within `row` and its length. (Port of delta-proto's
+/// `parse_contract_row`, but returns an offset rather than a borrowed slice so the caller can map it
+/// back into the whole inflated buffer.)
+/// Layout: [varuint 0][code u64][scope u64][table u64][pk u64][payer u64][varuint vlen][value].
+fn parse_contract_row(row: &[u8]) -> Option<(u64, u64, u64, u64, usize, usize)> {
+    let (_v, k) = read_varuint(row)?;
+    let mut off = k;
+    let rd = |off: &mut usize| -> Option<u64> {
+        let n = u64::from_le_bytes(row.get(*off..*off + 8)?.try_into().ok()?);
+        *off += 8;
+        Some(n)
+    };
+    let code = rd(&mut off)?;
+    let scope = rd(&mut off)?;
+    let table = rd(&mut off)?;
+    let primary_key = rd(&mut off)?;
+    let _payer = rd(&mut off)?;
+    let (vlen, k) = read_varuint(row.get(off..)?)?;
+    off += k;
+    // bounds-check the value range exists, but return its position (not the slice)
+    row.get(off..off + vlen)?;
+    Some((code, scope, table, primary_key, off, vlen))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Frozen-log facts (read once at startup) and per-entry reader.
 // ---------------------------------------------------------------------------------------------
 
-/// Immutable facts about the frozen trace_history log, shared read-only across workers.
+/// Immutable facts about a frozen state-history log (trace_history or chain_state_history),
+/// shared read-only across workers.
 struct LogInfo {
     log_path: String,
     idx_path: String,
@@ -278,6 +357,153 @@ impl BlockCache {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Delta block reader + cache (chain_state_history). Mirrors the trace LogReader/BlockCache, but the
+// inflated payload is the raw `table_delta[]` bytes and the parsed product is a per-block map keyed
+// by (code, scope, table, primary_key) -> the `value` byte-range, built ONCE per block at read time.
+// ---------------------------------------------------------------------------------------------
+
+/// A single chain_state_history block read off disk: the inflated `table_delta[]` bytes plus a map
+/// from each present `contract_row`'s (code, scope, table, primary_key) to the byte-range of its
+/// `value` within `inflated`. Held together so the cache keeps both without dangling the ranges.
+struct DeltaBlockData {
+    inflated: Vec<u8>,
+    /// (code, scope_name, table, primary_key) -> (value_offset, value_len) into `inflated`.
+    /// `scope` is keyed by its NAME STRING (`trace::name_to_string`) — the exact form Hyperion stores
+    /// in the delta doc / `_id` and that the request echoes back. Antelope name encoding is NOT
+    /// bijective over arbitrary integer scopes (legal on WAX/EOS), so keying on the raw u64 would miss
+    /// those rows. `code`/`table` are always real names (round-trip safe), so they stay u64.
+    rows: HashMap<(u64, String, u64, u64), (usize, usize)>,
+}
+
+/// Per-thread handles for pulling one block out of the frozen chain_state_history log.
+struct DeltaReader {
+    idx: File,
+    log: File,
+    first_block: u32,
+}
+
+impl DeltaReader {
+    fn open(info: &LogInfo) -> Result<Self> {
+        Ok(Self {
+            idx: File::open(&info.idx_path)?,
+            log: File::open(&info.log_path)?,
+            first_block: info.first_block,
+        })
+    }
+
+    /// Read + inflate + walk block `n`'s contract_row deltas into a key->value-range map. Returns
+    /// `Ok(None)` if the entry inflates empty or the delta payload won't walk (treated as "no such
+    /// block content"); `Err` only on I/O / format faults. Caller checks the range first.
+    fn read_block(&mut self, n: u32) -> Result<Option<DeltaBlockData>> {
+        // index entry -> log offset
+        self.idx
+            .seek(SeekFrom::Start((n - self.first_block) as u64 * 8))?;
+        let mut ob = [0u8; 8];
+        self.idx.read_exact(&mut ob)?;
+        let pos = u64::from_le_bytes(ob);
+
+        // entry header at that offset
+        self.log.seek(SeekFrom::Start(pos))?;
+        let mut hdr = [0u8; 48];
+        self.log.read_exact(&mut hdr)?;
+        let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
+        if block_num != n {
+            bail!("index/log mismatch: asked block {n}, entry at offset {pos} is block {block_num}");
+        }
+        let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
+        let log_len = self.log.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
+        if payload_size > log_len {
+            bail!("payload_size {payload_size} at block {n} exceeds log length {log_len}");
+        }
+        let mut payload = vec![0u8; payload_size as usize];
+        self.log.read_exact(&mut payload)?;
+
+        let inflated = match decode_payload(&payload) {
+            Ok(d) if !d.is_empty() => d,
+            Ok(_) => return Ok(None), // empty entry — no deltas
+            Err(e) => bail!("inflate block {n}: {e}"),
+        };
+
+        // Walk the table_delta[] once, recording every present contract_row's value range. The
+        // ranges are offsets into `inflated`, which we keep alongside the map. A truncated/garbage
+        // delta returns None from for_each_row -> treat as no content.
+        let mut rows: HashMap<(u64, String, u64, u64), (usize, usize)> = HashMap::new();
+        let base = inflated.as_ptr() as usize;
+        let walked = for_each_row(&inflated, |name, present, data| {
+            if name != b"contract_row" || present != 1 {
+                return;
+            }
+            let Some((code, scope, table, primary_key, voff_in_row, vlen)) = parse_contract_row(data)
+            else {
+                return;
+            };
+            // `data` is a sub-slice of `inflated`; convert the value's in-row offset to an absolute
+            // offset into `inflated` via pointer arithmetic (both live in the same allocation).
+            let value_off = (data.as_ptr() as usize - base) + voff_in_row;
+            // First write for a given key wins (a block normally has one present row per key). The
+            // scope is keyed by its name string so it matches the request's echoed scope exactly.
+            rows.entry((code, trace::name_to_string(scope), table, primary_key))
+                .or_insert((value_off, vlen));
+        });
+        if walked.is_none() {
+            return Ok(None); // unparsable delta payload — treat as empty
+        }
+        if rows.is_empty() {
+            return Ok(None); // no present contract_row deltas in this block
+        }
+        Ok(Some(DeltaBlockData { inflated, rows }))
+    }
+}
+
+/// Tiny per-thread delta-block cache: a bounded ring of recently-read delta blocks. `None` slots
+/// mean "read but had no contract_row content" (cache the miss). Mirrors `BlockCache`.
+struct DeltaCache {
+    cap: usize,
+    slots: Vec<(u32, Option<DeltaBlockData>)>,
+    next: usize,
+}
+
+impl DeltaCache {
+    fn new(cap: usize) -> Self {
+        Self {
+            cap: cap.max(1),
+            slots: Vec::with_capacity(cap.max(1)),
+            next: 0,
+        }
+    }
+
+    fn find(&self, n: u32) -> Option<usize> {
+        self.slots.iter().position(|(b, _)| *b == n)
+    }
+
+    fn insert(&mut self, n: u32, data: Option<DeltaBlockData>) -> usize {
+        if let Some(i) = self.find(n) {
+            self.slots[i].1 = data;
+            return i;
+        }
+        if self.slots.len() < self.cap {
+            self.slots.push((n, data));
+            self.slots.len() - 1
+        } else {
+            let i = self.next;
+            self.slots[i] = (n, data);
+            self.next = (self.next + 1) % self.cap;
+            i
+        }
+    }
+
+    /// Read `n` from cache, or via `reader`, caching the result. Returns the slot index, or `Err`
+    /// only on a genuine I/O/format fault from `reader`.
+    fn get_or_read(&mut self, n: u32, reader: &mut DeltaReader) -> Result<usize> {
+        if let Some(i) = self.find(n) {
+            return Ok(i);
+        }
+        let data = reader.read_block(n)?;
+        Ok(self.insert(n, data))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Minimal JSON helpers (string escaping + name rendering) — kept inline, no serde re-serialize.
 // ---------------------------------------------------------------------------------------------
 
@@ -359,10 +585,16 @@ fn name_str(names: &Abieos, n: u64) -> String {
 // Request handling.
 // ---------------------------------------------------------------------------------------------
 
-/// Per-worker mutable state.
+/// Per-worker mutable state. The trace path (`reader`/`cache`, for /action,/block,/actions) and
+/// the delta path (`delta_reader`/`delta_cache`, for /deltas) each own their own File handles +
+/// block cache; the contract-ABI `reg` is shared by both (same per-block ABI lookup).
 struct Worker<'a> {
     reader: LogReader,
     cache: BlockCache,
+    /// `None` when this archive was started without a chain_state_history log (actions-only); in that
+    /// case POST /deltas answers 503 and the trace/GET endpoints are unaffected.
+    delta_reader: Option<DeltaReader>,
+    delta_cache: DeltaCache,
     reg: Registry<'a>,
     names: Abieos,
     scratch: String,
@@ -689,9 +921,10 @@ fn json_u64(v: &serde_json::Value) -> Option<u64> {
     v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
 }
 
-/// Parse the JSON array request body into `BatchItem`s. `Err(Reply)` carries the right status code:
-/// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds `MAX_BATCH_ITEMS`.
-fn parse_batch_body(req: &mut Request) -> std::result::Result<Vec<BatchItem>, Reply> {
+/// Read the request body bounded to `MAX_BATCH_BODY_BYTES` and parse it as a JSON array, applying the
+/// shared caps: 400 on read failure / malformed JSON / non-array, 413 on over-size body or
+/// over-`MAX_BATCH_ITEMS`. Used by both `/actions` and `/deltas`.
+fn read_batch_array(req: &mut Request) -> std::result::Result<Vec<serde_json::Value>, Reply> {
     // Read the body, bounded so a runaway POST can't exhaust memory. `Content-Length` is advisory;
     // we cap the actual read regardless.
     let mut buf = Vec::new();
@@ -718,6 +951,13 @@ fn parse_batch_body(req: &mut Request) -> std::result::Result<Vec<BatchItem>, Re
             &format!("too many items (max {MAX_BATCH_ITEMS})"),
         ));
     }
+    Ok(arr)
+}
+
+/// Parse the JSON array request body into `BatchItem`s. `Err(Reply)` carries the right status code:
+/// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds `MAX_BATCH_ITEMS`.
+fn parse_batch_body(req: &mut Request) -> std::result::Result<Vec<BatchItem>, Reply> {
+    let arr = read_batch_array(req)?;
 
     let mut items = Vec::with_capacity(arr.len());
     for el in &arr {
@@ -868,8 +1108,215 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
     Reply::json(200, body)
 }
 
+// ---------------------------------------------------------------------------------------------
+// POST /deltas — the delta analog of POST /actions. Hydrates contract_row values for many cold-tier
+// delta docs in one round-trip. Mirrors handle_actions_batch 1:1 (parse caps, group-by-block,
+// decode-each-block-once, work-bound, input-order emit, copy-out-before-decode borrow discipline).
+// ---------------------------------------------------------------------------------------------
+
+/// One parsed `/deltas` request item: the (block, code, scope, table, primary_key) of one
+/// contract_row to hydrate. `code/scope/table` are kept as both the resolved u64 name (for the
+/// per-block map lookup) and the original request string (echoed back verbatim).
+struct DeltaItem {
+    block_num: u64,
+    code: u64,
+    table: u64,
+    primary_key: u64,
+    code_str: String,
+    /// The scope NAME STRING (verbatim from the request) — also the per-block map's scope key.
+    scope_str: String,
+    table_str: String,
+}
+
+/// A resolved `/deltas` entry, captured during the per-block pass so the cache borrow is released
+/// before decoding (which borrows the registry — a disjoint Worker field). `value` is the owned
+/// contract_row value bytes copied out of the inflated delta block.
+struct ResolvedDelta {
+    value: Vec<u8>,
+}
+
+/// Parse the JSON array request body into `DeltaItem`s. `Err(Reply)` carries the right status code:
+/// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds the caps. The
+/// `primary_key` accepts a u64 number OR a decimal string (like /actions' global_sequence).
+fn parse_deltas_body(req: &mut Request, names: &Abieos) -> std::result::Result<Vec<DeltaItem>, Reply> {
+    let arr = read_batch_array(req)?;
+
+    let mut items = Vec::with_capacity(arr.len());
+    for el in &arr {
+        let (Some(bn), Some(code_str), Some(scope_str), Some(table_str), Some(pk)) = (
+            el.get("block_num").and_then(|x| x.as_u64()),
+            el.get("code").and_then(|x| x.as_str()),
+            el.get("scope").and_then(|x| x.as_str()),
+            el.get("table").and_then(|x| x.as_str()),
+            el.get("primary_key").and_then(json_u64),
+        ) else {
+            return Err(Reply::err(
+                400,
+                "each item needs numeric block_num, string code/scope/table, and number-or-string primary_key",
+            ));
+        };
+        // `code`/`table` are always real Antelope names — resolve to u64 for the map key + decode.
+        // `scope` is matched by its NAME STRING (see DeltaBlockData.rows), because arbitrary integer
+        // scopes are not bijective under name encoding, so it is intentionally NOT resolved here.
+        let (Ok(code), Ok(table)) = (
+            names.string_to_name(code_str),
+            names.string_to_name(table_str),
+        ) else {
+            return Err(Reply::err(400, "code/table must be valid Antelope names"));
+        };
+        items.push(DeltaItem {
+            block_num: bn,
+            code,
+            table,
+            primary_key: pk,
+            code_str: code_str.to_string(),
+            scope_str: scope_str.to_string(),
+            table_str: table_str.to_string(),
+        });
+    }
+    Ok(items)
+}
+
+/// Append the echoed request key (block_num, code, scope, table, primary_key) of a `/deltas` item.
+/// `primary_key` is emitted as a string (the canonical Hyperion delta-doc form).
+fn append_delta_key(
+    out: &mut String,
+    block_num: u64,
+    code: &str,
+    scope: &str,
+    table: &str,
+    primary_key: u64,
+) {
+    out.push_str("{\"block_num\":");
+    out.push_str(&block_num.to_string());
+    out.push_str(",\"code\":");
+    push_json_str(out, code);
+    out.push_str(",\"scope\":");
+    push_json_str(out, scope);
+    out.push_str(",\"table\":");
+    push_json_str(out, table);
+    out.push_str(",\"primary_key\":\"");
+    out.push_str(&primary_key.to_string());
+    out.push('"');
+}
+
+/// `POST /deltas` — hydrate contract_row values for many cold-tier deltas in one round-trip. The
+/// request body is a JSON array of `{block_num, code, scope, table, primary_key}`; the response is
+/// `{"deltas":[...]}` in the SAME order as the request. Each distinct block is read + walked ONCE
+/// (shared per-thread delta cache), then every requested key within it is resolved.
+fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
+    // Defensive: the router only reaches here when a delta log was opened, so delta_reader is Some.
+    if w.delta_reader.is_none() {
+        return Reply::err(503, "delta archive unavailable on this node (no chain_state_history log)");
+    }
+    let items = match parse_deltas_body(req, &w.names) {
+        Ok(v) => v,
+        Err(reply) => return reply,
+    };
+
+    // Slot per input position; `None` until resolved (and left `None` => not-found).
+    let mut resolved: Vec<Option<ResolvedDelta>> = Vec::with_capacity(items.len());
+    resolved.resize_with(items.len(), || None);
+
+    // Group input positions by block so we walk each distinct block exactly once. Items whose block
+    // is out of the archived range are never grouped -> stay not-found.
+    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
+            continue; // out of range -> not found
+        }
+        by_block.entry(it.block_num as u32).or_default().push(i);
+    }
+
+    // Bound the per-request decode work (see MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE): stop resolving
+    // once either the distinct-block cap or the wall-clock deadline is hit. Positions in any block
+    // we don't reach stay `None` -> emitted as `found:false` below — best-effort and contract-safe.
+    let started = Instant::now();
+    let mut blocks_done = 0usize;
+    for (&block_num, positions) in &by_block {
+        if blocks_done >= MAX_BLOCKS_PER_BATCH || started.elapsed() >= BATCH_DEADLINE {
+            break;
+        }
+        blocks_done += 1;
+        // Read (or hit cache) + walk the delta block once; its rows map is keyed by
+        // (code, scope, table, primary_key) -> value byte-range into the inflated buffer.
+        let slot = match w.delta_cache.get_or_read(block_num, w.delta_reader.as_mut().unwrap()) {
+            Ok(s) => s,
+            // A genuine I/O/format fault on one block must not abort the whole batch; leave those
+            // positions not-found and carry on.
+            Err(_) => continue,
+        };
+        let Some(_block) = w.delta_cache.slots[slot].1.as_ref() else {
+            continue; // block had no contract_row deltas -> all its positions stay not-found
+        };
+
+        for &i in positions {
+            let it = &items[i];
+            let key = (it.code, it.scope_str.clone(), it.table, it.primary_key);
+            let Some(&(off, len)) = w.delta_cache.slots[slot].1.as_ref().unwrap().rows.get(&key)
+            else {
+                continue; // no such row in this block -> not found
+            };
+            // Copy the value slice OUT of the cached block (releases the `w.delta_cache` borrow) so
+            // the decode below can mutably borrow the disjoint reg/scratch Worker fields.
+            let value: Vec<u8> =
+                w.delta_cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
+            resolved[i] = Some(ResolvedDelta { value });
+        }
+    }
+
+    // Emit in INPUT order. Decode each resolved value here (borrowing reg/scratch). On decode
+    // failure emit the raw value as UPPERCASE hex under "value" instead of "data" — every found row
+    // still gets an answer.
+    let mut body = String::with_capacity(64 + items.len() * 96);
+    body.push_str("{\"deltas\":[");
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            body.push(',');
+        }
+        append_delta_key(
+            &mut body,
+            item.block_num,
+            &item.code_str,
+            &item.scope_str,
+            &item.table_str,
+            item.primary_key,
+        );
+        match &resolved[i] {
+            Some(r) => {
+                w.scratch.clear();
+                let blk = item.block_num as u32;
+                let Worker { reg, scratch, .. } = w;
+                // Decode against the row's block; on failure retry against block-1's ABI to handle a
+                // setabi-in-the-same-block boundary (mirrors delta-proto's recovery) before falling
+                // back to raw hex. Either way every found row still gets an answer.
+                let decoded = decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk).is_ok()
+                    || (blk > 1 && {
+                        scratch.clear();
+                        decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk - 1).is_ok()
+                    });
+                if decoded {
+                    body.push_str(",\"data\":");
+                    body.push_str(scratch);
+                } else {
+                    // LOWERCASE hex to match delta-proto (the Hyperion-validated producer of the cold
+                    // doc): a hydrated undecodable `value` is then byte-identical to the hot doc.
+                    body.push_str(",\"value\":");
+                    push_json_str(&mut body, &hex::encode(&r.value));
+                }
+                body.push_str(",\"found\":true}");
+            }
+            None => {
+                body.push_str(",\"found\":false}");
+            }
+        }
+    }
+    body.push_str("]}");
+    Reply::json(200, body)
+}
+
 /// Route + handle one request, never panicking the worker thread.
-fn handle(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
+fn handle(w: &mut Worker, info: &LogInfo, delta_info: Option<&LogInfo>, req: &mut Request) -> Reply {
     let raw = req.url().to_string();
     let (path, query) = match raw.split_once('?') {
         Some((p, q)) => (p, q),
@@ -877,10 +1324,14 @@ fn handle(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
     };
     let method = req.method().clone();
 
-    // POST /actions — batch hydration (reads the request body).
+    // POST /actions or /deltas — batch hydration (reads the request body).
     if method == tiny_http::Method::Post {
         return match path {
             "/actions" => handle_actions_batch(w, info, req),
+            "/deltas" => match delta_info {
+                Some(di) => handle_deltas_batch(w, di, req),
+                None => Reply::err(503, "delta archive unavailable on this node (no chain_state_history log)"),
+            },
             _ => Reply::err(404, "unknown endpoint"),
         };
     }
@@ -917,10 +1368,17 @@ fn respond(req: Request, reply: Reply) {
     let _ = req.respond(response);
 }
 
-fn worker_loop(server: Arc<Server>, info: Arc<LogInfo>, abi_index: Arc<AbiIndex>) -> Result<()> {
+fn worker_loop(
+    server: Arc<Server>,
+    info: Arc<LogInfo>,
+    delta_info: Option<Arc<LogInfo>>,
+    abi_index: Arc<AbiIndex>,
+) -> Result<()> {
     let mut w = Worker {
         reader: LogReader::open(&info)?,
         cache: BlockCache::new(64),
+        delta_reader: delta_info.as_deref().map(DeltaReader::open).transpose()?,
+        delta_cache: DeltaCache::new(64),
         reg: Registry::new(&abi_index),
         names: Abieos::new(),
         scratch: String::new(),
@@ -933,7 +1391,7 @@ fn worker_loop(server: Arc<Server>, info: Arc<LogInfo>, abi_index: Arc<AbiIndex>
         // Defensive: a handler should never panic, but if one ever does, catch it so the worker
         // thread survives and keeps serving.
         let reply = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            handle(&mut w, &info, &mut req)
+            handle(&mut w, &info, delta_info.as_deref(), &mut req)
         })) {
             Ok(r) => r,
             Err(_) => Reply::err(500, "internal error"),
@@ -943,23 +1401,18 @@ fn worker_loop(server: Arc<Server>, info: Arc<LogInfo>, abi_index: Arc<AbiIndex>
     Ok(())
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    eprintln!("[archive-server] loading ABI index {} ...", args.abi_index);
-    let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
-    eprintln!(
-        "[archive-server] {} contracts in ABI index",
-        abi_index.len()
-    );
-
-    let log_path = format!("{}/trace_history.log", args.from_disk);
-    let idx_path = format!("{}/trace_history.index", args.from_disk);
+/// Open one frozen state-history log pair (`<dir>/<stem>.{log,index}`), validate its SHiP magic, and
+/// compute the served block range from the first entry header + the index length. Shared by both the
+/// trace (actions) and chain_state_history (deltas) logs.
+fn open_log_info(dir: &str, stem: &str) -> Result<LogInfo> {
+    let log_path = format!("{dir}/{stem}.log");
+    let idx_path = format!("{dir}/{stem}.index");
 
     // first_block from the first entry header (and validate the ship magic).
     let mut f = File::open(&log_path).with_context(|| format!("open {log_path}"))?;
     let mut hdr = [0u8; 48];
-    f.read_exact(&mut hdr).context("read first header")?;
+    f.read_exact(&mut hdr)
+        .with_context(|| format!("read first header of {log_path}"))?;
     if !is_ship_magic(u64::from_le_bytes(hdr[0..8].try_into().unwrap())) {
         bail!("{log_path} is not a state-history log (bad ship magic)");
     }
@@ -974,12 +1427,38 @@ fn main() -> Result<()> {
     }
     let last_block = first_block + n_idx - 1;
 
-    let info = Arc::new(LogInfo {
+    Ok(LogInfo {
         log_path,
         idx_path,
         first_block,
         last_block,
-    });
+    })
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+
+    eprintln!("[archive-server] loading ABI index {} ...", args.abi_index);
+    let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
+    eprintln!(
+        "[archive-server] {} contracts in ABI index",
+        abi_index.len()
+    );
+
+    // Both the trace (actions) and the chain_state_history (deltas) logs live in the same
+    // --from-disk dir, with identical SHiP framing; open each the same way.
+    let info = Arc::new(open_log_info(&args.from_disk, "trace_history")?);
+    // The delta (chain_state_history) log is OPTIONAL: an actions-only archive (or one whose delta
+    // range isn't frozen in this dir) must still boot and serve /action, /block, /health and POST
+    // /actions. When it's absent, POST /deltas answers 503 and everything else is unaffected.
+    let delta_info = match open_log_info(&args.from_disk, "chain_state_history") {
+        Ok(li) => Some(Arc::new(li)),
+        Err(e) => {
+            eprintln!("[archive-server] chain_state_history not available ({e:#}) — POST /deltas disabled; actions + GET endpoints unaffected");
+            None
+        }
+    };
+    let (first_block, last_block) = (info.first_block, info.last_block);
 
     let addr = format!("0.0.0.0:{}", args.port);
     let server = Arc::new(
@@ -989,15 +1468,25 @@ fn main() -> Result<()> {
     eprintln!(
         "[archive-server] serving blocks [{first_block}..{last_block}] on http://{addr} with {threads} worker(s)"
     );
+    match &delta_info {
+        Some(di) => eprintln!(
+            "[archive-server]   delta blocks [{}..{}] (chain_state_history)",
+            di.first_block, di.last_block
+        ),
+        None => eprintln!("[archive-server]   delta blocks: none — POST /deltas disabled"),
+    }
     eprintln!("[archive-server]   GET /action?block_num=<N>&global_sequence=<G>");
     eprintln!("[archive-server]   GET /block/<N>");
     eprintln!("[archive-server]   GET /health");
+    eprintln!("[archive-server]   POST /actions  [{{block_num, global_sequence}}, ...]");
+    eprintln!("[archive-server]   POST /deltas   [{{block_num, code, scope, table, primary_key}}, ...]");
 
     let mut handles = Vec::new();
     for i in 0..threads {
-        let (srv, inf, ai) = (server.clone(), info.clone(), abi_index.clone());
+        let (srv, inf, dinf, ai) =
+            (server.clone(), info.clone(), delta_info.clone(), abi_index.clone());
         handles.push(std::thread::spawn(move || {
-            if let Err(e) = worker_loop(srv, inf, ai) {
+            if let Err(e) = worker_loop(srv, inf, dinf, ai) {
                 eprintln!("[archive-server] worker {i} FAILED: {e:#}");
             }
         }));
