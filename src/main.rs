@@ -58,6 +58,45 @@ struct Args {
     stream_threshold: u64,
 }
 
+/// Open `path` for resumable appending, first trimming any partial trailing line an
+/// interrupted run may have left — so a resumed write never concatenates a new record onto an
+/// incomplete one. Anything trimmed sits at/after the checkpoint watermark and is re-emitted on
+/// resume, so it is never lost; the output stays clean NDJSON.
+fn open_resumable_out(path: &str) -> Result<File> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false) // open the existing file in place; we trim only the partial last line
+        .open(path)?;
+    let len = f.seek(SeekFrom::End(0))?;
+    if len == 0 {
+        return Ok(f);
+    }
+    f.seek(SeekFrom::Start(len - 1))?;
+    let mut last = [0u8; 1];
+    f.read_exact(&mut last)?;
+    if last[0] != b'\n' {
+        // unterminated trailing line — drop it back to the last complete record
+        let window = len.min(1 << 20); // a record is far smaller than 1 MiB; scan that tail
+        let start = len - window;
+        f.seek(SeekFrom::Start(start))?;
+        let mut buf = vec![0u8; window as usize];
+        f.read_exact(&mut buf)?;
+        match buf.iter().rposition(|&b| b == b'\n') {
+            Some(pos) => f.set_len(start + pos as u64 + 1)?,
+            // no newline in the scanned tail: isolate the stray line so the next record is clean
+            None => {
+                f.seek(SeekFrom::End(0))?;
+                f.write_all(b"\n")?;
+            }
+        }
+    }
+    f.seek(SeekFrom::End(0))?;
+    Ok(f)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -68,11 +107,7 @@ async fn main() -> Result<()> {
         .is_some_and(|c| std::path::Path::new(c).exists());
     let out: Box<dyn Write + Send> = match &args.out {
         Some(path) if resuming => Box::new(BufWriter::new(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .context("open out file (append/resume)")?,
+            open_resumable_out(path).context("open out file (append/resume)")?,
         )),
         Some(path) => Box::new(BufWriter::new(
             File::create(path).context("create out file")?,
@@ -113,4 +148,60 @@ async fn main() -> Result<()> {
         out,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// A resumed append must trim a partial trailing line (interrupted mid-write) so the next
+    /// record is a clean line, never concatenated onto the incomplete one.
+    #[test]
+    fn resumable_out_trims_partial_trailing_line() {
+        let dir = std::env::temp_dir().join(format!("abi-scanner-resume-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.ndjson");
+        let p = path.to_str().unwrap();
+        // two complete records + an interrupted partial (no trailing newline)
+        std::fs::write(p, b"{\"a\":1}\n{\"b\":2}\n{\"partial\":").unwrap();
+        {
+            let mut f = open_resumable_out(p).unwrap();
+            f.write_all(b"{\"c\":3}\n").unwrap();
+        }
+        let mut s = String::new();
+        std::fs::File::open(p)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            s, "{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n",
+            "partial line trimmed and next record clean; got {s:?}"
+        );
+    }
+
+    /// A clean file (ends with newline) is appended to as-is.
+    #[test]
+    fn resumable_out_keeps_clean_file() {
+        let dir = std::env::temp_dir().join(format!("abi-scanner-resume2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.ndjson");
+        let p = path.to_str().unwrap();
+        std::fs::write(p, b"{\"a\":1}\n").unwrap();
+        {
+            let mut f = open_resumable_out(p).unwrap();
+            f.write_all(b"{\"b\":2}\n").unwrap();
+        }
+        let mut s = String::new();
+        std::fs::File::open(p)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            s, "{\"a\":1}\n{\"b\":2}\n",
+            "clean file appended as-is; got {s:?}"
+        );
+    }
 }
