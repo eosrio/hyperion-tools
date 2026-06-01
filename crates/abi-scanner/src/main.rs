@@ -51,10 +51,12 @@ struct Args {
     /// ~8 threads with small chunks was the measured sweet spot on a ZFS NVMe array.
     #[arg(long, default_value_t = 20_000)]
     chunk_size: u64,
-    /// Disk: entries whose payload is at least this many bytes are stream-inflated only up to
-    /// the account table (skipping the rest), instead of read + inflated whole. This avoids a
-    /// multi-GB read/allocation on a snapshot init-delta. Default 16 MiB.
-    #[arg(long, default_value_t = 16 << 20)]
+    /// Disk: entries whose payload is at least this many bytes are stream-inflated only up to the
+    /// account table (the first table; the rest is skipped) instead of read + inflated whole.
+    /// Default 0 = stream every block, so a block with no setabi decompresses only its first table
+    /// header instead of its whole (often huge) delta. Raise it to fall back to whole-payload
+    /// inflate for entries below the threshold.
+    #[arg(long, default_value_t = 0)]
     stream_threshold: u64,
 }
 

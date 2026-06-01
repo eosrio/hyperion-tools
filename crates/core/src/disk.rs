@@ -115,13 +115,19 @@ fn scan_account_streaming_entry<R: std::io::Read>(
     }
     let mut z = flate2::read::ZlibDecoder::new(log);
     let n_tables = read_varuint_r(&mut z)?;
-    for _ in 0..n_tables {
+    for ti in 0..n_tables {
         let _variant = read_varuint_r(&mut z)?;
         let name_len = read_varuint_r(&mut z)? as usize;
         let mut name = vec![0u8; name_len];
         z.read_exact(&mut name)?;
         let n_rows = read_varuint_r(&mut z)?;
         let is_account = name == b"account";
+        // `account` is the first table in Leap/Spring's fixed delta order, so if the first present
+        // table isn't `account`, this block carries no setabi — stop before inflating any further
+        // (the dense contract_row table that typically follows is never decompressed or walked).
+        if !is_account && ti == 0 {
+            return Ok(());
+        }
         for _ in 0..n_rows {
             let mut present = [0u8; 1];
             z.read_exact(&mut present)?;
@@ -192,9 +198,11 @@ fn worker_scan(
         }
         let entry_end = pos + 48 + payload_size;
         if payload_size >= stream_threshold {
-            // Huge entry (e.g. a snapshot init-delta spanning thousands of 128K records):
-            // stream-inflate only up to the account table, then seek past the rest — avoids
-            // reading + inflating + allocating the whole multi-GB payload.
+            // Default path (stream_threshold = 0 -> every entry): stream-inflate only up to the
+            // account table (the first table emitted), then seek past the rest. A block with no
+            // setabi decompresses only its first table header instead of its whole delta — and a
+            // snapshot init-delta still avoids a multi-GB read/allocation. Raise --stream-threshold
+            // to fall back to whole-payload inflate (the branch below) for entries beneath it.
             if let Err(e) = scan_account_streaming_entry(&mut log, &abieos, block_num, sink) {
                 eprintln!("[disk] block {block_num}: streaming scan: {e}");
             }
