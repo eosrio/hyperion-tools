@@ -620,13 +620,6 @@ impl Reply {
             json: true,
         }
     }
-    fn text(code: u16, body: &str) -> Self {
-        Self {
-            code,
-            body: body.to_string(),
-            json: false,
-        }
-    }
     fn err(code: u16, msg: &str) -> Self {
         let mut b = String::new();
         b.push_str("{\"error\":");
@@ -654,6 +647,20 @@ fn parse_query(q: &str) -> HashMap<&str, &str> {
         m.insert(k, v);
     }
     m
+}
+
+/// `GET /health` — liveness plus the archived block ranges this server can serve, so integrators
+/// can discover coverage instead of probing for it. `deltas` is `null` when this node has no
+/// `chain_state_history` log (contract_row hydration / `POST /deltas` unavailable).
+fn handle_health(info: &LogInfo, delta_info: Option<&LogInfo>) -> Reply {
+    let range =
+        |i: &LogInfo| serde_json::json!({"first_block": i.first_block, "last_block": i.last_block});
+    let body = serde_json::json!({
+        "status": "ok",
+        "actions": range(info),
+        "deltas": delta_info.map(range),
+    });
+    Reply::json(200, body.to_string())
 }
 
 /// `GET /action?block_num=N&global_sequence=G` — find the single action_trace in block N whose
@@ -1390,7 +1397,7 @@ fn handle(
         return Reply::err(405, "method not allowed");
     }
     match path {
-        "/health" => Reply::text(200, "ok"),
+        "/health" => handle_health(info, delta_info),
         "/action" => handle_action(w, info, query),
         p if p.starts_with("/block/") => {
             let tail = &p["/block/".len()..];
@@ -1524,7 +1531,7 @@ fn main() -> Result<()> {
     }
     eprintln!("[archive-server]   GET /action?block_num=<N>&global_sequence=<G>");
     eprintln!("[archive-server]   GET /block/<N>");
-    eprintln!("[archive-server]   GET /health");
+    eprintln!("[archive-server]   GET /health   (status + archived block ranges)");
     eprintln!("[archive-server]   POST /actions  [{{block_num, global_sequence}}, ...]");
     eprintln!(
         "[archive-server]   POST /deltas   [{{block_num, code, scope, table, primary_key}}, ...]"
