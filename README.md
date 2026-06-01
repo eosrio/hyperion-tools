@@ -61,7 +61,7 @@ The disk path bypasses nodeos's single-threaded SHiP serializer entirely, so it 
 ```bash
 # whole chain (end is clamped to the last committed block) -> portable snapshot
 abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
-  --threads 12 --out wax-abi-snapshot.ndjson
+  --threads 12 --out abi-snapshot.ndjson
 ```
 
 - `--threads N` parallel readers pull small chunks from a shared cursor (work-stealing), so every thread stays busy to the end even though recent blocks are far denser than early ones. Throughput scales ~linearly to the core count; don't exceed physical cores.
@@ -73,10 +73,10 @@ For long full-chain scans, pass `--checkpoint <file>` to make the scan **stop-an
 
 ```bash
 abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
-  --threads 12 --out wax-abi.ndjson --checkpoint wax.ckpt
+  --threads 12 --out abi.ndjson --checkpoint chain.ckpt
 # ...interrupted... just run the same line again — it resumes from the checkpoint:
 abi-scanner --from-disk /data/nodeos/state-history --start 2 --end 999999999 \
-  --threads 12 --out wax-abi.ndjson --checkpoint wax.ckpt
+  --threads 12 --out abi.ndjson --checkpoint chain.ckpt
 ```
 
 Once complete, re-running is a no-op. To **catch up new blocks** later (the chain advanced), re-run the same command: it resumes from the prior end and indexes only the new blocks. Blocks scanned-but-not-yet-checkpointed at the moment of an interruption are re-scanned on resume — harmless, since abi-index docs are keyed by `block + account` (idempotent on `_bulk`).
@@ -95,11 +95,11 @@ Measured on **Telos (Spring 1.2.2)**: a node restored from a ~1.6 GB snapshot pr
 ### SHiP (remote node or fleet-router)
 
 ```bash
-abi-scanner --ship ws://node:8080 --start 2 --end 999999999 --out wax-abi-snapshot.ndjson
+abi-scanner --ship ws://node:8080 --start 2 --end 999999999 --out abi-snapshot.ndjson
 
 # fan out across a fleet of nodes via fleet-router
 abi-scanner --ship ws://fleet-router:18080 --start 2 --end 999999999 \
-  --connections 16 --in-flight 200 --out wax-abi-snapshot.ndjson
+  --connections 16 --in-flight 200 --out abi-snapshot.ndjson
 ```
 
 ### Ingest into Elasticsearch
@@ -107,9 +107,9 @@ abi-scanner --ship ws://fleet-router:18080 --start 2 --end 999999999 \
 Each line is a complete abi-index doc (`_id = block + account`). A minimal bulk ingest:
 
 ```bash
-awk '{print "{\"index\":{\"_id\":\"" NR "\"}}"; print}' wax-abi-snapshot.ndjson \
+awk '{print "{\"index\":{\"_id\":\"" NR "\"}}"; print}' abi-snapshot.ndjson \
   | curl -s -H 'content-type: application/x-ndjson' --data-binary @- \
-    "http://localhost:9200/wax-abi-v1/_bulk" > /dev/null
+    "http://localhost:9200/<chain>-abi-v1/_bulk" > /dev/null
 ```
 
 (Or derive `_id` as `block + account` to match Hyperion exactly.)
@@ -143,7 +143,7 @@ The HTTP server behind Hyperion v4.5 **tiered storage**. Cold-tier ES documents 
 
 ```bash
 archive-server --from-disk /data/nodeos/state-history \
-  --abi-index wax-abi.ndjson --port 8088
+  --abi-index abi.ndjson --port 8088
 ```
 
 | endpoint | purpose |
@@ -167,10 +167,10 @@ The batch endpoints group requested positions by block so each block is read and
 The prototype read path for the next-gen indexer: decode Hyperion-shaped action/delta documents straight from the on-disk logs, at core-scaling throughput, with no `ship-0` serializer in the loop. Both emit NDJSON (or, for `action-proto`, straight to Elasticsearch) and support a **cold-tier metadata-only** mode that omits the heavy payload the `archive-server` re-serves on demand.
 
 ```bash
-action-proto --from-disk /data/nodeos/state-history --abi-index wax-abi.ndjson \
-  --start 2 --end 999999999 --threads 12 --out wax-actions.ndjson
-delta-proto  --from-disk /data/nodeos/state-history --abi-index wax-abi.ndjson \
-  --start 2 --end 999999999 --threads 12 --out wax-deltas.ndjson
+action-proto --from-disk /data/nodeos/state-history --abi-index abi.ndjson \
+  --start 2 --end 999999999 --threads 12 --out actions.ndjson
+delta-proto  --from-disk /data/nodeos/state-history --abi-index abi.ndjson \
+  --start 2 --end 999999999 --threads 12 --out deltas.ndjson
 ```
 
 ## `es-load` — Elasticsearch write-ceiling benchmark
