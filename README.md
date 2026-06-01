@@ -1,6 +1,6 @@
 # abi-scanner
 
-[![CI](https://github.com/eosrio/abi-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/eosrio/abi-scanner/actions/workflows/ci.yml)
+[![CI](https://github.com/eosrio/hyperion-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/eosrio/hyperion-tools/actions/workflows/ci.yml)
 
 A high-performance **Antelope ABI scanner**. It extracts every contract ABI version (`setabi`) across a chain's history into a portable, **Elasticsearch-ingestible** snapshot — either by reading the nodeos **state-history log directly off disk** (fastest, no nodeos load) or by streaming **SHiP** from a node/[fleet-router](https://github.com/eosrio/fleet-router).
 
@@ -26,8 +26,8 @@ The disk path bypasses nodeos's single-threaded SHiP serializer entirely, so it 
 Requires a Rust toolchain (1.74+). No C++/clang needed — the pure-Rust abieos backend is used.
 
 ```bash
-git clone https://github.com/eosrio/abi-scanner
-cd abi-scanner
+git clone https://github.com/eosrio/hyperion-tools
+cd hyperion-tools
 cargo build --release
 # binary at target/release/abi-scanner
 ```
