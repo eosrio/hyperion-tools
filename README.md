@@ -17,7 +17,7 @@ The zero-copy state-history deserializer at the core originated in EOS Rio's **[
 | **`archive-server`** | binary · v4.5 | On-demand tiered-storage archive: serves action `act.data` and `contract_row` delta values from frozen state-history logs over HTTP, so cold-tier ES docs can drop the heavy payloads and hydrate on read. |
 | **`action-proto`** | binary · experimental | Direct-from-disk action reader: decodes `action_traces` from `trace_history` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). The next-gen indexer read path. |
 | **`delta-proto`** | binary · experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas from `chain_state_history` into Hyperion-shaped delta NDJSON. |
-| **`es-load`** | binary · tooling | Fast, GIL-free parallel NDJSON → Elasticsearch `_bulk` loader for measuring the ES write ceiling. Loopback-only by default. |
+| **`es-load`** | binary · tooling | Fast, multi-threaded NDJSON → Elasticsearch `_bulk` loader for measuring the ES write ceiling. Loopback-only by default. |
 | **`slice-log`** | binary · tooling | Extracts a rebased block-range slice of a state-history ship log (or the block log), read-only, for local ground-truth testing of the direct-from-disk tools. |
 
 > **Maturity:** `abi-scanner` is production-ready (it builds the published ABI snapshots). `archive-server` powers the v4.5 tiered-storage path. `action-proto`/`delta-proto` are the direct-from-disk indexer **prototypes** — the road to replacing the `ship-0` serializer entirely. `es-load`/`slice-log` are local benchmarking / test-fixture tooling.
@@ -175,7 +175,7 @@ delta-proto  --from-disk /data/nodeos/state-history --abi-index wax-abi.ndjson \
 
 ## `es-load` — Elasticsearch write-ceiling benchmark
 
-Fast, GIL-free parallel `_bulk` loader that applies Hyperion's `_id`/`_index` rules, for measuring how fast a given ES cluster can actually ingest (the system write ceiling, typically ~3–4× slower than decode). **Loopback-only by default** — it refuses a non-local ES target unless `BENCH_ALLOW_EXTERNAL_ES=1` is set, so a benchmark can never accidentally hit production.
+Fast, multi-threaded `_bulk` loader (real OS-thread posters) that applies Hyperion's `_id`/`_index` rules — fast enough that ES, not the loader, is the bottleneck, so it measures the true write ceiling (typically ~3–4× slower than decode). **Loopback-only by default** — it refuses a non-local ES target unless `BENCH_ALLOW_EXTERNAL_ES=1` is set, so a benchmark can never accidentally hit production. (`bench/` also ships a small Python `bulk-load.py` for quick checks, but it's GIL-bound — use `es-load` for the actual ceiling.)
 
 ## `slice-log` — local test fixtures
 

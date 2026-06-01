@@ -1,6 +1,6 @@
 [package]
 name = "es-load"
-description = "Fast parallel, GIL-free NDJSON -> Elasticsearch _bulk loader (local write-ceiling benchmarking), applying the Hyperion _id/_index rules. Loopback-only by default."
+description = "Fast, multi-threaded NDJSON -> Elasticsearch _bulk loader (local write-ceiling benchmarking), applying the Hyperion _id/_index rules. Loopback-only by default."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
