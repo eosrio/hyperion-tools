@@ -1,0 +1,28 @@
+[package]
+name = "hyperion-ship"
+description = "Antelope State-History (SHiP) read + decode core for the hyperion-tools toolkit: the parallel direct-from-disk state-history reader, trace/delta zero-copy hand-walk decoders, the block-log reader, and ABI extraction — on the pure-Rust rs_abieos backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+
+[lib]
+name = "hyperion_ship"
+
+[dependencies]
+rs_abieos = { workspace = true }
+flate2 = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+# The live SHiP-websocket source (the `ship` module) is the only part that needs the async stack.
+tokio = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[features]
+default = []
+ship = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures"]

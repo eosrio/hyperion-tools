@@ -1,0 +1,13 @@
+[package]
+name = "slice-log"
+description = "Extract a rebased block-range slice of a nodeos state-history ship log (trace_history / chain_state_history) or the block log (read-only) for local, ground-truth testing of the direct-from-disk tools."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+anyhow = { workspace = true }

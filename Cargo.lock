@@ -8,15 +8,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "flate2",
- "futures",
+ "hyperion-ship",
+ "tokio",
+]
+
+[[package]]
+name = "action-proto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
  "hex",
+ "hyperion-ship",
  "minreq",
  "rs_abieos",
  "serde_json",
- "tiny_http",
- "tokio",
- "tokio-tungstenite",
 ]
 
 [[package]]
@@ -80,6 +86,19 @@ name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
+name = "archive-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "hyperion-ship",
+ "rs_abieos",
+ "serde_json",
+ "tiny_http",
+]
 
 [[package]]
 name = "ascii"
@@ -201,6 +220,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "delta-proto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "hyperion-ship",
+ "rs_abieos",
+ "serde_json",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -218,6 +249,16 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "es-load"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "minreq",
+ "serde_json",
 ]
 
 [[package]]
@@ -373,6 +414,20 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "hyperion-ship"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "futures",
+ "hex",
+ "rs_abieos",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -632,6 +687,14 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slice-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+]
 
 [[package]]
 name = "smallvec"

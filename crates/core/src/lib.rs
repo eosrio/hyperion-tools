@@ -27,5 +27,6 @@ pub mod abi;
 pub mod blocks;
 pub mod delta;
 pub mod disk;
+#[cfg(feature = "ship")]
 pub mod ship;
 pub mod trace;

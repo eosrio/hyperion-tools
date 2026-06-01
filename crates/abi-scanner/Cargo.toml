@@ -1,0 +1,18 @@
+[package]
+name = "abi-scanner"
+description = "Extract every contract ABI version (setabi) across an Antelope chain's history into a portable, Elasticsearch-ingestible snapshot — via SHiP or directly from the state-history log."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["antelope", "eosio", "ship", "abi", "state-history"]
+categories = ["command-line-utilities", "parsing"]
+readme = "../../README.md"
+
+[dependencies]
+hyperion-ship = { workspace = true, features = ["ship"] }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }

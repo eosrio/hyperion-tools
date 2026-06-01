@@ -1,0 +1,18 @@
+[package]
+name = "action-proto"
+description = "Direct-from-disk action reader: decode action_traces from trace_history into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Supports cold-tier metadata-only emit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyperion-ship = { workspace = true }
+rs_abieos = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+minreq = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }

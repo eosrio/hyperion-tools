@@ -70,7 +70,10 @@ fn main() -> Result<()> {
     let n_idx = (idx.metadata()?.len() / 8) as u32;
     let last_block = first_block + n_idx - 1;
     if a.start < first_block || a.start > last_block {
-        bail!("start {} out of log range [{first_block}..{last_block}]", a.start);
+        bail!(
+            "start {} out of log range [{first_block}..{last_block}]",
+            a.start
+        );
     }
     let end = (a.start + a.count).min(last_block + 1); // exclusive
 

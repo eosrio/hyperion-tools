@@ -1,0 +1,18 @@
+[package]
+name = "archive-server"
+description = "On-demand tiered-storage archive: serve action act.data and contract_row delta values from frozen state-history logs over HTTP (GET /action, /block, /health; POST /actions, /deltas)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyperion-ship = { workspace = true }
+rs_abieos = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+tiny_http = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
