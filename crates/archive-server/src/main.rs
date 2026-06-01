@@ -23,7 +23,7 @@
 //! per-thread LRU-ish block cache so `/block/<N>` followed by `/action?block_num=N` (or any nearby
 //! request) skips the re-inflate + re-parse. The `Arc<AbiIndex>` is shared read-only.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -1020,7 +1020,10 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
 
     // Group input positions by block so we decode each distinct block exactly once. Items whose
     // block is out of the archived range are simply never grouped -> stay not-found.
-    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    // BTreeMap (not HashMap): iterate blocks in ascending order so that when the
+    // MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE cap trims a batch, the resolved subset is
+    // deterministic across identical retries — and reads hit the log in ascending offset order.
+    let mut by_block: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
             continue; // out of range -> not found
@@ -1252,7 +1255,10 @@ fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Rep
 
     // Group input positions by block so we walk each distinct block exactly once. Items whose block
     // is out of the archived range are never grouped -> stay not-found.
-    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    // BTreeMap (not HashMap): iterate blocks in ascending order so that when the
+    // MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE cap trims a batch, the resolved subset is
+    // deterministic across identical retries — and reads hit the log in ascending offset order.
+    let mut by_block: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
             continue; // out of range -> not found

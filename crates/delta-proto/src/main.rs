@@ -284,6 +284,7 @@ fn worker(
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob);
     let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
+    let log_len = std::fs::metadata(log_path)?.len();
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
@@ -297,6 +298,10 @@ fn worker(
         }
         let block_id = hex::encode(&hdr[8..40]);
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
+        if payload_size > log_len {
+            // a payload can't exceed the whole log — a wrong offset, not a real entry.
+            bail!("payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error");
+        }
         let mut payload = vec![0u8; payload_size as usize];
         log.read_exact(&mut payload)?;
         // trailing 8-byte position suffix (present on normal genesis-synced entries)
