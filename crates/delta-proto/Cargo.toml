@@ -1,0 +1,17 @@
+[package]
+name = "delta-proto"
+description = "Direct-from-disk delta reader: decode contract_row table deltas from chain_state_history into Hyperion-shaped delta NDJSON. Supports cold-tier metadata-only emit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyperion-ship = { workspace = true }
+rs_abieos = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }

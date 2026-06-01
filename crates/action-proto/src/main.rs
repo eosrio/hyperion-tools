@@ -35,9 +35,9 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
-use abi_scanner::blocks::{slot_to_iso, BlockLog};
-use abi_scanner::disk::{decode_payload, is_ship_magic};
-use abi_scanner::trace;
+use hyperion_ship::blocks::{slot_to_iso, BlockLog};
+use hyperion_ship::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::trace;
 
 #[derive(Parser, Debug)]
 #[command(about = "PROTOTYPE: decode action_traces directly from the trace_history log.")]
@@ -188,7 +188,13 @@ enum Fail {
 type Failures =
     std::sync::Mutex<std::collections::BTreeMap<(&'static str, String, String), (u64, String)>>;
 
-fn record_failure(failures: &Failures, reason: &'static str, code: &str, action: &str, sample: &str) {
+fn record_failure(
+    failures: &Failures,
+    reason: &'static str,
+    code: &str,
+    action: &str,
+    sample: &str,
+) {
     let mut m = failures.lock().unwrap();
     let e = m
         .entry((reason, code.to_string(), action.to_string()))
@@ -281,11 +287,18 @@ fn asset_amount(v: &Value) -> f64 {
         .unwrap_or(0.0)
 }
 fn str_of(v: &Value) -> String {
-    v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string())
+    v.as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| v.to_string())
 }
 
 /// Apply the matching `@`-field handler(s) for this action, mutating `doc` in place.
-fn process_action_data(doc: &mut Map<String, Value>, account: &str, name: &str, memo_in_field: bool) {
+fn process_action_data(
+    doc: &mut Map<String, Value>,
+    account: &str,
+    name: &str,
+    memo_in_field: bool,
+) {
     if name == "transfer" {
         h_transfer(doc, memo_in_field);
     }
@@ -308,7 +321,9 @@ fn process_action_data(doc: &mut Map<String, Value>, account: &str, name: &str, 
 
 fn h_transfer(doc: &mut Map<String, Value>, memo_in_field: bool) {
     let xfer = {
-        let Some(data) = act_data_mut(doc) else { return };
+        let Some(data) = act_data_mut(doc) else {
+            return;
+        };
         let qtd = data
             .get("quantity")
             .and_then(Value::as_str)
@@ -342,7 +357,9 @@ fn h_transfer(doc: &mut Map<String, Value>, memo_in_field: bool) {
 
 fn h_newaccount(doc: &mut Map<String, Value>) {
     let na = {
-        let Some(data) = act_data_mut(doc) else { return };
+        let Some(data) = act_data_mut(doc) else {
+            return;
+        };
         let name = if let Some(n) = data.get("newact").cloned() {
             n
         } else if let Some(n) = data.remove("name") {
@@ -351,8 +368,14 @@ fn h_newaccount(doc: &mut Map<String, Value>) {
             return;
         };
         let mut m = Map::new();
-        m.insert("active".into(), data.get("active").cloned().unwrap_or(Value::Null));
-        m.insert("owner".into(), data.get("owner").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "active".into(),
+            data.get("active").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "owner".into(),
+            data.get("owner").cloned().unwrap_or(Value::Null),
+        );
         m.insert("newact".into(), name);
         m
     };
@@ -361,18 +384,34 @@ fn h_newaccount(doc: &mut Map<String, Value>) {
 
 fn h_updateauth(doc: &mut Map<String, Value>) {
     let ua = {
-        let Some(data) = act_data_mut(doc) else { return };
+        let Some(data) = act_data_mut(doc) else {
+            return;
+        };
         if let Some(auth) = data.get_mut("auth").and_then(|a| a.as_object_mut()) {
             for k in ["accounts", "keys", "waits"] {
-                if auth.get(k).and_then(|v| v.as_array()).map(|a| a.is_empty()).unwrap_or(false) {
+                if auth
+                    .get(k)
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.is_empty())
+                    .unwrap_or(false)
+                {
                     auth.remove(k);
                 }
             }
         }
         let mut m = Map::new();
-        m.insert("permission".into(), data.get("permission").cloned().unwrap_or(Value::Null));
-        m.insert("parent".into(), data.get("parent").cloned().unwrap_or(Value::Null));
-        m.insert("auth".into(), data.get("auth").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "permission".into(),
+            data.get("permission").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "parent".into(),
+            data.get("parent").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "auth".into(),
+            data.get("auth").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@updateauth".into(), Value::Object(ua));
@@ -381,18 +420,31 @@ fn h_updateauth(doc: &mut Map<String, Value>) {
 fn h_delegatebw(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
-        let (cpu, net) = if data.contains_key("stake_cpu_quantity") && data.contains_key("stake_net_quantity") {
-            (asset_amount(&data["stake_cpu_quantity"]), asset_amount(&data["stake_net_quantity"]))
-        } else {
-            (0.0, 0.0)
-        };
+        let (cpu, net) =
+            if data.contains_key("stake_cpu_quantity") && data.contains_key("stake_net_quantity") {
+                (
+                    asset_amount(&data["stake_cpu_quantity"]),
+                    asset_amount(&data["stake_net_quantity"]),
+                )
+            } else {
+                (0.0, 0.0)
+            };
         let mut m = Map::new();
         m.insert("amount".into(), js_number(cpu + net));
         m.insert("stake_cpu_quantity".into(), js_number(cpu));
         m.insert("stake_net_quantity".into(), js_number(net));
-        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
-        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
-        m.insert("transfer".into(), data.get("transfer").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "from".into(),
+            data.get("from").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "receiver".into(),
+            data.get("receiver").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "transfer".into(),
+            data.get("transfer").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@delegatebw".into(), Value::Object(m));
@@ -402,8 +454,13 @@ fn h_delegatebw(doc: &mut Map<String, Value>) {
 fn h_undelegatebw(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
-        let (cpu, net) = if data.contains_key("unstake_cpu_quantity") && data.contains_key("unstake_net_quantity") {
-            (asset_amount(&data["unstake_cpu_quantity"]), asset_amount(&data["unstake_net_quantity"]))
+        let (cpu, net) = if data.contains_key("unstake_cpu_quantity")
+            && data.contains_key("unstake_net_quantity")
+        {
+            (
+                asset_amount(&data["unstake_cpu_quantity"]),
+                asset_amount(&data["unstake_net_quantity"]),
+            )
         } else {
             (0.0, 0.0)
         };
@@ -411,8 +468,14 @@ fn h_undelegatebw(doc: &mut Map<String, Value>) {
         m.insert("amount".into(), js_number(cpu + net));
         m.insert("unstake_cpu_quantity".into(), js_number(cpu));
         m.insert("unstake_net_quantity".into(), js_number(net));
-        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
-        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "from".into(),
+            data.get("from").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "receiver".into(),
+            data.get("receiver").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@undelegatebw".into(), Value::Object(m));
@@ -423,8 +486,14 @@ fn h_buyram(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
         let mut m = Map::new();
-        m.insert("payer".into(), data.get("payer").cloned().unwrap_or(Value::Null));
-        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "payer".into(),
+            data.get("payer").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "receiver".into(),
+            data.get("receiver").cloned().unwrap_or(Value::Null),
+        );
         if let Some(q) = data.get("quant") {
             m.insert("quant".into(), js_number(asset_amount(q)));
         }
@@ -439,12 +508,21 @@ fn h_buyrambytes(doc: &mut Map<String, Value>) {
         let Some(data) = act_data(doc) else { return };
         let bytes = data
             .get("bytes")
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .unwrap_or(0);
         let mut m = Map::new();
         m.insert("bytes".into(), Value::from(bytes));
-        m.insert("payer".into(), data.get("payer").cloned().unwrap_or(Value::Null));
-        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "payer".into(),
+            data.get("payer").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "receiver".into(),
+            data.get("receiver").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@buyrambytes".into(), Value::Object(m));
@@ -455,8 +533,14 @@ fn h_buyrex(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
         let mut m = Map::new();
-        m.insert("amount".into(), js_number(data.get("amount").map(asset_amount).unwrap_or(0.0)));
-        m.insert("from".into(), data.get("from").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "amount".into(),
+            js_number(data.get("amount").map(asset_amount).unwrap_or(0.0)),
+        );
+        m.insert(
+            "from".into(),
+            data.get("from").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@buyrex".into(), Value::Object(m));
@@ -466,14 +550,23 @@ fn h_unstaketorex(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
         let (cpu, net) = if data.contains_key("from_cpu") && data.contains_key("from_net") {
-            (asset_amount(&data["from_cpu"]), asset_amount(&data["from_net"]))
+            (
+                asset_amount(&data["from_cpu"]),
+                asset_amount(&data["from_net"]),
+            )
         } else {
             (0.0, 0.0)
         };
         let mut m = Map::new();
         m.insert("amount".into(), js_number(cpu + net));
-        m.insert("owner".into(), data.get("owner").cloned().unwrap_or(Value::Null));
-        m.insert("receiver".into(), data.get("receiver").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "owner".into(),
+            data.get("owner").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "receiver".into(),
+            data.get("receiver").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@unstaketorex".into(), Value::Object(m));
@@ -483,8 +576,14 @@ fn h_voteproducer(doc: &mut Map<String, Value>) {
     let m = {
         let Some(data) = act_data(doc) else { return };
         let mut m = Map::new();
-        m.insert("proxy".into(), data.get("proxy").cloned().unwrap_or(Value::Null));
-        m.insert("producers".into(), data.get("producers").cloned().unwrap_or(Value::Null));
+        m.insert(
+            "proxy".into(),
+            data.get("proxy").cloned().unwrap_or(Value::Null),
+        );
+        m.insert(
+            "producers".into(),
+            data.get("producers").cloned().unwrap_or(Value::Null),
+        );
         m
     };
     doc.insert("@voteproducer".into(), Value::Object(m));
@@ -634,6 +733,7 @@ fn worker(
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob);
     let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
+    let log_len = std::fs::metadata(log_path)?.len();
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
@@ -647,6 +747,10 @@ fn worker(
         }
         let block_id = hex::encode(&hdr[8..40]);
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
+        if payload_size > log_len {
+            // a payload can't exceed the whole log — a wrong offset, not a real entry.
+            bail!("payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error");
+        }
         let mut payload = vec![0u8; payload_size as usize];
         log.read_exact(&mut payload)?;
         let entry_end = pos + 48 + payload_size;
@@ -660,7 +764,8 @@ fn worker(
         stats.blocks.fetch_add(1, Relaxed);
 
         // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
-        let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num)) {
+        let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num))
+        {
             Some((prod, slot)) => (Some(trace::name_to_string(prod)), Some(slot_to_iso(slot))),
             None => (None, None),
         };
@@ -689,7 +794,9 @@ fn worker(
                 if act.except {
                     continue;
                 }
-                let Some(receipt) = &act.receipt else { continue };
+                let Some(receipt) = &act.receipt else {
+                    continue;
+                };
                 let code = act.account;
                 let action_u64 = act.name;
                 let account = trace::name_to_string(code);
@@ -702,12 +809,26 @@ fn worker(
                 let l2_t = if profile { Some(Instant::now()) } else { None };
                 let mut decoded = false;
                 {
-                    let r1 = decode_action(&mut reg, &mut data_buf, code, action_u64, data_bytes, block_num);
+                    let r1 = decode_action(
+                        &mut reg,
+                        &mut data_buf,
+                        code,
+                        action_u64,
+                        data_bytes,
+                        block_num,
+                    );
                     let outcome = match r1 {
                         Ok(()) => Ok(false),
                         Err(first) => {
                             let retry = if !matches!(first, Fail::NoAbi) && block_num > 1 {
-                                decode_action(&mut reg, &mut data_buf, code, action_u64, data_bytes, block_num - 1)
+                                decode_action(
+                                    &mut reg,
+                                    &mut data_buf,
+                                    code,
+                                    action_u64,
+                                    data_bytes,
+                                    block_num - 1,
+                                )
                             } else {
                                 Err(first)
                             };
@@ -787,7 +908,8 @@ fn worker(
                 // Build the doc body directly as JSON; cleanActionTrace pruning = conditional
                 // writes. Ends with a trailing comma. act_digest/code/abi/receipts are appended
                 // by emit_doc after grouping.
-                let mut body = String::with_capacity(data_part.as_ref().map_or(0, |d| d.len()) + 256);
+                let mut body =
+                    String::with_capacity(data_part.as_ref().map_or(0, |d| d.len()) + 256);
                 if let Some(ts) = &block_ts {
                     body.push_str("\"@timestamp\":");
                     push_json_str(&mut body, ts);
@@ -939,7 +1061,7 @@ struct EsStats {
     docs: AtomicU64,     // docs accepted into a posted _bulk body
     bytes: AtomicU64,    // total _bulk request body bytes
     requests: AtomicU64, // _bulk requests issued
-    errors: AtomicU64,   // bulk responses whose body contained `"errors":true` (or transport errors)
+    errors: AtomicU64, // bulk responses whose body contained `"errors":true` (or transport errors)
 }
 
 /// Config the ES posters need to build each `_bulk` meta line. (Cheap to clone — only the URL +
@@ -1008,7 +1130,10 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
         {
             Ok(resp) => {
                 // Cheap error check: the bulk response sets `"errors":true` iff any item failed.
-                let failed = resp.as_str().map(|s| s.contains("\"errors\":true")).unwrap_or(true)
+                let failed = resp
+                    .as_str()
+                    .map(|s| s.contains("\"errors\":true"))
+                    .unwrap_or(true)
                     || resp.status_code < 200
                     || resp.status_code >= 300;
                 if failed {
@@ -1124,7 +1249,20 @@ fn main() -> Result<()> {
             let bd = args.blocks_dir.clone();
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, bd.as_deref(), args.index_transfer_memo, args.metadata_only, &st, &fl, txc.as_ref()) {
+                if let Err(e) = worker(
+                    &lp,
+                    &ip,
+                    first_block,
+                    cs,
+                    ce,
+                    &ai,
+                    bd.as_deref(),
+                    args.index_transfer_memo,
+                    args.metadata_only,
+                    &st,
+                    &fl,
+                    txc.as_ref(),
+                ) {
                     eprintln!("[action-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));
@@ -1169,7 +1307,8 @@ fn main() -> Result<()> {
     }
     let f = failures.lock().unwrap();
     if !f.is_empty() {
-        let mut by_reason: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+        let mut by_reason: std::collections::BTreeMap<&str, u64> =
+            std::collections::BTreeMap::new();
         for ((reason, _, _), (cnt, _)) in f.iter() {
             *by_reason.entry(reason).or_default() += cnt;
         }

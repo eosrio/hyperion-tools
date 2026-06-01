@@ -23,7 +23,7 @@
 //! per-thread LRU-ish block cache so `/block/<N>` followed by `/action?block_num=N` (or any nearby
 //! request) skips the re-inflate + re-parse. The `Arc<AbiIndex>` is shared read-only.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -34,9 +34,9 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use tiny_http::{Header, Request, Response, Server};
 
-use abi_scanner::delta::read_varuint;
-use abi_scanner::disk::{decode_payload, is_ship_magic};
-use abi_scanner::trace::{self, Tx};
+use hyperion_ship::delta::read_varuint;
+use hyperion_ship::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::trace::{self, Tx};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -66,8 +66,8 @@ struct Args {
 type AbiIndex = HashMap<u64, Vec<(u32, String)>>;
 
 fn load_abi_index(path: &str) -> Result<AbiIndex> {
-    use std::io::BufRead;
     use serde_json::Value;
+    use std::io::BufRead;
     let names = Abieos::new();
     let f = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
     let mut idx: AbiIndex = HashMap::new();
@@ -286,7 +286,9 @@ impl LogReader {
         self.log.read_exact(&mut hdr)?;
         let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
         if block_num != n {
-            bail!("index/log mismatch: asked block {n}, entry at offset {pos} is block {block_num}");
+            bail!(
+                "index/log mismatch: asked block {n}, entry at offset {pos} is block {block_num}"
+            );
         }
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         let log_len = self.log.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
@@ -408,7 +410,9 @@ impl DeltaReader {
         self.log.read_exact(&mut hdr)?;
         let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
         if block_num != n {
-            bail!("index/log mismatch: asked block {n}, entry at offset {pos} is block {block_num}");
+            bail!(
+                "index/log mismatch: asked block {n}, entry at offset {pos} is block {block_num}"
+            );
         }
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         let log_len = self.log.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
@@ -433,7 +437,8 @@ impl DeltaReader {
             if name != b"contract_row" || present != 1 {
                 return;
             }
-            let Some((code, scope, table, primary_key, voff_in_row, vlen)) = parse_contract_row(data)
+            let Some((code, scope, table, primary_key, voff_in_row, vlen)) =
+                parse_contract_row(data)
             else {
                 return;
             };
@@ -609,17 +614,29 @@ struct Reply {
 
 impl Reply {
     fn json(code: u16, body: String) -> Self {
-        Self { code, body, json: true }
+        Self {
+            code,
+            body,
+            json: true,
+        }
     }
     fn text(code: u16, body: &str) -> Self {
-        Self { code, body: body.to_string(), json: false }
+        Self {
+            code,
+            body: body.to_string(),
+            json: false,
+        }
     }
     fn err(code: u16, msg: &str) -> Self {
         let mut b = String::new();
         b.push_str("{\"error\":");
         push_json_str(&mut b, msg);
         b.push('}');
-        Self { code, body: b, json: true }
+        Self {
+            code,
+            body: b,
+            json: true,
+        }
     }
 }
 
@@ -678,7 +695,9 @@ fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
             if act.except {
                 continue;
             }
-            let Some(receipt) = &act.receipt else { continue };
+            let Some(receipt) = &act.receipt else {
+                continue;
+            };
             if receipt.global_sequence == global_sequence {
                 found = Some((act.account, act.name, act.data.0, act.data.1));
                 break 'outer;
@@ -703,7 +722,8 @@ fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
     {
         // Copy the act.data slice out of the cached block (releases the `w.cache` borrow) so we can
         // then mutably split the disjoint `reg`/`scratch` fields of the worker for the decode.
-        let data: Vec<u8> = w.cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
+        let data: Vec<u8> =
+            w.cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
         let Worker { reg, scratch, .. } = w;
         append_data_value(&mut body, scratch, reg, code, action, &data, block_num);
     }
@@ -766,7 +786,9 @@ fn handle_block(w: &mut Worker, info: &LogInfo, n: u32) -> Reply {
                 if act.except {
                     continue;
                 }
-                let Some(receipt) = &act.receipt else { continue };
+                let Some(receipt) = &act.receipt else {
+                    continue;
+                };
                 refs.push(ActRef {
                     code: act.account,
                     name: act.name,
@@ -841,7 +863,10 @@ fn handle_block(w: &mut Worker, info: &LogInfo, n: u32) -> Reply {
             if rlen > 0 {
                 let block = w.cache.slots[slot].1.as_ref().unwrap();
                 body.push_str(",\"return_value\":");
-                push_json_str(&mut body, &hex::encode_upper(&block.inflated[roff..roff + rlen]));
+                push_json_str(
+                    &mut body,
+                    &hex::encode_upper(&block.inflated[roff..roff + rlen]),
+                );
             }
         }
         // act { account, name, authorization, data }
@@ -865,7 +890,8 @@ fn handle_block(w: &mut Worker, info: &LogInfo, n: u32) -> Reply {
             let (off, len) = a.data;
             // Copy the slice out first (releases the `w.cache` borrow), then mutably split the
             // disjoint `reg`/`scratch` fields for the decode.
-            let owned: Vec<u8> = w.cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
+            let owned: Vec<u8> =
+                w.cache.slots[slot].1.as_ref().unwrap().inflated[off..off + len].to_vec();
             let Worker { reg, scratch, .. } = w;
             append_data_value(&mut body, scratch, reg, a.code, a.name, &owned, n);
         }
@@ -994,27 +1020,25 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
 
     // Group input positions by block so we decode each distinct block exactly once. Items whose
     // block is out of the archived range are simply never grouped -> stay not-found.
-    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    // BTreeMap (not HashMap): iterate blocks in ascending order so that when the
+    // MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE cap trims a batch, the resolved subset is
+    // deterministic across identical retries — and reads hit the log in ascending offset order.
+    let mut by_block: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
             continue; // out of range -> not found
         }
-        by_block
-            .entry(it.block_num as u32)
-            .or_default()
-            .push(i);
+        by_block.entry(it.block_num as u32).or_default().push(i);
     }
 
     // Bound the per-request decode work (see MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE): stop resolving
     // once either the distinct-block cap or the wall-clock deadline is hit. Positions in any block
     // we don't reach stay `None` -> emitted as `found:false` below — best-effort and contract-safe.
     let started = Instant::now();
-    let mut blocks_done = 0usize;
-    for (&block_num, positions) in &by_block {
+    for (blocks_done, (&block_num, positions)) in by_block.iter().enumerate() {
         if blocks_done >= MAX_BLOCKS_PER_BATCH || started.elapsed() >= BATCH_DEADLINE {
             break;
         }
-        blocks_done += 1;
         // Read (or hit cache) the block once.
         let slot = match w.cache.get_or_read(block_num, &mut w.reader) {
             Ok(s) => s,
@@ -1037,11 +1061,16 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
                     if act.except {
                         continue;
                     }
-                    let Some(receipt) = &act.receipt else { continue };
+                    let Some(receipt) = &act.receipt else {
+                        continue;
+                    };
                     // First receipt wins for a given global_sequence (global_sequence is unique).
-                    by_gs
-                        .entry(receipt.global_sequence)
-                        .or_insert((act.account, act.name, act.data.0, act.data.1));
+                    by_gs.entry(receipt.global_sequence).or_insert((
+                        act.account,
+                        act.name,
+                        act.data.0,
+                        act.data.1,
+                    ));
                 }
             }
         }
@@ -1138,7 +1167,10 @@ struct ResolvedDelta {
 /// Parse the JSON array request body into `DeltaItem`s. `Err(Reply)` carries the right status code:
 /// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds the caps. The
 /// `primary_key` accepts a u64 number OR a decimal string (like /actions' global_sequence).
-fn parse_deltas_body(req: &mut Request, names: &Abieos) -> std::result::Result<Vec<DeltaItem>, Reply> {
+fn parse_deltas_body(
+    req: &mut Request,
+    names: &Abieos,
+) -> std::result::Result<Vec<DeltaItem>, Reply> {
     let arr = read_batch_array(req)?;
 
     let mut items = Vec::with_capacity(arr.len());
@@ -1207,7 +1239,10 @@ fn append_delta_key(
 fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Reply {
     // Defensive: the router only reaches here when a delta log was opened, so delta_reader is Some.
     if w.delta_reader.is_none() {
-        return Reply::err(503, "delta archive unavailable on this node (no chain_state_history log)");
+        return Reply::err(
+            503,
+            "delta archive unavailable on this node (no chain_state_history log)",
+        );
     }
     let items = match parse_deltas_body(req, &w.names) {
         Ok(v) => v,
@@ -1220,7 +1255,10 @@ fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Rep
 
     // Group input positions by block so we walk each distinct block exactly once. Items whose block
     // is out of the archived range are never grouped -> stay not-found.
-    let mut by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    // BTreeMap (not HashMap): iterate blocks in ascending order so that when the
+    // MAX_BLOCKS_PER_BATCH / BATCH_DEADLINE cap trims a batch, the resolved subset is
+    // deterministic across identical retries — and reads hit the log in ascending offset order.
+    let mut by_block: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if it.block_num < info.first_block as u64 || it.block_num > info.last_block as u64 {
             continue; // out of range -> not found
@@ -1232,15 +1270,16 @@ fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Rep
     // once either the distinct-block cap or the wall-clock deadline is hit. Positions in any block
     // we don't reach stay `None` -> emitted as `found:false` below — best-effort and contract-safe.
     let started = Instant::now();
-    let mut blocks_done = 0usize;
-    for (&block_num, positions) in &by_block {
+    for (blocks_done, (&block_num, positions)) in by_block.iter().enumerate() {
         if blocks_done >= MAX_BLOCKS_PER_BATCH || started.elapsed() >= BATCH_DEADLINE {
             break;
         }
-        blocks_done += 1;
         // Read (or hit cache) + walk the delta block once; its rows map is keyed by
         // (code, scope, table, primary_key) -> value byte-range into the inflated buffer.
-        let slot = match w.delta_cache.get_or_read(block_num, w.delta_reader.as_mut().unwrap()) {
+        let slot = match w
+            .delta_cache
+            .get_or_read(block_num, w.delta_reader.as_mut().unwrap())
+        {
             Ok(s) => s,
             // A genuine I/O/format fault on one block must not abort the whole batch; leave those
             // positions not-found and carry on.
@@ -1290,10 +1329,12 @@ fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Rep
                 // Decode against the row's block; on failure retry against block-1's ABI to handle a
                 // setabi-in-the-same-block boundary (mirrors delta-proto's recovery) before falling
                 // back to raw hex. Either way every found row still gets an answer.
-                let decoded = decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk).is_ok()
+                let decoded = decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk)
+                    .is_ok()
                     || (blk > 1 && {
                         scratch.clear();
-                        decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk - 1).is_ok()
+                        decode_delta_row(reg, scratch, item.code, item.table, &r.value, blk - 1)
+                            .is_ok()
                     });
                 if decoded {
                     body.push_str(",\"data\":");
@@ -1316,7 +1357,12 @@ fn handle_deltas_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Rep
 }
 
 /// Route + handle one request, never panicking the worker thread.
-fn handle(w: &mut Worker, info: &LogInfo, delta_info: Option<&LogInfo>, req: &mut Request) -> Reply {
+fn handle(
+    w: &mut Worker,
+    info: &LogInfo,
+    delta_info: Option<&LogInfo>,
+    req: &mut Request,
+) -> Reply {
     let raw = req.url().to_string();
     let (path, query) = match raw.split_once('?') {
         Some((p, q)) => (p, q),
@@ -1330,7 +1376,10 @@ fn handle(w: &mut Worker, info: &LogInfo, delta_info: Option<&LogInfo>, req: &mu
             "/actions" => handle_actions_batch(w, info, req),
             "/deltas" => match delta_info {
                 Some(di) => handle_deltas_batch(w, di, req),
-                None => Reply::err(503, "delta archive unavailable on this node (no chain_state_history log)"),
+                None => Reply::err(
+                    503,
+                    "delta archive unavailable on this node (no chain_state_history log)",
+                ),
             },
             _ => Reply::err(404, "unknown endpoint"),
         };
@@ -1461,9 +1510,7 @@ fn main() -> Result<()> {
     let (first_block, last_block) = (info.first_block, info.last_block);
 
     let addr = format!("0.0.0.0:{}", args.port);
-    let server = Arc::new(
-        Server::http(&addr).map_err(|e| anyhow::anyhow!("bind {addr}: {e}"))?,
-    );
+    let server = Arc::new(Server::http(&addr).map_err(|e| anyhow::anyhow!("bind {addr}: {e}"))?);
     let threads = args.threads.max(1);
     eprintln!(
         "[archive-server] serving blocks [{first_block}..{last_block}] on http://{addr} with {threads} worker(s)"
@@ -1479,12 +1526,18 @@ fn main() -> Result<()> {
     eprintln!("[archive-server]   GET /block/<N>");
     eprintln!("[archive-server]   GET /health");
     eprintln!("[archive-server]   POST /actions  [{{block_num, global_sequence}}, ...]");
-    eprintln!("[archive-server]   POST /deltas   [{{block_num, code, scope, table, primary_key}}, ...]");
+    eprintln!(
+        "[archive-server]   POST /deltas   [{{block_num, code, scope, table, primary_key}}, ...]"
+    );
 
     let mut handles = Vec::new();
     for i in 0..threads {
-        let (srv, inf, dinf, ai) =
-            (server.clone(), info.clone(), delta_info.clone(), abi_index.clone());
+        let (srv, inf, dinf, ai) = (
+            server.clone(),
+            info.clone(),
+            delta_info.clone(),
+            abi_index.clone(),
+        );
         handles.push(std::thread::spawn(move || {
             if let Err(e) = worker_loop(srv, inf, dinf, ai) {
                 eprintln!("[archive-server] worker {i} FAILED: {e:#}");

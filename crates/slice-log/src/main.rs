@@ -68,11 +68,20 @@ fn main() -> Result<()> {
     };
 
     let n_idx = (idx.metadata()?.len() / 8) as u32;
+    if n_idx == 0 {
+        bail!(
+            "{idx_path}: empty or truncated index ({} bytes) — no blocks to slice",
+            idx.metadata()?.len()
+        );
+    }
     let last_block = first_block + n_idx - 1;
     if a.start < first_block || a.start > last_block {
-        bail!("start {} out of log range [{first_block}..{last_block}]", a.start);
+        bail!(
+            "start {} out of log range [{first_block}..{last_block}]",
+            a.start
+        );
     }
-    let end = (a.start + a.count).min(last_block + 1); // exclusive
+    let end = a.start.saturating_add(a.count).min(last_block + 1); // exclusive
 
     let start_off = u64_at(&mut idx, (a.start - first_block) as u64 * 8)?;
     let end_off = if end <= last_block {
@@ -85,6 +94,11 @@ fn main() -> Result<()> {
     let mut out_log = File::create(format!("{}/{}.log", a.out, a.stem))?;
     out_log.write_all(&header)?;
     log.seek(SeekFrom::Start(start_off))?;
+    if end_off < start_off {
+        bail!(
+            "corrupt index: offset for block {end} ({end_off}) precedes start offset ({start_off})"
+        );
+    }
     let mut remaining = end_off - start_off;
     let mut buf = vec![0u8; 8 << 20];
     while remaining > 0 {

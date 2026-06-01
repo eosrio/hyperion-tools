@@ -75,24 +75,28 @@ pub fn parse_result(bin: &[u8]) -> Option<(u32, &[u8])> {
 /// skipping all other tables (e.g. the dense contract_row) by length.
 pub fn for_each_account_row<F: FnMut(&[u8]) -> Result<()>>(deltas: &[u8], mut f: F) -> Result<()> {
     let mut off = 0usize;
-    let (n_tables, k) = read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad table count"))?;
+    let (n_tables, k) =
+        read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad table count"))?;
     off += k;
     for _ in 0..n_tables {
-        let (_variant, k) = read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad variant"))?;
+        let (_variant, k) =
+            read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad variant"))?;
         off += k;
-        let (name_len, k) = read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad name len"))?;
+        let (name_len, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
+            .ok_or_else(|| anyhow!("bad name len"))?;
         off += k;
         let name = deltas
             .get(off..off + name_len)
             .ok_or_else(|| anyhow!("name oob"))?;
         off += name_len;
-        let (rows, k) = read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad rows count"))?;
+        let (rows, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
+            .ok_or_else(|| anyhow!("bad rows count"))?;
         off += k;
         let is_account = name == b"account";
         for _ in 0..rows {
             off += 1; // present byte
-            let (data_len, k) =
-                read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad data len"))?;
+            let (data_len, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
+                .ok_or_else(|| anyhow!("bad data len"))?;
             off += k;
             if is_account {
                 let data = deltas
@@ -162,5 +166,28 @@ mod tests {
         let mut empty = row[..13].to_vec();
         empty.push(0x00); // abi len 0
         assert!(account_setabi(&abieos, &empty).unwrap().is_none());
+    }
+
+    #[test]
+    fn truncated_delta_errors_not_panics() {
+        // A non-account table row whose data_len runs past the buffer end used to push the
+        // cursor out of bounds; the next read then panicked on `&deltas[off..]`. It must now
+        // surface a clean Err instead.
+        let buf = [
+            0x02, // n_tables = 2
+            0x00, // table 0: variant
+            0x04, 0x74, 0x65, 0x73, 0x74, // name_len 4, "test" (not "account")
+            0x01, // rows = 1
+            0x01, // present byte
+            0x64, // data_len = 100 — but the buffer ends here
+        ];
+        // Advancing to table 1 reads at off=110 on a 10-byte buffer: pre-fix panic, now Err.
+        assert!(for_each_account_row(&buf, |_| Ok(())).is_err());
+
+        // Truncated right after the table count is likewise a clean Err, not a panic.
+        assert!(for_each_account_row(&[0x01], |_| Ok(())).is_err());
+
+        // A well-formed empty delta (zero tables) is still Ok.
+        assert!(for_each_account_row(&[0x00], |_| Ok(())).is_ok());
     }
 }

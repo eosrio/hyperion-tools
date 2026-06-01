@@ -342,7 +342,7 @@ fn skip_partial_v0(c: &mut Cur) -> Option<()> {
 
 fn skip_signature(c: &mut Cur) -> Option<()> {
     match c.u8()? {
-        0 | 1 => c.skip(65)?,      // K1, R1
+        0 | 1 => c.skip(65)?, // K1, R1
         2 => {
             c.skip(65)?; // WA compact signature
             c.skip_bytes()?; // auth_data
@@ -374,7 +374,15 @@ mod tests {
     #[test]
     fn names_round_trip() {
         assert_eq!(name_to_string(0), "");
-        for n in ["eosio", "eosio.token", "m.federation", "guild.nefty", "mtlgg.wam", "a", "1xq.o.c.wam"] {
+        for n in [
+            "eosio",
+            "eosio.token",
+            "m.federation",
+            "guild.nefty",
+            "mtlgg.wam",
+            "a",
+            "1xq.o.c.wam",
+        ] {
             assert_eq!(name_to_string(name_val(n)), n);
         }
     }

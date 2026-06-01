@@ -9,7 +9,7 @@ use std::io::{BufWriter, Write};
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use abi_scanner::{disk, ship};
+use hyperion_ship::{disk, ship};
 
 #[derive(Parser, Debug, Clone)]
 #[command(about = "Scan a SHiP block range for contract ABI versions (setabi), deltas-only.")]

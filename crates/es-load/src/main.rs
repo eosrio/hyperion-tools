@@ -54,7 +54,14 @@ fn meta(mode: &str, v: &Value, chain: &str, ver: &str, size: u64) -> Option<(Str
     let part = partition(block, size);
     if mode == "delta" {
         let g = |k: &str| v.get(k).and_then(Value::as_str);
-        let id = format!("{}-{}-{}-{}-{}", block, g("code")?, g("scope")?, g("table")?, g("primary_key")?);
+        let id = format!(
+            "{}-{}-{}-{}-{}",
+            block,
+            g("code")?,
+            g("scope")?,
+            g("table")?,
+            g("primary_key")?
+        );
         Some((format!("{chain}-delta-{ver}-{part}"), id))
     } else {
         let gs = v.get("global_sequence")?;
@@ -67,7 +74,13 @@ fn meta(mode: &str, v: &Value, chain: &str, ver: &str, size: u64) -> Option<(Str
 }
 
 fn guard_local(es: &str) -> Result<()> {
-    let host = es.split("://").last().unwrap_or(es).split(['/', ':']).next().unwrap_or("");
+    let host = es
+        .split("://")
+        .last()
+        .unwrap_or(es)
+        .split(['/', ':'])
+        .next()
+        .unwrap_or("");
     let local = matches!(host, "localhost" | "127.0.0.1" | "::1" | "");
     if !local && std::env::var("BENCH_ALLOW_EXTERNAL_ES").as_deref() != Ok("1") {
         bail!("REFUSING: ES host '{host}' is not loopback — local benchmarking only (set BENCH_ALLOW_EXTERNAL_ES=1 to override).");
@@ -79,7 +92,10 @@ fn main() -> Result<()> {
     let args = Args::parse();
     guard_local(&args.es)?;
     let url = format!("{}/_bulk", args.es.trim_end_matches('/'));
-    let reader = Arc::new(Mutex::new(BufReader::with_capacity(8 << 20, File::open(&args.file)?)));
+    let reader = Arc::new(Mutex::new(BufReader::with_capacity(
+        8 << 20,
+        File::open(&args.file)?,
+    )));
     let (docs, bytes, reqs, errors) = (
         Arc::new(AtomicU64::new(0)),
         Arc::new(AtomicU64::new(0)),
@@ -88,13 +104,27 @@ fn main() -> Result<()> {
     );
     eprintln!(
         "[es-load] {} -> {} | mode={} index={}-{}-{}-<part> | batch={} workers={}",
-        args.file, url, args.mode, args.chain, args.mode, args.index_version, args.batch, args.workers
+        args.file,
+        url,
+        args.mode,
+        args.chain,
+        args.mode,
+        args.index_version,
+        args.batch,
+        args.workers
     );
     let t0 = Instant::now();
     std::thread::scope(|s| {
         for _ in 0..args.workers.max(1) {
-            let (reader, docs, bytes, reqs, errors, url, args) =
-                (reader.clone(), docs.clone(), bytes.clone(), reqs.clone(), errors.clone(), url.clone(), &args);
+            let (reader, docs, bytes, reqs, errors, url, args) = (
+                reader.clone(),
+                docs.clone(),
+                bytes.clone(),
+                reqs.clone(),
+                errors.clone(),
+                url.clone(),
+                &args,
+            );
             s.spawn(move || {
                 let mut body = String::with_capacity(args.batch * 256);
                 loop {
@@ -122,8 +152,16 @@ fn main() -> Result<()> {
                     let mut n = 0u64;
                     for line in &lines {
                         let line = line.trim_end();
-                        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-                        let Some((idx, id)) = meta(&args.mode, &v, &args.chain, &args.index_version, args.partition_size) else {
+                        let Ok(v) = serde_json::from_str::<Value>(line) else {
+                            continue;
+                        };
+                        let Some((idx, id)) = meta(
+                            &args.mode,
+                            &v,
+                            &args.chain,
+                            &args.index_version,
+                            args.partition_size,
+                        ) else {
                             continue;
                         };
                         body.push_str("{\"index\":{\"_index\":\"");
@@ -146,7 +184,10 @@ fn main() -> Result<()> {
                     {
                         Ok(resp) => {
                             (200..300).contains(&resp.status_code)
-                                && resp.as_str().map(|s| !s.contains("\"errors\":true")).unwrap_or(false)
+                                && resp
+                                    .as_str()
+                                    .map(|s| !s.contains("\"errors\":true"))
+                                    .unwrap_or(false)
                         }
                         Err(_) => false,
                     };

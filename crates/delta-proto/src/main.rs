@@ -25,8 +25,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
-use abi_scanner::delta::read_varuint;
-use abi_scanner::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::delta::read_varuint;
+use hyperion_ship::disk::{decode_payload, is_ship_magic};
 
 #[derive(Parser, Debug)]
 #[command(about = "PROTOTYPE: decode contract_row deltas directly from the state-history log.")]
@@ -120,7 +120,9 @@ fn for_each_row<F: FnMut(&[u8], u8, &[u8]) -> Result<()>>(deltas: &[u8], mut f: 
             off += 1;
             let (dlen, k) = read_varuint(&deltas[off..]).ok_or_else(|| anyhow!("bad data len"))?;
             off += k;
-            let data = deltas.get(off..off + dlen).ok_or_else(|| anyhow!("data oob"))?;
+            let data = deltas
+                .get(off..off + dlen)
+                .ok_or_else(|| anyhow!("data oob"))?;
             f(name, present, data)?;
             off += dlen;
         }
@@ -167,8 +169,8 @@ fn parse_contract_row(row: &[u8]) -> Option<ContractRow<'_>> {
 #[derive(Default)]
 struct Stats {
     blocks: AtomicU64,
-    rows: AtomicU64,    // contract_row present==1 seen
-    decoded: AtomicU64, // value -> JSON ok
+    rows: AtomicU64,      // contract_row present==1 seen
+    decoded: AtomicU64,   // value -> JSON ok
     no_abi: AtomicU64,    // (subset of raw) no ABI version at all for (code, block)
     raw: AtomicU64,       // undecodable -> raw `value` preserved (e.g. table not in the ABI)
     recovered: AtomicU64, // decoded only after retrying against block-1's ABI
@@ -185,7 +187,13 @@ enum Fail {
 type Failures =
     std::sync::Mutex<std::collections::BTreeMap<(&'static str, String, String), (u64, String)>>;
 
-fn record_failure(failures: &Failures, reason: &'static str, code: &str, table: &str, sample: &str) {
+fn record_failure(
+    failures: &Failures,
+    reason: &'static str,
+    code: &str,
+    table: &str,
+    sample: &str,
+) {
     let mut m = failures.lock().unwrap();
     let e = m
         .entry((reason, code.to_string(), table.to_string()))
@@ -276,6 +284,7 @@ fn worker(
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob);
     let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
+    let log_len = std::fs::metadata(log_path)?.len();
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
@@ -289,6 +298,10 @@ fn worker(
         }
         let block_id = hex::encode(&hdr[8..40]);
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
+        if payload_size > log_len {
+            // a payload can't exceed the whole log — a wrong offset, not a real entry.
+            bail!("payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error");
+        }
         let mut payload = vec![0u8; payload_size as usize];
         log.read_exact(&mut payload)?;
         // trailing 8-byte position suffix (present on normal genesis-synced entries)
@@ -420,7 +433,9 @@ fn main() -> Result<()> {
     let mut out: Option<Box<dyn Write + Send>> = args
         .out
         .as_ref()
-        .map(|p| -> Result<Box<dyn Write + Send>> { Ok(Box::new(BufWriter::new(File::create(p)?))) })
+        .map(|p| -> Result<Box<dyn Write + Send>> {
+            Ok(Box::new(BufWriter::new(File::create(p)?)))
+        })
         .transpose()?;
     let emit = out.is_some();
     let metadata_only = args.metadata_only;
@@ -451,7 +466,18 @@ fn main() -> Result<()> {
             let (ai, st, fl) = (abi_index.clone(), stats.clone(), failures.clone());
             let txc = if emit { Some(tx.clone()) } else { None };
             handles.push(s.spawn(move || {
-                if let Err(e) = worker(&lp, &ip, first_block, cs, ce, &ai, &st, &fl, txc.as_ref(), metadata_only) {
+                if let Err(e) = worker(
+                    &lp,
+                    &ip,
+                    first_block,
+                    cs,
+                    ce,
+                    &ai,
+                    &st,
+                    &fl,
+                    txc.as_ref(),
+                    metadata_only,
+                ) {
                     eprintln!("[delta-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
             }));
@@ -479,7 +505,8 @@ fn main() -> Result<()> {
     // breakdown of the raw (undecodable) rows — table not declared in the ABI, etc.
     let f = failures.lock().unwrap();
     if !f.is_empty() {
-        let mut by_reason: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+        let mut by_reason: std::collections::BTreeMap<&str, u64> =
+            std::collections::BTreeMap::new();
         for ((reason, _, _), (cnt, _)) in f.iter() {
             *by_reason.entry(reason).or_default() += cnt;
         }
