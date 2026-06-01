@@ -1,0 +1,4 @@
+# Keep the build context small — these are large and never needed inside the image build.
+target
+target-linux
+.git

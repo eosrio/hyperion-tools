@@ -1,0 +1,96 @@
+name: Release
+
+# Cut a release on a `v*` tag: build the whole toolkit (abi-scanner, action-proto, delta-proto,
+# archive-server, es-load) for portable Linux targets — musl-static binaries run on ANY Linux
+# regardless of glibc — attach the tarballs (+ sha256) to the GitHub Release, and publish a ghcr
+# image for the archive-server service.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the release + upload assets
+  packages: write   # push the ghcr image
+
+env:
+  CARGO_TERM_COLOR: always
+  BINS: abi-scanner action-proto delta-proto archive-server es-load
+
+jobs:
+  binaries:
+    name: binaries (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl    # static: runs on ANY x86_64 Linux regardless of glibc
+          - aarch64-unknown-linux-musl   # static: arm64
+          - x86_64-unknown-linux-gnu     # glibc: broad distro compatibility
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # `cross` handles the musl + aarch64 toolchains in docker so the build is reproducible and
+      # needs no host linker setup. Our deps are pure-Rust, so the musl builds are fully static.
+      - name: Install cross
+        run: cargo install cross --locked
+      - name: Build (all bins)
+        run: cross build --release --target ${{ matrix.target }} --bins
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="${{ github.event.repository.name }}-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          for b in $BINS; do
+            cp "target/${{ matrix.target }}/release/$b" "dist/$name/"
+          done
+          [ -f README.md ] && cp README.md "dist/$name/" || true
+          [ -f LICENSE ] && cp LICENSE "dist/$name/" || true
+          tar -C dist -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            *.tar.gz.sha256
+
+  image:
+    name: ghcr image (archive-server)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/archive-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      # amd64 only for now (native on the runner). arm64 bare-metal is covered by the
+      # aarch64-unknown-linux-musl tarball above; a multi-arch image can be added later.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
