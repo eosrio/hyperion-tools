@@ -1,0 +1,271 @@
+{
+  "index_patterns": [
+    "{{CHAIN}}-action-*"
+  ],
+  "priority": 500,
+  "template": {
+    "settings": {
+      "index": {
+        "codec": "best_compression",
+        "refresh_interval": "1s",
+        "number_of_shards": 4,
+        "number_of_replicas": 0,
+        "sort.field": "global_sequence",
+        "sort.order": "desc"
+      }
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "ds_error": {
+          "type": "boolean"
+        },
+        "global_sequence": {
+          "type": "long"
+        },
+        "account_ram_deltas.delta": {
+          "type": "integer"
+        },
+        "account_ram_deltas.account": {
+          "type": "keyword"
+        },
+        "act.authorization.permission": {
+          "enabled": false
+        },
+        "act.authorization.actor": {
+          "type": "keyword"
+        },
+        "act.account": {
+          "type": "keyword"
+        },
+        "act.name": {
+          "type": "keyword"
+        },
+        "act.data": {
+          "enabled": false
+        },
+        "block_num": {
+          "type": "long"
+        },
+        "block_id": {
+          "type": "keyword"
+        },
+        "action_ordinal": {
+          "type": "long"
+        },
+        "creator_action_ordinal": {
+          "type": "long"
+        },
+        "cpu_usage_us": {
+          "type": "integer"
+        },
+        "net_usage_words": {
+          "type": "integer"
+        },
+        "code_sequence": {
+          "type": "integer"
+        },
+        "abi_sequence": {
+          "type": "integer"
+        },
+        "act_digest": {
+          "type": "keyword",
+          "index": false,
+          "doc_values": false
+        },
+        "trx_id": {
+          "type": "keyword",
+          "doc_values": false
+        },
+        "producer": {
+          "type": "keyword"
+        },
+        "signatures": {
+          "enabled": false
+        },
+        "inline_count": {
+          "type": "short"
+        },
+        "max_inline": {
+          "type": "short"
+        },
+        "inline_filtered": {
+          "type": "boolean"
+        },
+        "receipts": {
+          "properties": {
+            "global_sequence": {
+              "type": "long",
+              "doc_values": false
+            },
+            "recv_sequence": {
+              "type": "long",
+              "doc_values": false
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "auth_sequence": {
+              "properties": {
+                "account": {
+                  "type": "keyword"
+                },
+                "sequence": {
+                  "type": "long",
+                  "doc_values": false
+                }
+              }
+            }
+          }
+        },
+        "@newaccount": {
+          "properties": {
+            "active": {
+              "type": "object"
+            },
+            "owner": {
+              "type": "object"
+            },
+            "newact": {
+              "type": "keyword"
+            }
+          }
+        },
+        "@updateauth": {
+          "properties": {
+            "permission": {
+              "type": "keyword"
+            },
+            "parent": {
+              "type": "keyword"
+            },
+            "auth": {
+              "type": "object"
+            }
+          }
+        },
+        "@transfer": {
+          "properties": {
+            "from": {
+              "type": "keyword"
+            },
+            "to": {
+              "type": "keyword"
+            },
+            "amount": {
+              "type": "float"
+            },
+            "symbol": {
+              "type": "keyword"
+            },
+            "memo": {
+              "type": "text"
+            }
+          }
+        },
+        "@unstaketorex": {
+          "properties": {
+            "owner": {
+              "type": "keyword"
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "amount": {
+              "type": "float"
+            }
+          }
+        },
+        "@buyrex": {
+          "properties": {
+            "from": {
+              "type": "keyword"
+            },
+            "amount": {
+              "type": "float"
+            }
+          }
+        },
+        "@buyram": {
+          "properties": {
+            "payer": {
+              "type": "keyword"
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "quant": {
+              "type": "float"
+            }
+          }
+        },
+        "@buyrambytes": {
+          "properties": {
+            "payer": {
+              "type": "keyword"
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "bytes": {
+              "type": "long"
+            }
+          }
+        },
+        "@delegatebw": {
+          "properties": {
+            "from": {
+              "type": "keyword"
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "stake_cpu_quantity": {
+              "type": "float"
+            },
+            "stake_net_quantity": {
+              "type": "float"
+            },
+            "transfer": {
+              "type": "boolean"
+            },
+            "amount": {
+              "type": "float"
+            }
+          }
+        },
+        "@undelegatebw": {
+          "properties": {
+            "from": {
+              "type": "keyword"
+            },
+            "receiver": {
+              "type": "keyword"
+            },
+            "unstake_cpu_quantity": {
+              "type": "float"
+            },
+            "unstake_net_quantity": {
+              "type": "float"
+            },
+            "amount": {
+              "type": "float"
+            }
+          }
+        },
+        "@voteproducer": {
+          "properties": {
+            "proxy": {
+              "type": "keyword"
+            },
+            "producers": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  }
+}

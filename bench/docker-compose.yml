@@ -1,0 +1,89 @@
+# Local benchmark stack for the direct-from-disk indexer (abi-scanner / delta-proto / action-proto).
+#
+# IMPORTANT: this is for LOCAL testing on YOUR OWN machine. NEVER point the loaders or these
+# services at a production Elasticsearch cluster — the write benchmark creates/fills indices and
+# tunes settings, and is meant to run against a throwaway local ES you control.
+#
+#   docker compose up -d                  # Elasticsearch + Kibana (the write-benchmark target)
+#   docker compose --profile full up -d   # + RabbitMQ + Redis (for the eventual ingestor path)
+#
+# Host prerequisite for Elasticsearch:  sudo sysctl -w vm.max_map_count=262144
+name: ds-indexer-bench
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-9.4.2}
+    container_name: ds-bench-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - bootstrap.memory_lock=true
+      - cluster.name=ds-bench
+      - cluster.routing.allocation.disk.threshold_enabled=false
+      - action.destructive_requires_name=false
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms4g -Xmx4g}"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION:-9.4.2}
+    container_name: ds-bench-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+
+  # ---- full Hyperion-style write path (opt-in) -------------------------------------------------
+  # Brought up with `--profile full` for the eventual reader -> AMQP -> ingestor -> ES integration.
+  # Not needed for the standalone NDJSON -> ES `_bulk` write benchmark.
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ds-bench-rabbitmq
+    profiles: ["full"]
+    environment:
+      - RABBITMQ_DEFAULT_USER=${AMQP_USER:-hyperion}
+      - RABBITMQ_DEFAULT_PASS=${AMQP_PASS:-hyperion}
+      - RABBITMQ_DEFAULT_VHOST=${AMQP_VHOST:-hyperion}
+    ports:
+      - "${AMQP_PORT:-5672}:5672"
+      - "${AMQP_MGMT_PORT:-15672}:15672"
+
+  redis:
+    image: redis:7-alpine
+    container_name: ds-bench-redis
+    profiles: ["full"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+
+  # Hyperion keeps *current state* (latest table rows) in MongoDB — bounded by live row count, it
+  # does not grow with history, so it is not part of the storage problem. Here for the full pipeline.
+  mongo:
+    image: mongo:7
+    container_name: ds-bench-mongo
+    profiles: ["full"]
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodata:/data/db
+
+volumes:
+  esdata:
+  redisdata:
+  mongodata:
