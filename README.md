@@ -4,7 +4,7 @@
 
 A Rust workspace of high-performance **Antelope state-history tools** — the engine behind [Hyperion](https://github.com/eosrio/hyperion-history-api)'s direct-from-disk indexing and tiered-storage archive (v4.5).
 
-Every tool here reads the nodeos **state-history log straight off disk** (or streams **SHiP**), which bypasses nodeos's single-threaded `ship` serializer — the historic bottleneck — so throughput scales with CPU cores instead of one node thread. Decoding uses the pure-Rust **[rs_abieos](https://github.com/eosrio/rs-abieos)** backend, so there is **no C++/clang toolchain** to build.
+Most of these tools read the nodeos **state-history log straight off disk** (or stream **SHiP**), which bypasses nodeos's single-threaded `ship` serializer — the historic bottleneck — so throughput scales with CPU cores instead of one node thread. (`es-load` is the exception: it ingests the NDJSON the readers produce.) Decoding uses the pure-Rust **[rs_abieos](https://github.com/eosrio/rs-abieos)** backend, so there is **no C++/clang toolchain** to build.
 
 The zero-copy state-history deserializer at the core originated in EOS Rio's **[fleet-router](https://github.com/eosrio/fleet-router)** and is shared here as the `hyperion-ship` library.
 
@@ -148,11 +148,11 @@ archive-server --from-disk /data/nodeos/state-history \
 
 | endpoint | purpose |
 |---|---|
-| `GET /action?block_num=&global_sequence=` | one action's decoded `act.data` |
+| `GET /action?block_num=<N>&global_sequence=<G>` | one action's decoded `act.data` |
 | `GET /block/<N>` | a block's decoded traces |
 | `POST /actions` | batch-hydrate many actions in one round-trip (request order preserved) |
 | `POST /deltas` | batch-hydrate many `contract_row` delta values |
-| `GET /health` | liveness + the archived block range |
+| `GET /health` | liveness check (returns `200 ok`) |
 
 The batch endpoints group requested positions by block so each block is read and decoded exactly once per request (shared per-thread cache), and process blocks in ascending order for sequential disk reads and deterministic results under the per-request work cap. See the Hyperion **tiered-storage** docs for the full wire contract and the API-side hydration flow.
 
