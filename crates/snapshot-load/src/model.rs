@@ -118,16 +118,27 @@ impl AbiRegistry {
         }
     }
 
-    /// Standard-token-contract check (replicates `sync-accounts.ts::scanABIs`): the ABI must declare
-    /// both an `accounts` and a `stat` table and a `transfer` action. Filters out non-token contracts
-    /// (e.g. `key.chain`) whose `accounts` table has a different row model and would otherwise create
-    /// duplicate `(code, scope, symbol)` keys. Cached per code.
+    /// Standard-token-contract check — mirrors `sync-accounts.ts::scanABIs`' contract-eligibility
+    /// test. The ABI must declare both an `accounts` and a `stat` table, a `transfer` action, AND the
+    /// `transfer` struct's first four fields must be `from:name, to:name, quantity:asset, memo:string`
+    /// (accepting the `account_name` alias for `from`/`to`). The field check is what rejects non-token contracts that
+    /// merely *look* token-shaped — e.g. WAX `simpleassets` (an NFT contract whose `transfer` takes
+    /// `assetids`, not `quantity:asset`), whose `accounts` rows otherwise collide on the unique
+    /// `(code, scope, symbol)` index. Cached per code.
     pub fn is_token_contract(&mut self, code: u64) -> bool {
         if let Some(v) = self.token_cache.get(&code) {
             return *v;
         }
+        let verdict = self.compute_token_verdict(code);
+        self.token_cache.insert(code, verdict);
+        verdict
+    }
+
+    fn compute_token_verdict(&mut self, code: u64) -> bool {
+        // Fast pre-filter via the already-parsed AbiHandle: needs accounts + stat tables + a transfer
+        // action. Avoids the abi_bin_to_json parse below for the common non-token case.
         let (acc, stat, xfer) = (self.accounts_name, self.stat_name, self.transfer_name);
-        let verdict = self
+        let basic = self
             .handle(code)
             .map(|h| {
                 h.type_for_table(acc).is_some()
@@ -135,8 +146,19 @@ impl AbiRegistry {
                     && h.type_for_action(xfer).is_some()
             })
             .unwrap_or(false);
-        self.token_cache.insert(code, verdict);
-        verdict
+        if !basic {
+            return false;
+        }
+        // scanABIs field check: render the packed ABI to JSON and validate the `transfer` struct.
+        // (The prefilter above already parsed these bytes via `AbiHandle`; this re-render is the only
+        // way to reach the struct fields, and the `Err` arm is therefore defensive.)
+        let Some(raw) = self.raw.get(&code) else {
+            return false;
+        };
+        match self.names.abi_bin_to_json(raw) {
+            Ok(json) => transfer_fields_match(&json),
+            Err(_) => false, // can't validate the ABI -> exclude (scanABIs likewise skips on ABI error)
+        }
     }
     pub fn decode(&mut self, code: u64, table: u64, value: &[u8], out: &mut String) -> Dec {
         let raw = &self.raw;
@@ -186,6 +208,58 @@ impl AbiRegistry {
     }
 }
 
+/// `true` iff the ABI JSON's `transfer` struct's first four fields are
+/// `from:name, to:name, quantity:asset, memo:string` — the eosio.token signature — accepting the
+/// legacy `account_name` alias for `from`/`to` at their expected positions. Mirrors the candidate
+/// selection in `sync-accounts.ts::scanABIs`.
+///
+/// Note: this is the *contract-eligibility* test. The `(code, scope, symbol)` uniqueness that the
+/// `accounts` index relies on is upheld downstream by `map::map_account`, which derives `symbol` from
+/// each row's decoded `balance` asset (a standard token has one row per symbol per scope) and drops
+/// rows with no parseable balance — not by this function.
+fn transfer_fields_match(abi_json: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(abi_json) else {
+        return false;
+    };
+    let Some(structs) = v.get("structs").and_then(|s| s.as_array()) else {
+        return false;
+    };
+    let Some(transfer) = structs
+        .iter()
+        .find(|s| s.get("name").and_then(|n| n.as_str()) == Some("transfer"))
+    else {
+        return false;
+    };
+    let Some(fields) = transfer.get("fields").and_then(|f| f.as_array()) else {
+        return false;
+    };
+    const EXPECT: [(&str, &str); 4] = [
+        ("from", "name"),
+        ("to", "name"),
+        ("quantity", "asset"),
+        ("memo", "string"),
+    ];
+    if fields.len() < EXPECT.len() {
+        return false;
+    }
+    for (i, (ename, etype)) in EXPECT.iter().enumerate() {
+        let fname = fields[i].get("name").and_then(|x| x.as_str()).unwrap_or("");
+        let ftype = fields[i].get("type").and_then(|x| x.as_str()).unwrap_or("");
+        if fname != *ename {
+            return false;
+        }
+        // `account_name` is the legacy alias for `name`, accepted only on from/to and only at their
+        // expected position. (scanABIs accepts it position-blind, but a working chain never swaps
+        // from/to, so this is behavior-identical on every real token ABI while being strictly tighter.)
+        let type_ok =
+            ftype == *etype || ((*ename == "from" || *ename == "to") && ftype == "account_name");
+        if !type_ok {
+            return false;
+        }
+    }
+    true
+}
+
 /// Parse the `account_object` section into `code(u64) -> packed abi_def bytes`.
 /// Row = name(u64) | creation_date(u32) | varuint abi_len | abi_len bytes. The varuint length is
 /// consumed here, so the stored bytes are exactly what `AbiHandle::from_bin` expects. Empty ABIs skipped.
@@ -208,8 +282,9 @@ pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Ve
         }
         // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX length bails instead of truncating
         // (a no-op on 64-bit; correct on a 32-bit target).
-        let abi_len = usize::try_from(abi_len_u)
-            .map_err(|_| anyhow::anyhow!("account_object: abi length {abi_len_u} overflows usize"))?;
+        let abi_len = usize::try_from(abi_len_u).map_err(|_| {
+            anyhow::anyhow!("account_object: abi length {abi_len_u} overflows usize")
+        })?;
         if abi_len == 0 {
             continue;
         }
@@ -248,4 +323,146 @@ pub fn format_line(names: &Abieos, row: &RawRow, block: u32, dec: &Dec, decoded:
     }
     s.push_str("}\n");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transfer_fields_match;
+
+    fn abi_with_transfer(fields: &str) -> String {
+        format!(
+            r#"{{"version":"eosio::abi/1.2","structs":[{{"name":"transfer","base":"","fields":[{fields}]}}]}}"#
+        )
+    }
+
+    #[test]
+    fn standard_eosio_token_transfer_matches() {
+        let abi = abi_with_transfer(
+            r#"{"name":"from","type":"name"},{"name":"to","type":"name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"}"#,
+        );
+        assert!(transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn account_name_alias_for_from_to_matches() {
+        let abi = abi_with_transfer(
+            r#"{"name":"from","type":"account_name"},{"name":"to","type":"account_name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"}"#,
+        );
+        assert!(transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn extra_trailing_fields_are_ignored() {
+        // scanABIs only validates the first four fields; a 5th is fine.
+        let abi = abi_with_transfer(
+            r#"{"name":"from","type":"name"},{"name":"to","type":"name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"},{"name":"extra","type":"uint64"}"#,
+        );
+        assert!(transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn simpleassets_style_nft_transfer_rejected() {
+        // simpleassets: transfer(from, to, assetids[], memo) — field[2] is not quantity:asset.
+        let abi = abi_with_transfer(
+            r#"{"name":"from","type":"name"},{"name":"to","type":"name"},{"name":"assetids","type":"uint64[]"},{"name":"memo","type":"string"}"#,
+        );
+        assert!(!transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn too_few_fields_rejected() {
+        let abi = abi_with_transfer(r#"{"name":"from","type":"name"},{"name":"to","type":"name"}"#);
+        assert!(!transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn no_transfer_struct_rejected() {
+        let abi =
+            r#"{"version":"eosio::abi/1.2","structs":[{"name":"issue","base":"","fields":[]}]}"#;
+        assert!(!transfer_fields_match(abi));
+    }
+
+    #[test]
+    fn malformed_json_rejected() {
+        assert!(!transfer_fields_match("not json"));
+    }
+
+    #[test]
+    fn swapped_from_to_account_name_rejected() {
+        // The alias must be position-correct: from/to physically swapped (both account_name) must NOT
+        // pass, even though each named field uses the legacy alias. (Bot-flagged regression.)
+        let abi = abi_with_transfer(
+            r#"{"name":"to","type":"account_name"},{"name":"from","type":"account_name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"}"#,
+        );
+        assert!(!transfer_fields_match(&abi));
+    }
+
+    #[test]
+    fn account_name_alias_on_wrong_field_rejected() {
+        // account_name is accepted only for from/to, not for a differently-named first field.
+        let abi = abi_with_transfer(
+            r#"{"name":"sender","type":"account_name"},{"name":"to","type":"name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"}"#,
+        );
+        assert!(!transfer_fields_match(&abi));
+    }
+
+    /// Integration test for the whole verdict path: pack real ABIs with `abi_json_to_bin`, then drive
+    /// `AbiRegistry::is_token_contract` so the `AbiHandle` prefilter, the `abi_bin_to_json` re-render,
+    /// `transfer_fields_match`, and the per-code cache all run together.
+    #[test]
+    fn compute_token_verdict_accepts_token_rejects_nft() {
+        use super::AbiRegistry;
+        use rs_abieos::Abieos;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let mk_abi = |transfer_fields: &str| -> String {
+            let mut s = String::new();
+            s.push_str(r#"{"version":"eosio::abi/1.1","types":[],"structs":["#);
+            s.push_str(
+                r#"{"name":"account","base":"","fields":[{"name":"balance","type":"asset"}]},"#,
+            );
+            s.push_str(r#"{"name":"currency_stats","base":"","fields":[{"name":"supply","type":"asset"},{"name":"max_supply","type":"asset"},{"name":"issuer","type":"name"}]},"#);
+            s.push_str(r#"{"name":"transfer","base":"","fields":["#);
+            s.push_str(transfer_fields);
+            s.push_str(r#"]}],"#);
+            s.push_str(
+                r#""actions":[{"name":"transfer","type":"transfer","ricardian_contract":""}],"#,
+            );
+            s.push_str(r#""tables":[{"name":"accounts","index_type":"i64","key_names":[],"key_types":[],"type":"account"},{"name":"stat","index_type":"i64","key_names":[],"key_types":[],"type":"currency_stats"}],"#);
+            s.push_str(
+                r#""ricardian_clauses":[],"error_messages":[],"abi_extensions":[],"variants":[]}"#,
+            );
+            s
+        };
+        let token_abi = mk_abi(
+            r#"{"name":"from","type":"name"},{"name":"to","type":"name"},{"name":"quantity","type":"asset"},{"name":"memo","type":"string"}"#,
+        );
+        let nft_abi = mk_abi(
+            r#"{"name":"from","type":"name"},{"name":"to","type":"name"},{"name":"assetids","type":"uint64[]"},{"name":"memo","type":"string"}"#,
+        );
+
+        let abieos = Abieos::new();
+        let tkn = abieos.string_to_name("tkn").unwrap();
+        let nft = abieos.string_to_name("nft").unwrap();
+        let mut map: HashMap<u64, Vec<u8>> = HashMap::new();
+        map.insert(
+            tkn,
+            abieos.abi_json_to_bin(&token_abi).expect("pack token abi"),
+        );
+        map.insert(nft, abieos.abi_json_to_bin(&nft_abi).expect("pack nft abi"));
+
+        let mut reg = AbiRegistry::new(Arc::new(map));
+        assert!(
+            reg.is_token_contract(tkn),
+            "standard eosio.token-shaped contract should qualify"
+        );
+        assert!(
+            !reg.is_token_contract(nft),
+            "simpleassets-style NFT (transfer takes assetids) should be rejected"
+        );
+        // second call hits the cache and yields the same verdict
+        assert!(reg.is_token_contract(tkn));
+        assert!(!reg.is_token_contract(nft));
+    }
 }

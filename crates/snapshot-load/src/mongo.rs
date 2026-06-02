@@ -317,9 +317,8 @@ fn fixup_expiration(doc: &mut Document) {
         // offset AFTER the date's 'T'. (The earlier `contains('+')` check missed negative offsets,
         // and a plain date contains '-' separators, so scan only the time part for the offset sign.)
         let has_zone = s.ends_with('Z')
-            || s.rsplit_once('T').is_some_and(|(_, time)| {
-                time.contains('+') || time.contains('-')
-            });
+            || s.rsplit_once('T')
+                .is_some_and(|(_, time)| time.contains('+') || time.contains('-'));
         let rfc = if has_zone { s.clone() } else { format!("{s}Z") };
         if let Ok(dt) = DateTime::parse_rfc3339_str(&rfc) {
             doc.insert("expiration", Bson::DateTime(dt));

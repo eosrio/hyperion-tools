@@ -118,9 +118,8 @@ fn ensure_decompressed(path: &str) -> Result<String> {
         let inf = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
         let mut dec =
             ruzstd::StreamingDecoder::new(inf).map_err(|e| anyhow!("zstd init: {e:?}"))?;
-        let mut outf = BufWriter::new(
-            File::create(&tmp_path).with_context(|| format!("create {tmp_path}"))?,
-        );
+        let mut outf =
+            BufWriter::new(File::create(&tmp_path).with_context(|| format!("create {tmp_path}"))?);
         std::io::copy(&mut dec, &mut outf)?;
         outf.flush()?;
         drop(outf); // close before rename (Windows: cannot rename an open file)
@@ -681,15 +680,17 @@ fn run_stream_permissions<R: Read>(
             "eosio::chain::permission_object" => {
                 // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX payload bails instead of
                 // truncating (a no-op on 64-bit; correct on a 32-bit target).
-                let plen = usize::try_from(payload_len)
-                    .map_err(|_| anyhow!("permission_object payload_len {payload_len} overflows usize"))?;
+                let plen = usize::try_from(payload_len).map_err(|_| {
+                    anyhow!("permission_object payload_len {payload_len} overflows usize")
+                })?;
                 let mut buf = Vec::new();
                 s.read_into(plen, &mut buf)?;
                 perm_buf = Some((buf, rows));
             }
             "eosio::chain::permission_link_object" => {
-                let plen = usize::try_from(payload_len)
-                    .map_err(|_| anyhow!("permission_link_object payload_len {payload_len} overflows usize"))?;
+                let plen = usize::try_from(payload_len).map_err(|_| {
+                    anyhow!("permission_link_object payload_len {payload_len} overflows usize")
+                })?;
                 let mut lbuf = Vec::new();
                 s.read_into(plen, &mut lbuf)?;
                 let (pbuf, perm_rows) = perm_buf
@@ -888,7 +889,10 @@ fn run_url_path(args: &Args) -> Result<()> {
     if let Some(n) = &inner_name {
         eprintln!("[snapshot-load] tar entry {n}");
     }
-    let block_num = resolve_block_num(args.block_num, inner_name.as_deref().unwrap_or(url_basename))?;
+    let block_num = resolve_block_num(
+        args.block_num,
+        inner_name.as_deref().unwrap_or(url_basename),
+    )?;
     eprintln!("[snapshot-load] head block_num={block_num}");
 
     if want_permissions {

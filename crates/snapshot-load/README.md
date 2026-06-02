@@ -115,9 +115,19 @@ The `serde_json::Value → BSON` encode happens in the parallel decode workers (
 accumulator), so the concurrent writers actually saturate the sink. The run reports decode+write
 `docs/s`, per-collection counts, the index-build time, and grand-total wall-clock — the end-to-end
 "index a full table set" number. Measured locally against a throwaway
-`docker run --rm -p 27017:27017 mongo:8`: **Telos `accounts` — 1,145,318 validated token-balance docs,
+`docker run --rm -p 27017:27017 mongo:8`: **Telos `accounts` — 1,145,012 validated token-balance docs,
 write 1.8 s → ~623 K docs/s, indexes 3.5 s, grand total 5.4 s, 0 errors** (writers=24, batch=6000;
 only validated token contracts are written, mirroring `sync-accounts` `scanABIs`).
+
+A contract is treated as a token candidate (and its `accounts` rows indexed) only if its ABI passes the
+same `scanABIs` eligibility test Hyperion uses: it declares both `accounts` and `stat` tables, a
+`transfer` action, **and** the `transfer` struct's first four fields are `from:name, to:name,
+quantity:asset, memo:string` (the `account_name` alias is accepted for `from`/`to`). The field check is
+essential — it rejects NFT/other contracts that merely look token-shaped (e.g. WAX `simpleassets`, whose
+`transfer` takes `assetids`), which would otherwise emit non-balance rows that collide on the unique
+`(code, scope, symbol)` index. (Beyond that contract-level filter, each row is kept only if its decoded
+`balance` parses to an `amount` plus a 1–7-char uppercase `symbol`, so the emitted set is not strictly
+byte-identical to Hyperion's per-account `get_currency_balance` walk.)
 
 `block_num` is derived from the snapshot filename (EOSUSA `snapshot-<64-hex block_id>.bin` → first 4 bytes
 of the block_id; EOS Nation `snapshot-...-<decimal>.bin[.zst]` → trailing digits). When streaming a

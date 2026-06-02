@@ -95,8 +95,14 @@ fn map_voter(ctx: &RowCtx, data: Value) -> Option<Value> {
 // ── ACCOUNTS ───────────────────────────────────────────────────────────────────────────────────
 
 /// `{balance:"<amount> <SYM>"}` → `IAccount`. `code` = token contract, `scope` = holder.
-/// Skips rows of non-validated token contracts (mirrors sync-accounts `scanABIs`), and rows whose
-/// `balance` is missing/malformed (a contract that declares an `accounts` table with a different shape).
+/// Skips rows of non-validated token contracts (the `scanABIs` contract-eligibility filter in
+/// `model::transfer_fields_match`), and rows whose `balance` is missing/malformed (a contract that
+/// declares an `accounts` table with a different shape).
+///
+/// This `balance`-derived `symbol` is what actually upholds the unique `(code, scope, symbol)` index:
+/// a standard eosio.token `accounts` table has one row per symbol per scope, so the validated set
+/// cannot produce a duplicate key. The contract-level `scanABIs` filter is the first gate; this
+/// per-row balance parse is the second.
 fn map_account(ctx: &RowCtx, data: Value) -> Option<Value> {
     if !ctx.token_ok {
         return None;

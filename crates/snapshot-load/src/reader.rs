@@ -331,7 +331,7 @@ pub fn enumerate_sections(s: &mut Snap) -> Result<Vec<Section>> {
         let after_size = s.pos;
         let rows = s.u64()?;
         let name = s.cstr()?;
-        let name_bytes = name.len() as u64 + 1; // + NUL
+        let name_bytes = name.len() as u64 + 1;
         // `size` is untrusted: it must cover at least row_count(8) + name + NUL, and the section must
         // fit inside the file. Guard before the subtraction (else u64 underflow → bogus huge
         // payload_len) and before computing the next-section offset (else OOB / desync).
@@ -341,9 +341,9 @@ pub fn enumerate_sections(s: &mut Snap) -> Result<Vec<Section>> {
                 "section '{name}' at offset {start}: size {size} < header {header_bytes} (row_count+name+NUL) — malformed framing"
             );
         }
-        let next_off = after_size
-            .checked_add(size)
-            .ok_or_else(|| anyhow!("section '{name}' at {start}: next-section offset overflow (size {size})"))?;
+        let next_off = after_size.checked_add(size).ok_or_else(|| {
+            anyhow!("section '{name}' at {start}: next-section offset overflow (size {size})")
+        })?;
         if next_off > s.len {
             bail!(
                 "section '{name}' at offset {start}: extends to {next_off} past file length {} — truncated/corrupt",
@@ -414,7 +414,13 @@ mod tests {
     fn minimal_section_list_parses() {
         // header + two well-formed sections + end marker.
         let mut buf = header();
-        push_section(&mut buf, frame_size("alpha", 3), 1, "alpha", &[0xaa, 0xbb, 0xcc]);
+        push_section(
+            &mut buf,
+            frame_size("alpha", 3),
+            1,
+            "alpha",
+            &[0xaa, 0xbb, 0xcc],
+        );
         push_section(&mut buf, frame_size("beta", 0), 7, "beta", &[]);
         buf.extend_from_slice(&u64::MAX.to_le_bytes()); // end-of-file marker
 
