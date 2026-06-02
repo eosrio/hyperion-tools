@@ -54,7 +54,8 @@ struct Args {
     /// comma-separated table selectors: `voters` | `accounts` | `*` | `table` | `code:table` | `code:scope:table`
     #[arg(long, default_value = "voters,accounts")]
     tables: String,
-    /// override head block_num (else derived from the snapshot filename)
+    /// override head block_num (else derived from the snapshot filename, or a streamed tar's inner
+    /// `snapshot-<block_id>.bin` entry name)
     #[arg(long)]
     block_num: Option<u32>,
     /// stop after emitting N docs (smoke test; skips the full-consumption invariant)
@@ -83,7 +84,7 @@ struct Args {
     /// database_prefix (db name = <prefix>_<chain>)
     #[arg(long, default_value = "hyperion")]
     mongo_prefix: String,
-    /// optional authSource appended to the URI
+    /// optional auth database (applied via the typed credential source, not appended to the URI)
     #[arg(long)]
     mongo_auth_source: Option<String>,
     /// concurrent insert_many writer tasks (in-flight futures)
@@ -111,13 +112,20 @@ fn ensure_decompressed(path: &str) -> Result<String> {
     };
     if !std::path::Path::new(out_path).exists() {
         eprintln!("[snapshot-load] decompressing {path} -> {out_path}");
+        // Decompress to a sibling `.tmp` then atomically rename into place, so an interrupted run
+        // never leaves a half-written `<out>.bin` that a later run's `exists()` check would trust.
+        let tmp_path = format!("{out_path}.tmp");
         let inf = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
         let mut dec =
             ruzstd::StreamingDecoder::new(inf).map_err(|e| anyhow!("zstd init: {e:?}"))?;
-        let mut outf =
-            BufWriter::new(File::create(out_path).with_context(|| format!("create {out_path}"))?);
+        let mut outf = BufWriter::new(
+            File::create(&tmp_path).with_context(|| format!("create {tmp_path}"))?,
+        );
         std::io::copy(&mut dec, &mut outf)?;
         outf.flush()?;
+        drop(outf); // close before rename (Windows: cannot rename an open file)
+        std::fs::rename(&tmp_path, out_path)
+            .with_context(|| format!("rename {tmp_path} -> {out_path}"))?;
     }
     Ok(out_path.to_string())
 }
@@ -433,7 +441,9 @@ impl<R: Read> Read for TeeReader<R> {
 /// Detects kind by URL suffix: `.tar.gz`/`.tgz` (gunzip + untar the single `snapshot-*.bin`),
 /// `.bin.zst`/`.zst` (streaming zstd), or bare `.bin`. The returned reader is forward-only (NOT
 /// seekable). For the `.tar.gz` leg the `tar::Archive` is leaked — acceptable for a one-shot CLI.
-fn open_url_stream(url: &str) -> Result<Box<dyn Read>> {
+/// Returns the inner snapshot filename for tar inputs (`snapshot-<block_id>.bin`) so the caller can
+/// derive block_num from it when the URL basename can't (e.g. a `latest.tar.gz` "latest" pointer).
+fn open_url_stream(url: &str) -> Result<(Box<dyn Read>, Option<String>)> {
     let resp = ureq::get(url)
         .call()
         .with_context(|| format!("GET {url}"))?;
@@ -460,15 +470,15 @@ fn open_url_stream(url: &str) -> Result<Box<dyn Read>> {
                     .unwrap_or("")
                     .starts_with("snapshot")
             {
-                return Ok(Box::new(entry)); // tar::Entry: Read, streams forward from here
+                return Ok((Box::new(entry), Some(name))); // tar::Entry: Read, streams forward from here
             }
         }
         bail!("no snapshot-*.bin entry found in tar stream {url}");
     } else if u.ends_with(".bin.zst") || u.ends_with(".zst") {
         let dec = ruzstd::StreamingDecoder::new(body).map_err(|e| anyhow!("zstd init: {e:?}"))?;
-        Ok(Box::new(dec))
+        Ok((Box::new(dec), None))
     } else if u.ends_with(".bin") {
-        Ok(Box::new(body))
+        Ok((Box::new(body), None))
     } else {
         bail!(
             "unknown snapshot extension in URL (expected .tar.gz/.tgz, .bin.zst/.zst, .bin): {url}"
@@ -493,6 +503,7 @@ fn run_stream<R: Read>(
     stats_only: bool,
     raw: bool,
     mongo_cfg: Option<mongo::MongoCfg>,
+    tee_active: bool,
 ) -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)> {
     // header: magic + file_format_version (mirror enumerate_sections)
     let magic = s.u32()?;
@@ -516,10 +527,18 @@ fn run_stream<R: Read>(
         if size == u64::MAX {
             bail!("hit end-marker before any row section (no contract_tables/key_value_object)");
         }
+        // EARLY guard (forward stream): `size` must cover at least row_count(8) BEFORE we read 8 bytes
+        // of `rows`; on `size < 8` those 8 bytes would come from the next frame, desyncing the scan.
+        if size < 8 {
+            bail!("malformed section framing: size {size} < 8 (cannot hold row_count)");
+        }
         let after_size = s.pos();
         let rows = s.u64()?;
         let name = s.cstr()?;
         let name_bytes = name.len() as u64 + 1; // + NUL
+        if size < 8 + name_bytes {
+            bail!("malformed section framing: size {size} < header for '{name}'");
+        }
         let payload_off = after_size + 8 + name_bytes;
         let payload_len = size - 8 - name_bytes;
         let sec = Section {
@@ -575,11 +594,22 @@ fn run_stream<R: Read>(
                     raw,
                     mongo_cfg,
                     move |sink| {
-                        if name == "contract_tables" {
-                            tables::walk_v6(&mut s, &sec, t, limit, sink)
+                        let ps = if name == "contract_tables" {
+                            tables::walk_v6(&mut s, &sec, t, limit, sink)?
                         } else {
-                            tables::walk_v8(&mut s, &sec, &interesting, limit, sink)
+                            tables::walk_v8(&mut s, &sec, &interesting, limit, sink)?
+                        };
+                        // With --tee, the on-disk .bin must mirror EVERY source byte. The walk stops
+                        // at the row section's end (and `--limit` stops it even earlier), so drain the
+                        // remainder of the stream to EOF — this is also what triggers the TeeReader's
+                        // final EOF flush, making the teed file byte-identical to the source.
+                        if tee_active {
+                            let drained = s.drain_to_eof()?;
+                            eprintln!(
+                                "[snapshot-load] --tee: drained {drained} trailing bytes to complete the .bin"
+                            );
                         }
+                        Ok(ps)
                     },
                 );
             }
@@ -604,6 +634,7 @@ fn run_stream_permissions<R: Read>(
     out: &mut dyn Write,
     limit: Option<u64>,
     stats_only: bool,
+    tee_active: bool,
 ) -> Result<perms::PermStats> {
     let magic = s.u32()?;
     if magic != MAGIC {
@@ -622,10 +653,18 @@ fn run_stream_permissions<R: Read>(
         if size == u64::MAX {
             bail!("hit end-marker before permission_link_object");
         }
+        // EARLY guard (forward stream): `size` must cover at least row_count(8) BEFORE we read 8 bytes
+        // of `rows`; on `size < 8` those 8 bytes would come from the next frame, desyncing the scan.
+        if size < 8 {
+            bail!("malformed section framing: size {size} < 8 (cannot hold row_count)");
+        }
         let after_size = s.pos();
         let rows = s.u64()?;
         let name = s.cstr()?;
         let name_bytes = name.len() as u64 + 1;
+        if size < 8 + name_bytes {
+            bail!("malformed section framing: size {size} < header for '{name}'");
+        }
         let payload_off = after_size + 8 + name_bytes;
         let payload_len = size - 8 - name_bytes;
 
@@ -640,19 +679,33 @@ fn run_stream_permissions<R: Read>(
                 abi_raw = load_abis(&mut s, &sec)?;
             }
             "eosio::chain::permission_object" => {
+                // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX payload bails instead of
+                // truncating (a no-op on 64-bit; correct on a 32-bit target).
+                let plen = usize::try_from(payload_len)
+                    .map_err(|_| anyhow!("permission_object payload_len {payload_len} overflows usize"))?;
                 let mut buf = Vec::new();
-                s.read_into(payload_len as usize, &mut buf)?;
+                s.read_into(plen, &mut buf)?;
                 perm_buf = Some((buf, rows));
             }
             "eosio::chain::permission_link_object" => {
+                let plen = usize::try_from(payload_len)
+                    .map_err(|_| anyhow!("permission_link_object payload_len {payload_len} overflows usize"))?;
                 let mut lbuf = Vec::new();
-                s.read_into(payload_len as usize, &mut lbuf)?;
+                s.read_into(plen, &mut lbuf)?;
                 let (pbuf, perm_rows) = perm_buf
                     .ok_or_else(|| anyhow!("permission_link_object before permission_object"))?;
-                return perms::decode_permissions_bufs(
+                let st = perms::decode_permissions_bufs(
                     &lbuf, rows, &pbuf, perm_rows, &abi_raw, names, eosio, block_num, out, limit,
                     stats_only,
-                );
+                )?;
+                // With --tee, mirror the rest of the source bytes to disk (and trigger the EOF flush).
+                if tee_active {
+                    let drained = s.drain_to_eof()?;
+                    eprintln!(
+                        "[snapshot-load] --tee: drained {drained} trailing bytes to complete the .bin"
+                    );
+                }
+                return Ok(st);
             }
             _ => {
                 s.seek_to(payload_off + payload_len)?;
@@ -664,13 +717,20 @@ fn run_stream_permissions<R: Read>(
 /// Build the forward-only `StreamSnap` over the URL's decompressed body, optionally tee'd to disk.
 /// `block_num` is required up front (computed by the caller) because the streamed body's URL may not
 /// carry a parseable height, and a forward stream cannot be re-opened to look.
-fn open_stream_snap(url: &str, tee: Option<&str>) -> Result<StreamSnap<BufReader<Box<dyn Read>>>> {
-    let raw = open_url_stream(url)?;
+/// Buffered forward-only streaming reader over the raw snapshot `.bin` bytes (HTTP body → optional
+/// gunzip+untar or zstd → optional tee), wrapped in `StreamSnap`.
+type SnapStream = StreamSnap<BufReader<Box<dyn Read>>>;
+
+fn open_stream_snap(url: &str, tee: Option<&str>) -> Result<(SnapStream, Option<String>)> {
+    let (raw, inner_name) = open_url_stream(url)?;
     let raw: Box<dyn Read> = match tee {
         Some(p) => Box::new(TeeReader::new(raw, p)?),
         None => raw,
     };
-    Ok(StreamSnap::new(BufReader::with_capacity(1 << 20, raw)))
+    Ok((
+        StreamSnap::new(BufReader::with_capacity(1 << 20, raw)),
+        inner_name,
+    ))
 }
 
 /// Parse the `--tables` contract-table selectors into resolved `Targets` (shared by both paths).
@@ -714,28 +774,23 @@ fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
     if args.raw {
         bail!("--raw and --mongo are mutually exclusive (raw emits hex, not decodable docs)");
     }
-    let mut uri = base_uri.clone();
-    if let Some(src) = &args.mongo_auth_source {
-        if uri.contains("?authSource=") || uri.contains("&authSource=") {
-            // already present
-        } else if uri.contains('?') {
-            uri.push_str(&format!("&authSource={src}"));
-        } else {
-            uri.push_str(&format!("/?authSource={src}"));
-        }
-    }
+    // --mongo-auth-source is applied via the typed credential `source` inside the sink (see
+    // mongo::run_writer), NOT string-appended to the URI.
+    let uri = base_uri.clone();
     let writers = args.mongo_writers.max(1);
     let db_name = format!("{}_{}", args.mongo_prefix, chain);
     eprintln!(
-        "[snapshot-load][mongo] {uri} -> db={db_name} | writers={writers} batch={} pool={} drop={} index={}",
+        "[snapshot-load][mongo] {uri} -> db={db_name} | writers={writers} batch={} pool={} drop={} index={} authSource={}",
         args.mongo_batch,
         args.mongo_pool.unwrap_or(writers as u32 + 2),
         args.mongo_drop,
         !args.mongo_no_index,
+        args.mongo_auth_source.as_deref().unwrap_or("<uri-default>"),
     );
     Ok(Some(mongo::MongoCfg {
         uri,
         db_name,
+        auth_source: args.mongo_auth_source.clone(),
         writers,
         batch: args.mongo_batch.max(1),
         pool: args.mongo_pool.unwrap_or(writers as u32 + 2),
@@ -812,16 +867,31 @@ fn run_url_path(args: &Args) -> Result<()> {
     }
 
     let t0 = Instant::now();
-    let basename = url.split(['?', '#']).next().unwrap_or(url);
-    let block_num = resolve_block_num(args.block_num, basename)?;
+
+    // Build targets / mongo config up front (cheap, validates --tables/--mongo) so a bad arg fails
+    // before we open the network stream. `permissions` is a native path needing neither.
+    let main_cfg = if want_permissions {
+        None
+    } else {
+        Some((build_targets(&specs, &names)?, build_mongo_cfg(args)?))
+    };
+
     eprintln!("[snapshot-load] streaming from {url}");
-    eprintln!("[snapshot-load] head block_num={block_num}");
     if args.tee.is_some() && args.limit.is_some() {
         eprintln!("[snapshot-load] note: --tee forces a full read; --limit only short-circuits the decode walk and would truncate the teed .bin");
     }
 
+    // Open the stream first: a `.tar.gz` yields its inner `snapshot-<block_id>.bin` entry name, which
+    // is the authoritative block_num source when the URL basename has none (e.g. `latest.tar.gz`).
+    let (s, inner_name) = open_stream_snap(url, args.tee.as_deref())?;
+    let url_basename = url.split(['?', '#']).next().unwrap_or(url);
+    if let Some(n) = &inner_name {
+        eprintln!("[snapshot-load] tar entry {n}");
+    }
+    let block_num = resolve_block_num(args.block_num, inner_name.as_deref().unwrap_or(url_basename))?;
+    eprintln!("[snapshot-load] head block_num={block_num}");
+
     if want_permissions {
-        let s = open_stream_snap(url, args.tee.as_deref())?;
         let mut out: Box<dyn Write> = match &args.out {
             Some(p) => Box::new(BufWriter::with_capacity(
                 1 << 20,
@@ -837,6 +907,7 @@ fn run_url_path(args: &Args) -> Result<()> {
             &mut *out,
             args.limit,
             args.stats_only,
+            args.tee.is_some(),
         )?;
         out.flush()?;
         eprintln!("[snapshot-load] done in {:.1?}", t0.elapsed());
@@ -844,9 +915,7 @@ fn run_url_path(args: &Args) -> Result<()> {
         return Ok(());
     }
 
-    let t = build_targets(&specs, &names)?;
-    let mongo_cfg = build_mongo_cfg(args)?;
-    let s = open_stream_snap(url, args.tee.as_deref())?;
+    let (t, mongo_cfg) = main_cfg.expect("main_cfg built when !want_permissions");
     let (ps, ws, ms) = run_stream(
         s,
         &t,
@@ -857,6 +926,7 @@ fn run_url_path(args: &Args) -> Result<()> {
         args.stats_only,
         args.raw,
         mongo_cfg,
+        args.tee.is_some(),
     )?;
     report_run(args, t0, &ps, &ws, &ms);
     Ok(())
