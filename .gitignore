@@ -5,3 +5,9 @@
 *.ckpt.tmp
 # local state-history copies used for testing
 /sh-*/
+# downloaded chain snapshots used for testing
+/snapshots/
+# local AntelopeIO/spring source clone for snapshot-format study
+/.spring-src/
+# scratch decode/index output
+/out/

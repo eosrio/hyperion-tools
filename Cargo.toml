@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.88"  # mongodb 3.7 MSRV (snapshot-load Mongo sink); local toolchain is newer
 license = "MIT"
 repository = "https://github.com/eosrio/hyperion-tools"
 authors = ["EOS Rio"]
