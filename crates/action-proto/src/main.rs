@@ -1,4 +1,4 @@
-//! action-proto — PROTOTYPE: a direct-from-disk Hyperion *action* indexer.
+//! action-proto — experimental direct-from-disk Hyperion *action* indexer.
 //!
 //! The sibling of `delta-proto`, pointed at `trace_history.{log,index}` instead of
 //! `chain_state_history.*`. It reads the append-only trace log off disk in parallel (no nodeos,
@@ -20,7 +20,7 @@
 //! PHASE A scope: emits every field EXCEPT the block-header fields `@timestamp` and `producer`
 //! (those live only in the signed_block, not in any trace — Phase B reads the block log), and
 //! defers the computed `@transfer`/`@newaccount`/... handlers to a later slice. Uses a static
-//! chunk split (delta-proto style); work-stealing + checkpoint is a later productionization step.
+//! chunk split (delta-proto style); work-stealing + checkpoint can be added when needed.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -40,7 +40,7 @@ use hyperion_ship::disk::{decode_payload, is_ship_magic};
 use hyperion_ship::trace;
 
 #[derive(Parser, Debug)]
-#[command(about = "PROTOTYPE: decode action_traces directly from the trace_history log.")]
+#[command(about = "Experimental: decode action_traces directly from the trace_history log.")]
 struct Args {
     /// nodeos state-history dir (trace_history.{log,index})
     #[arg(long)]

@@ -93,7 +93,7 @@ impl WorkerStats {
 pub struct AbiRegistry {
     raw: Arc<HashMap<u64, Vec<u8>>>,
     cache: HashMap<u64, Option<AbiHandle>>,
-    /// Cached "is this a standard token contract" verdict per code (mirrors sync-accounts `scanABIs`).
+    /// Cached "is this a standard token contract" eligibility per code (mirrors sync-accounts `scanABIs`).
     token_cache: HashMap<u64, bool>,
     names: Abieos,
     accounts_name: u64,
@@ -129,12 +129,12 @@ impl AbiRegistry {
         if let Some(v) = self.token_cache.get(&code) {
             return *v;
         }
-        let verdict = self.compute_token_verdict(code);
-        self.token_cache.insert(code, verdict);
-        verdict
+        let eligible = self.compute_token_eligibility(code);
+        self.token_cache.insert(code, eligible);
+        eligible
     }
 
-    fn compute_token_verdict(&mut self, code: u64) -> bool {
+    fn compute_token_eligibility(&mut self, code: u64) -> bool {
         // Fast pre-filter via the already-parsed AbiHandle: needs accounts + stat tables + a transfer
         // action. Avoids the abi_bin_to_json parse below for the common non-token case.
         let (acc, stat, xfer) = (self.accounts_name, self.stat_name, self.transfer_name);
@@ -406,11 +406,11 @@ mod tests {
         assert!(!transfer_fields_match(&abi));
     }
 
-    /// Integration test for the whole verdict path: pack real ABIs with `abi_json_to_bin`, then drive
+    /// Integration test for the whole eligibility path: pack real ABIs with `abi_json_to_bin`, then drive
     /// `AbiRegistry::is_token_contract` so the `AbiHandle` prefilter, the `abi_bin_to_json` re-render,
     /// `transfer_fields_match`, and the per-code cache all run together.
     #[test]
-    fn compute_token_verdict_accepts_token_rejects_nft() {
+    fn compute_token_eligibility_accepts_token_rejects_nft() {
         use super::AbiRegistry;
         use rs_abieos::Abieos;
         use std::collections::HashMap;
@@ -461,7 +461,7 @@ mod tests {
             !reg.is_token_contract(nft),
             "simpleassets-style NFT (transfer takes assetids) should be rejected"
         );
-        // second call hits the cache and yields the same verdict
+        // second call hits the cache and yields the same result
         assert!(reg.is_token_contract(tkn));
         assert!(!reg.is_token_contract(nft));
     }

@@ -9,7 +9,7 @@ set -euo pipefail
 
 STATE_HISTORY="${STATE_HISTORY:-/data/nodeos/state-history}"
 SCANNER="${SCANNER:-abi-scanner}"
-REPO="${REPO:-eosrio/abi-scanner}"
+REPO="${REPO:-eosrio/hyperion-tools}"
 THREADS="${THREADS:-8}"
 OUT="${OUT:-wax-abi.ndjson}"
 CKPT="${CKPT:-wax-abi.ckpt}"

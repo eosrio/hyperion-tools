@@ -328,9 +328,8 @@ pub fn scan_disk<W: Write + Send>(
     // Chunk size is a tuning knob (`--chunk-size`). Counter-intuitively, *smaller* chunks are
     // faster on a cold, I/O-bound full-chain scan: they keep the N threads' read cursors
     // clustered close together so they share filesystem prefetch/cache locality. Large,
-    // widely-spread chunks scatter the streams and seek more; too many threads thrash a shared
-    // array. Measured on WAX over a ZFS NVMe array, ~8 threads with ~20k-block chunks peaked
-    // (4 or 16 threads, and 250k chunks, were all markedly slower).
+    // widely-spread chunks scatter the streams and seek more; too many threads can thrash shared
+    // storage. Tune `--threads` and `--chunk-size` together for the backing disk.
     let chunk = chunk_size.max(1);
     let cursor = Arc::new(AtomicU64::new(start as u64));
     // Completed chunk start-offsets, for computing the contiguous resume watermark.

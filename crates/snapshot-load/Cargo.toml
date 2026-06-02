@@ -1,6 +1,6 @@
 [package]
 name = "snapshot-load"
-description = "PROTOTYPE: decode active contract-table state (eosio voters, token balances) directly from an Antelope portable snapshot .bin into Hyperion-shaped NDJSON. No nodeos, no SHiP — deterministic point-in-time state."
+description = "Decode active Antelope portable snapshot state into Hyperion-shaped NDJSON or MongoDB collections without nodeos or SHiP replay."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

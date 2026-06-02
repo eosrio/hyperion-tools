@@ -48,7 +48,7 @@ struct Args {
     checkpoint: Option<String>,
     /// Disk: blocks per work-stealing chunk. Smaller keeps the threads' read cursors clustered
     /// (better shared prefetch/cache locality on a cold, I/O-bound scan); larger scatters them.
-    /// ~8 threads with small chunks was the measured sweet spot on a ZFS NVMe array.
+    /// Tune this with `--threads` for the storage backing the state-history log.
     #[arg(long, default_value_t = 20_000)]
     chunk_size: u64,
     /// Disk: entries whose payload is at least this many bytes are stream-inflated only up to the

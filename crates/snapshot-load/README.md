@@ -114,7 +114,7 @@ snapshot-load --snapshot snapshot-<id>.bin --chain telos \
 The `serde_json::Value → BSON` encode happens in the parallel decode workers (not the single batch
 accumulator), so the concurrent writers actually saturate the sink. The run reports decode+write
 `docs/s`, per-collection counts, the index-build time, and grand-total wall-clock — the end-to-end
-"index a full table set" number. Measured locally against a throwaway
+"index a full table set" number. Reference benchmark against a disposable
 `docker run --rm -p 27017:27017 mongo:8`: **Telos `accounts` — 1,145,012 validated token-balance docs,
 write 1.8 s → ~623 K docs/s, indexes 3.5 s, grand total 5.4 s, 0 errors** (writers=24, batch=6000;
 only validated token contracts are written, mirroring `sync-accounts` `scanABIs`).
@@ -209,6 +209,14 @@ with no matching `approvals2` row simply omits those three fields (matching `syn
 
 ## Reproducing the validation
 
-Helper scripts live under `snapshots/` (gitignored): `tojson.sh` (run spring-util to-json), `diff.py`
-(byte-diff our `--raw` output vs the oracle JSON), `inspect.sh` (section/row-format dump). spring-util is
-obtained without sudo by extracting the release `.deb` (`dpkg-deb -x antelope-spring_*.deb ~/spring`).
+The validation matrix above is reproduced by pairing `snapshot-load --raw` with Spring's reference
+decoder:
+
+```bash
+snapshot-load --snapshot snapshot-<id>.bin --raw --tables voters,accounts --out ours.ndjson
+spring-util snapshot to-json snapshot-<id>.bin > spring.json
+```
+
+Diff the selected `(code, scope, table, primary_key, payer, value)` tuples from both outputs, and keep the
+in-tool invariants enabled. `spring-util snapshot info snapshot-<id>.bin` is also useful for checking the
+header version, block id, chain id, and head block before comparing decoded rows.

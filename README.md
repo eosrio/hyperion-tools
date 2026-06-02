@@ -14,23 +14,25 @@ The zero-copy state-history deserializer at the core originated in EOS Rio's **[
 |---|---|---|
 | **`hyperion-ship`** | library | The shared SHiP read + decode core: the parallel direct-from-disk state-history reader, the zero-copy trace/delta hand-walk decoders, the block-log reader, and ABI extraction — on the pure-Rust `rs_abieos` backend. |
 | **`abi-scanner`** | binary · stable | Extracts every contract ABI version (`setabi`) across a chain's history into a portable, Elasticsearch-ingestible snapshot — via SHiP or directly from the state-history log. |
+| **`snapshot-load`** | binary · stable | Decodes active contract-table state directly from Antelope portable snapshots (`.bin`, `.bin.zst`, streamed URLs) into Hyperion-shaped NDJSON or MongoDB collections. |
 | **`archive-server`** | binary · v4.5 | On-demand tiered-storage archive: serves action `act.data` and `contract_row` delta values from frozen state-history logs over HTTP, so cold-tier ES docs can drop the heavy payloads and hydrate on read. |
 | **`action-proto`** | binary · experimental | Direct-from-disk action reader: decodes `action_traces` from `trace_history` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). The next-gen indexer read path. |
 | **`delta-proto`** | binary · experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas from `chain_state_history` into Hyperion-shaped delta NDJSON. |
 | **`es-load`** | binary · tooling | Fast, multi-threaded NDJSON → Elasticsearch `_bulk` loader for measuring the ES write ceiling. Loopback-only by default. |
 | **`slice-log`** | binary · tooling | Extracts a rebased block-range slice of a state-history ship log (or the block log), read-only, for local ground-truth testing of the direct-from-disk tools. |
 
-> **Maturity:** `abi-scanner` is production-ready (it builds the published ABI snapshots). `archive-server` powers the v4.5 tiered-storage path. `action-proto`/`delta-proto` are the direct-from-disk indexer **prototypes** — the road to replacing the `ship-0` serializer entirely. `es-load`/`slice-log` are local benchmarking / test-fixture tooling.
+> **Maturity:** `abi-scanner` builds the published ABI snapshots, and `snapshot-load` is validated against portable snapshot fixtures for the supported layouts. `archive-server` powers the v4.5 tiered-storage path. `action-proto`/`delta-proto` are experimental direct-from-disk indexer previews. `es-load`/`slice-log` are local benchmarking / test-fixture tooling.
 
 ## Build
 
-Requires a Rust toolchain (1.74+). No C++/clang needed — the pure-Rust abieos backend is used, and every dependency (including [`rs_abieos`](https://crates.io/crates/rs_abieos)'s `rust-backend`) comes from crates.io. No git dependencies.
+Requires a Rust toolchain (1.88+). No C++/clang needed — the pure-Rust abieos backend is used, and every dependency (including [`rs_abieos`](https://crates.io/crates/rs_abieos)'s `rust-backend`) comes from crates.io. No git dependencies.
 
 ```bash
 git clone https://github.com/eosrio/hyperion-tools
 cd hyperion-tools
 cargo build --release
-# all binaries land in target/release/: abi-scanner, archive-server, action-proto, delta-proto, es-load, slice-log
+# all binaries land in target/release/: abi-scanner, snapshot-load, archive-server,
+# action-proto, delta-proto, es-load, slice-log
 ```
 
 Build a single tool with `cargo build --release --bin <name>`. The repo is a Cargo workspace; the shared `hyperion-ship` library lives in `crates/core`, and each binary is its own crate under `crates/`.
@@ -132,8 +134,23 @@ Dense WAX era (~478 deltas/block), single live node:
 ### Limitations
 
 - `@timestamp` is omitted; the Hyperion abi lookup keys on `block`. Can be added from the block header if needed.
-- A direct `--es` bulk sink (instead of NDJSON) is a planned add-on.
-- `--checkpoint` resume is `--from-disk` only; SHiP-mode resume is not yet wired up.
+- For direct Elasticsearch ingest, feed the NDJSON into `es-load` or an `_bulk` request.
+- `--checkpoint` resume is available for `--from-disk`; SHiP-mode scans should be rerun from the desired start block.
+
+---
+
+## `snapshot-load` — portable snapshot state loader
+
+Decodes active table state directly from an Antelope portable snapshot (`.bin`, `.bin.zst`, or streamed download) and emits Hyperion-shaped documents without starting nodeos or replaying SHiP.
+
+```bash
+snapshot-load --snapshot snapshot-<id>.bin --tables voters,accounts --out state.ndjson
+
+snapshot-load --snapshot-url https://example.org/snaps/telos/latest.tar.gz \
+  --chain telos --tables accounts --mongo mongodb://localhost:27017
+```
+
+The reader supports pre-v7 commingled `contract_tables` snapshots and v8 split-section snapshots, branching on `chain_snapshot_header.version`. It covers the `hyp-control sync` targets: voters, token balances, proposals, dynamic contract-state tables, and permissions. See [`crates/snapshot-load/README.md`](crates/snapshot-load/README.md) and the format reference in [`crates/snapshot-load/FORMAT.md`](crates/snapshot-load/FORMAT.md).
 
 ---
 
@@ -164,7 +181,7 @@ The batch endpoints group requested positions by block so each block is read and
 
 ## `action-proto` / `delta-proto` — direct-from-disk readers (experimental)
 
-The prototype read path for the next-gen indexer: decode Hyperion-shaped action/delta documents straight from the on-disk logs, at core-scaling throughput, with no `ship-0` serializer in the loop. Both emit NDJSON (or, for `action-proto`, straight to Elasticsearch) and support a **cold-tier metadata-only** mode that omits the heavy payload the `archive-server` re-serves on demand.
+Experimental read paths for the next-gen indexer: decode Hyperion-shaped action/delta documents straight from the on-disk logs, at core-scaling throughput, with no `ship-0` serializer in the loop. Both emit NDJSON (or, for `action-proto`, straight to Elasticsearch) and support a **cold-tier metadata-only** mode that omits the heavy payload the `archive-server` re-serves on demand.
 
 ```bash
 action-proto --from-disk /data/nodeos/state-history --abi-index abi.ndjson \

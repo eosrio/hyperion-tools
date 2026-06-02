@@ -1,10 +1,10 @@
 //! archive-server — an on-demand "historical archive" HTTP server.
 //!
 //! The keystone of a tiered-storage design: Elasticsearch keeps only indexed *metadata* for old
-//! blocks (block_num, global_sequence, account, name, …), while the actual action `act.data`
-//! payloads are served straight from the frozen, compressed `trace_history.{log,index}`. The data
-//! is never duplicated — one archive process fronts one frozen block range, decoding `act.data`
-//! lazily, exactly when a request for it arrives.
+//! blocks (block_num, global_sequence, account, name, …), while action `act.data` payloads and
+//! contract_row delta values are served straight from frozen, compressed state-history logs. The
+//! data is never duplicated — one archive process fronts one frozen block range, decoding payloads
+//! lazily, exactly when a request for them arrives.
 //!
 //! Mechanics (reused verbatim from `action-proto`, kept self-contained here per the bin contract):
 //!   * Seek the index at `(block_num - first_block) * 8` -> 8-byte log offset.
@@ -40,10 +40,10 @@ use hyperion_ship::trace::{self, Tx};
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "On-demand historical archive: decode action act.data straight from a frozen trace_history log range over HTTP."
+    about = "On-demand historical archive: decode action act.data and contract_row values from frozen state-history logs over HTTP."
 )]
 struct Args {
-    /// nodeos state-history dir (must contain trace_history.{log,index}).
+    /// nodeos state-history dir (must contain trace_history.{log,index}; chain_state_history.{log,index} enables /deltas).
     #[arg(long)]
     from_disk: String,
     /// abi-index NDJSON produced by abi-scanner ({account, block, abi_hex, ...}).
