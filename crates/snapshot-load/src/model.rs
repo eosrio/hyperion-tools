@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
-use crate::reader::{Section, Snap};
+use crate::reader::{Section, SnapRead};
 
 /// One selected contract-table primary row, owned so it can cross the decode-channel.
 pub struct RawRow {
@@ -189,7 +189,7 @@ impl AbiRegistry {
 /// Parse the `account_object` section into `code(u64) -> packed abi_def bytes`.
 /// Row = name(u64) | creation_date(u32) | varuint abi_len | abi_len bytes. The varuint length is
 /// consumed here, so the stored bytes are exactly what `AbiHandle::from_bin` expects. Empty ABIs skipped.
-pub fn load_abis(s: &mut Snap, sec: &Section) -> Result<HashMap<u64, Vec<u8>>> {
+pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Vec<u8>>> {
     s.seek_to(sec.payload_off)?;
     let end = sec.payload_off + sec.payload_len;
     let mut map = HashMap::new();
@@ -204,10 +204,10 @@ pub fn load_abis(s: &mut Snap, sec: &Section) -> Result<HashMap<u64, Vec<u8>>> {
         s.read_buf(&mut abi)?;
         map.insert(name, abi);
     }
-    if s.pos != end {
+    if s.pos() != end {
         bail!(
             "account_object walk desync: consumed to {} but section ends at {}",
-            s.pos,
+            s.pos(),
             end
         );
     }

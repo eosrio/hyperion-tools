@@ -18,7 +18,7 @@ use std::io::Write;
 use anyhow::{anyhow, bail, Result};
 use rs_abieos::{AbiHandle, Abieos};
 
-use crate::reader::{find, Section, Snap};
+use crate::reader::{find, Section, SnapRead};
 
 #[derive(Default, Debug)]
 pub struct PermStats {
@@ -77,7 +77,7 @@ fn authority_len(b: &[u8]) -> Option<usize> {
     Some(o)
 }
 
-fn read_section_bytes(s: &mut Snap, sec: &Section) -> Result<Vec<u8>> {
+fn read_section_bytes(s: &mut impl SnapRead, sec: &Section) -> Result<Vec<u8>> {
     // NOTE: reads the whole section into memory (Telos ~188 MB, FIO ~406 MB — fine; for EOS-scale a
     // streaming parse would be better, but the permission sections are far smaller than contract_tables).
     s.seek_to(sec.payload_off)?;
@@ -86,9 +86,12 @@ fn read_section_bytes(s: &mut Snap, sec: &Section) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// Seek path: read both native sections fully into `Vec`s (`permission_link_object` first, then
+/// `permission_object` — they are read in either order on a seekable file), then delegate to the
+/// shared buffer-driven decoder. Byte-identical to the previous inline body (pure extraction).
 #[allow(clippy::too_many_arguments)]
 pub fn decode_permissions(
-    s: &mut Snap,
+    s: &mut impl SnapRead,
     secs: &[Section],
     abi_raw: &HashMap<u64, Vec<u8>>,
     names: &Abieos,
@@ -102,38 +105,78 @@ pub fn decode_permissions(
         .ok_or_else(|| anyhow!("no permission_object section"))?;
     let link_sec = find(secs, "eosio::chain::permission_link_object")
         .ok_or_else(|| anyhow!("no permission_link_object section"))?;
+
+    let lbuf = read_section_bytes(s, link_sec)?;
+    let pbuf = read_section_bytes(s, perm_sec)?;
+    decode_permissions_bufs(
+        &lbuf,
+        link_sec.rows,
+        &pbuf,
+        perm_sec.rows,
+        abi_raw,
+        names,
+        eosio,
+        block_num,
+        out,
+        limit,
+        stats_only,
+    )
+}
+
+/// Buffer-driven permissions decoder shared by the seek path and the streaming forward pass.
+/// Both native sections are already fully materialised into `lbuf` / `pbuf` before this is called.
+/// In writer order `permission_object` precedes `permission_link_object`, but the link map must be
+/// built first; the stream driver buffers the permission_object payload until the link section
+/// arrives, then calls this with both buffers in hand (see `main.rs::run_stream`).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_permissions_bufs(
+    lbuf: &[u8],
+    link_rows: u64,
+    pbuf: &[u8],
+    perm_rows: u64,
+    abi_raw: &HashMap<u64, Vec<u8>>,
+    names: &Abieos,
+    eosio: u64,
+    block_num: u32,
+    out: &mut dyn Write,
+    limit: Option<u64>,
+    stats_only: bool,
+) -> Result<PermStats> {
     let mut st = PermStats::default();
 
     // 1. permission_link_object (4 names, 32B/row) -> (account, required_permission) -> [(code, action)]
-    let lbuf = read_section_bytes(s, link_sec)?;
-    if lbuf.len() as u64 != link_sec.rows * 32 {
+    if lbuf.len() as u64 != link_rows * 32 {
         bail!(
             "permission_link_object: expected rows*32 = {} bytes but section payload is {}",
-            link_sec.rows * 32,
+            link_rows * 32,
             lbuf.len()
         );
     }
     let mut links: HashMap<(u64, u64), Vec<(u64, u64)>> = HashMap::new();
-    for i in 0..link_sec.rows as usize {
+    for i in 0..link_rows as usize {
         let o = i * 32;
         let f = |j: usize| u64::from_le_bytes(lbuf[o + j..o + j + 8].try_into().unwrap());
         let (account, code, message_type, required_permission) = (f(0), f(8), f(16), f(24));
-        links.entry((account, required_permission)).or_default().push((code, message_type));
+        links
+            .entry((account, required_permission))
+            .or_default()
+            .push((code, message_type));
         st.links += 1;
     }
 
     // 2. eosio ABI for rendering authority + time_point (fallback to hex/µs if unavailable)
-    let mut eosio_abi: Option<AbiHandle> = abi_raw.get(&eosio).and_then(|b| AbiHandle::from_bin(b).ok());
+    let mut eosio_abi: Option<AbiHandle> = abi_raw
+        .get(&eosio)
+        .and_then(|b| AbiHandle::from_bin(b).ok());
 
     // 3. permission_object rows = snapshot_permission_object
-    let pbuf = read_section_bytes(s, perm_sec)?;
     let n = |v: u64| names.name_to_string(v).unwrap_or_else(|_| v.to_string());
     let mut o = 0usize;
     let mut auth_json = String::new();
     let mut ts_json = String::new();
     let mut broke_early = false;
 
-    for _ in 0..perm_sec.rows {
+    for _ in 0..perm_rows {
         if o + 40 > pbuf.len() {
             bail!("permission_object: truncated fixed fields at offset {o}");
         }
@@ -141,8 +184,11 @@ pub fn decode_permissions(
         let (parent, owner, name) = (g(0), g(8), g(16));
         let last_updated = &pbuf[o + 24..o + 32]; // time_point i64 µs LE  (last_used at +32..+40, unused)
         let auth_off = o + 40;
-        let alen = authority_len(pbuf.get(auth_off..).ok_or_else(|| anyhow!("authority oob"))?)
-            .ok_or_else(|| anyhow!("bad authority at offset {auth_off}"))?;
+        let alen = authority_len(
+            pbuf.get(auth_off..)
+                .ok_or_else(|| anyhow!("authority oob"))?,
+        )
+        .ok_or_else(|| anyhow!("bad authority at offset {auth_off}"))?;
         let auth_bytes = pbuf
             .get(auth_off..auth_off + alen)
             .ok_or_else(|| anyhow!("authority slice oob at {auth_off}"))?;
@@ -154,9 +200,10 @@ pub fn decode_permissions(
         st.permissions += 1;
 
         // decode authority (always — feeds both stats and the doc)
-        let auth_ok = eosio_abi
-            .as_mut()
-            .is_some_and(|h| h.bin_to_json_into("authority", auth_bytes, &mut auth_json).is_ok());
+        let auth_ok = eosio_abi.as_mut().is_some_and(|h| {
+            h.bin_to_json_into("authority", auth_bytes, &mut auth_json)
+                .is_ok()
+        });
         if auth_ok {
             st.auth_decoded += 1;
         } else {
@@ -164,19 +211,26 @@ pub fn decode_permissions(
         }
 
         if !stats_only {
-            let ts_ok = eosio_abi
-                .as_mut()
-                .is_some_and(|h| h.bin_to_json_into("time_point", last_updated, &mut ts_json).is_ok());
+            let ts_ok = eosio_abi.as_mut().is_some_and(|h| {
+                h.bin_to_json_into("time_point", last_updated, &mut ts_json)
+                    .is_ok()
+            });
             write!(out, "{{\"block_num\":{block_num},\"last_updated\":")?;
             if ts_ok {
                 write!(out, "{ts_json}")?;
             } else {
-                write!(out, "{}", i64::from_le_bytes(last_updated.try_into().unwrap()))?;
+                write!(
+                    out,
+                    "{}",
+                    i64::from_le_bytes(last_updated.try_into().unwrap())
+                )?;
             }
             write!(
                 out,
                 ",\"account\":\"{}\",\"perm_name\":\"{}\",\"parent\":\"{}\",\"required_auth\":",
-                n(owner), n(name), n(parent)
+                n(owner),
+                n(name),
+                n(parent)
             )?;
             if auth_ok {
                 write!(out, "{auth_json}")?;
@@ -189,7 +243,12 @@ pub fn decode_permissions(
                     if i > 0 {
                         write!(out, ",")?;
                     }
-                    write!(out, "{{\"account\":\"{}\",\"action\":\"{}\"}}", n(*code), n(*action))?;
+                    write!(
+                        out,
+                        "{{\"account\":\"{}\",\"action\":\"{}\"}}",
+                        n(*code),
+                        n(*action)
+                    )?;
                 }
             }
             writeln!(out, "],\"present\":true}}")?;
@@ -202,7 +261,11 @@ pub fn decode_permissions(
     }
 
     if !broke_early && o != pbuf.len() {
-        bail!("permission_object walk DESYNC: consumed {} of {} bytes", o, pbuf.len());
+        bail!(
+            "permission_object walk DESYNC: consumed {} of {} bytes",
+            o,
+            pbuf.len()
+        );
     }
     Ok(st)
 }

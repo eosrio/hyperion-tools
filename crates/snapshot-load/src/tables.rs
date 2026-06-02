@@ -9,14 +9,14 @@ use std::collections::HashMap;
 use anyhow::{bail, Result};
 
 use crate::model::{ProducerStats, RawRow, Targets};
-use crate::reader::{Section, Snap, READ_SKIP_MAX, SECONDARY_ROW_SIZES};
+use crate::reader::{Section, SnapRead, READ_SKIP_MAX, SECONDARY_ROW_SIZES};
 
 /// v6: one commingled `contract_tables` section. Per table: `table_id_object` row, then for each of
 /// the 6 index types a `[varuint count][rows]` group. `table_id_object.count` must equal the sum of
 /// all 6 group counts (tripwire for a framing/skip-size desync), and the walk must consume the
 /// section to its exact byte boundary.
 pub fn walk_v6(
-    s: &mut Snap,
+    s: &mut impl SnapRead,
     sec: &Section,
     t: &Targets,
     limit: Option<u64>,
@@ -27,7 +27,7 @@ pub fn walk_v6(
     let mut ps = ProducerStats::default();
     let mut scratch: Vec<u8> = Vec::new();
 
-    while s.pos < end {
+    while s.pos() < end {
         let code = s.u64()?;
         let scope = s.u64()?;
         let table = s.u64()?;
@@ -81,12 +81,12 @@ pub fn walk_v6(
             break;
         }
     }
-    if !ps.limited && s.pos != end {
+    if !ps.limited && s.pos() != end {
         bail!(
             "contract_tables walk DESYNC: consumed to {} but section ends at {} (delta {})",
-            s.pos,
+            s.pos(),
             end,
-            end as i64 - s.pos as i64
+            end as i64 - s.pos() as i64
         );
     }
     Ok(ps)
@@ -95,7 +95,7 @@ pub fn walk_v6(
 /// v8: parse the standalone `table_id_object` section → `flattened ordinal -> (code,scope,table)`
 /// for our target tables. The 0-based row index is the flattened `t_id` the row sections reference.
 pub fn load_table_ids_v8(
-    s: &mut Snap,
+    s: &mut impl SnapRead,
     sec: &Section,
     t: &Targets,
 ) -> Result<HashMap<u64, (u64, u64, u64)>> {
@@ -112,10 +112,10 @@ pub fn load_table_ids_v8(
             interesting.insert(i, (code, scope, table));
         }
     }
-    if s.pos != end {
+    if s.pos() != end {
         bail!(
             "table_id_object walk desync: consumed to {} but section ends at {}",
-            s.pos,
+            s.pos(),
             end
         );
     }
@@ -126,7 +126,7 @@ pub fn load_table_ids_v8(
 /// is the flattened ordinal; in the key_value section every table has primary rows, so t_ids are
 /// strictly increasing (a wrong t_id width breaks that and the consumption check).
 pub fn walk_v8(
-    s: &mut Snap,
+    s: &mut impl SnapRead,
     kv_sec: &Section,
     interesting: &HashMap<u64, (u64, u64, u64)>,
     limit: Option<u64>,
@@ -138,7 +138,7 @@ pub fn walk_v8(
     let mut scratch: Vec<u8> = Vec::new();
     let mut prev_tid: i128 = -1;
 
-    while s.pos < end {
+    while s.pos() < end {
         let t_id = s.u64()?;
         let count = s.varuint()?;
         if (t_id as i128) <= prev_tid {
@@ -177,12 +177,12 @@ pub fn walk_v8(
             break;
         }
     }
-    if !ps.limited && s.pos != end {
+    if !ps.limited && s.pos() != end {
         bail!(
             "v8 key_value walk DESYNC: consumed to {} but section ends at {} (delta {})",
-            s.pos,
+            s.pos(),
             end,
-            end as i64 - s.pos as i64
+            end as i64 - s.pos() as i64
         );
     }
     Ok(ps)

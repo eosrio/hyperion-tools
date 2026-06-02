@@ -59,7 +59,10 @@ pub fn run_sink(cfg: MongoCfg, rx: crossbeam_channel::Receiver<SinkItem>) -> Res
     rt.block_on(async move { run_writer(cfg, rx).await })
 }
 
-async fn run_writer(cfg: MongoCfg, rx: crossbeam_channel::Receiver<SinkItem>) -> Result<MongoStats> {
+async fn run_writer(
+    cfg: MongoCfg,
+    rx: crossbeam_channel::Receiver<SinkItem>,
+) -> Result<MongoStats> {
     let mut opts = ClientOptions::parse(&cfg.uri).await?;
     opts.max_pool_size = Some(cfg.pool);
     opts.min_pool_size = Some(cfg.writers as u32);
@@ -130,7 +133,11 @@ async fn run_writer(cfg: MongoCfg, rx: crossbeam_channel::Receiver<SinkItem>) ->
         // merge + flush proposals
         let merged = merge_proposals(proposals, approvals);
         if !merged.is_empty() {
-            *per_coll_acc.lock().unwrap().entry(COLL_PROPOSALS).or_insert(0) += merged.len() as u64;
+            *per_coll_acc
+                .lock()
+                .unwrap()
+                .entry(COLL_PROPOSALS)
+                .or_insert(0) += merged.len() as u64;
             for chunk in merged.chunks(batch_size.max(1)) {
                 if acc_batch_tx
                     .blocking_send((COLL_PROPOSALS, chunk.to_vec()))
@@ -157,7 +164,10 @@ async fn run_writer(cfg: MongoCfg, rx: crossbeam_channel::Receiver<SinkItem>) ->
             let dropped = dropped.clone();
             let db_for_drop = db_for_drop.clone();
             async move {
-                if drop_dynamic && coll != COLL_VOTERS && coll != COLL_ACCOUNTS && coll != COLL_PROPOSALS
+                if drop_dynamic
+                    && coll != COLL_VOTERS
+                    && coll != COLL_ACCOUNTS
+                    && coll != COLL_PROPOSALS
                 {
                     let need = { dropped.lock().unwrap().insert(coll) };
                     if need {
@@ -188,7 +198,8 @@ async fn run_writer(cfg: MongoCfg, rx: crossbeam_channel::Receiver<SinkItem>) ->
         .await;
 
     let write_secs = write_t0.elapsed().as_secs_f64();
-    acc.join().map_err(|_| anyhow!("accumulator thread panicked"))?;
+    acc.join()
+        .map_err(|_| anyhow!("accumulator thread panicked"))?;
 
     let coll_counts: Vec<(String, u64)> = per_coll
         .lock()
@@ -295,12 +306,7 @@ async fn build_indexes(db: &mongodb::Database, coll: &str) -> Result<()> {
     let c = db.collection::<Document>(coll);
     let unique = || IndexOptions::builder().unique(true).build();
     let mk = |keys: Document| IndexModel::builder().keys(keys).build();
-    let mk_u = |keys: Document| {
-        IndexModel::builder()
-            .keys(keys)
-            .options(unique())
-            .build()
-    };
+    let mk_u = |keys: Document| IndexModel::builder().keys(keys).options(unique()).build();
 
     let models: Vec<IndexModel> = match coll {
         COLL_VOTERS => vec![

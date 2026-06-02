@@ -35,11 +35,7 @@ pub struct RowCtx<'a> {
 /// that the proposals merge step consumes (they are never written verbatim).
 ///
 /// `reg` is the per-worker ABI registry, needed only to decode `proposal.packed_transaction` actions.
-pub fn map_row(
-    ctx: &RowCtx,
-    data: Value,
-    reg: &mut AbiRegistry,
-) -> Option<(&'static str, Value)> {
+pub fn map_row(ctx: &RowCtx, data: Value, reg: &mut AbiRegistry) -> Option<(&'static str, Value)> {
     match (ctx.code, ctx.table) {
         ("eosio", "voters") => map_voter(ctx, data).map(|d| (COLL_VOTERS, d)),
         (_, "accounts") => map_account(ctx, data).map(|d| (COLL_ACCOUNTS, d)),

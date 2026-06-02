@@ -16,6 +16,10 @@ anyhow = { workspace = true }
 serde_json = { workspace = true }  # decoded-row JSON -> reshape into exact Hyperion doc shapes
 ruzstd = "0.7"  # pure-Rust zstd decoder (no C toolchain) for .bin.zst inputs
 crossbeam-channel = "0.5"  # MPMC channels for the scan -> decode-workers -> writer pipeline
+# Streaming HTTP-direct input: GET + on-the-fly decompress + decode (live-Hyperion spin-up overlap).
+ureq = { workspace = true }       # blocking streaming HTTP(S) body reader
+tar = { workspace = true }        # untar the single snapshot-*.bin from a .tar.gz stream
+flate2 = { workspace = true }     # GzDecoder for the .tar.gz leg
 # MongoDB sink (high-throughput parallel insert_many). Async tokio API, default features
 # (rustls-tls + bson-2); `mongodb::bson` provides Document/to_document. Needs Rust >= 1.88 (MSRV).
 mongodb = "3.7"
