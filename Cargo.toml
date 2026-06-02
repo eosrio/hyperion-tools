@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.88"  # mongodb 3.7 MSRV (snapshot-load Mongo sink); local toolchain is newer
 license = "MIT"
 repository = "https://github.com/eosrio/hyperion-tools"
 authors = ["EOS Rio"]
@@ -23,6 +23,10 @@ hex = "0.4"
 flate2 = "1"
 minreq = { version = "2", default-features = false }
 tiny_http = "0.12"
+# Streaming HTTP GET (blocking, rustls — no OpenSSL/C toolchain, matches ruzstd's pure-Rust stance).
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+# tar extraction to stream the single inner snapshot-*.bin from a .tar.gz.
+tar = "0.4"
 # Internal shared library.
 hyperion-ship = { path = "crates/core" }
 
