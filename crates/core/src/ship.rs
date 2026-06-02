@@ -125,7 +125,9 @@ async fn scan_range(
         }
         tx.send(Message::Binary(build_ack(1).into())).await.ok();
         processed += 1;
-        if processed.is_multiple_of(20000) {
+        // is_multiple_of() is only stable since 1.87, above our 1.74 MSRV — keep the `%` form.
+        #[allow(clippy::manual_is_multiple_of)]
+        if processed % 20000 == 0 {
             eprintln!("[c{id}] {processed} blocks ({found} ABIs) at {block_num}");
         }
         if block_num >= end {
