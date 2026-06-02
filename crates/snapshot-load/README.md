@@ -73,6 +73,13 @@ NDJSON emits the **exact Hyperion doc shapes** for the special targets (`IVoter`
 unpacked + per-action decoded); every other table emits the dynamic contract-state doc (`@`-prefixed
 system fields spread with the decoded row). `--raw` still emits the generic hex line for byte-diffing.
 
+> **Proposals in NDJSON:** the `proposal`↔`approvals2` join (`version`, `requested_approvals`,
+> `provided_approvals`) is performed only in the **`--mongo` sink**, which buffers and merges by
+> `(proposer, proposal_name)` at end-of-stream. In the default NDJSON sink the `approvals2` carrier
+> docs are **dropped** (never emitted), and each `proposal` line is the partial `IProposal` (proposer,
+> proposal_name, unpacked `trx`/`expiration`) **without** those three approval fields. For full
+> `IProposal` approvals, use the `--mongo` sink.
+
 ### MongoDB sink (high-throughput, parallel)
 
 Add `--mongo` to write straight into MongoDB instead of NDJSON (db = `<prefix>_<chain>`, collections
@@ -97,7 +104,7 @@ snapshot-load --snapshot snapshot-<id>.bin --chain telos \
 | `--mongo <uri>` | — | `mongodb://[user:pass@]host:port`; presence switches the sink from NDJSON to Mongo |
 | `--chain <name>` | — | **required** with `--mongo`; db name = `<mongo-prefix>_<chain>` |
 | `--mongo-prefix` | `hyperion` | database_prefix |
-| `--mongo-auth-source` | — | appended as `?authSource=` |
+| `--mongo-auth-source` | — | auth database, applied via the typed credential source (not appended to the URI) |
 | `--mongo-writers` | `8` | concurrent `insert_many` futures in flight |
 | `--mongo-batch` | `4000` | docs per `insert_many` |
 | `--mongo-pool` | writers+2 | max connection pool size |

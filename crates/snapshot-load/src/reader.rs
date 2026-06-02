@@ -7,7 +7,7 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 pub const MAGIC: u32 = 0x3051_0550;
 pub const FILE_FORMAT_VERSION: u32 = 1;
@@ -122,13 +122,21 @@ impl Snap {
         self.pos = p;
         Ok(())
     }
-    /// Advance the cursor by `n` bytes without materialising them.
+    /// Advance the cursor by `n` bytes without materialising them. `n` is untrusted (derived from
+    /// on-disk lengths), so guard the signed seek-offset cast and the position add against overflow.
     pub fn skip(&mut self, n: u64) -> Result<()> {
         if n == 0 {
             return Ok(());
         }
+        if n > i64::MAX as u64 {
+            bail!("skip {n} bytes overflows i64 seek offset at {}", self.pos);
+        }
+        let new_pos = self
+            .pos
+            .checked_add(n)
+            .ok_or_else(|| anyhow!("skip {n} overflows position {}", self.pos))?;
         self.f.seek(SeekFrom::Current(n as i64))?;
-        self.pos += n;
+        self.pos = new_pos;
         Ok(())
     }
     pub fn read_buf(&mut self, buf: &mut [u8]) -> Result<()> {
@@ -229,6 +237,22 @@ impl<R: Read> StreamSnap<R> {
             scratch: vec![0u8; READ_SKIP_MAX as usize],
         }
     }
+
+    /// Read-and-discard the rest of the stream to EOF, advancing `pos`. Used after the row-section
+    /// walk when `--tee` is active so the TeeReader mirrors EVERY byte (and gets its EOF flush),
+    /// producing an on-disk `.bin` byte-identical to the source. Returns total bytes drained.
+    pub fn drain_to_eof(&mut self) -> Result<u64> {
+        let mut total = 0u64;
+        loop {
+            let n = self.r.read(&mut self.scratch)?;
+            if n == 0 {
+                break; // EOF
+            }
+            self.pos += n as u64;
+            total += n as u64;
+        }
+        Ok(total)
+    }
 }
 
 impl<R: Read> SnapRead for StreamSnap<R> {
@@ -301,19 +325,165 @@ pub fn enumerate_sections(s: &mut Snap) -> Result<Vec<Section>> {
         let rows = s.u64()?;
         let name = s.cstr()?;
         let name_bytes = name.len() as u64 + 1; // + NUL
+        // `size` is untrusted: it must cover at least row_count(8) + name + NUL, and the section must
+        // fit inside the file. Guard before the subtraction (else u64 underflow → bogus huge
+        // payload_len) and before computing the next-section offset (else OOB / desync).
+        let header_bytes = 8 + name_bytes; // row_count(8) + name + NUL
+        if size < header_bytes {
+            bail!(
+                "section '{name}' at offset {start}: size {size} < header {header_bytes} (row_count+name+NUL) — malformed framing"
+            );
+        }
+        let next_off = after_size
+            .checked_add(size)
+            .ok_or_else(|| anyhow!("section '{name}' at {start}: next-section offset overflow (size {size})"))?;
+        if next_off > s.len {
+            bail!(
+                "section '{name}' at offset {start}: extends to {next_off} past file length {} — truncated/corrupt",
+                s.len
+            );
+        }
         let payload_off = after_size + 8 + name_bytes;
-        let payload_len = size - 8 - name_bytes; // size counts row_count(8) + name + NUL + payload
+        let payload_len = size - header_bytes; // size counts row_count(8) + name + NUL + payload
         out.push(Section {
             name,
             payload_off,
             rows,
             payload_len,
         });
-        s.seek_to(after_size + size)?; // next section
+        s.seek_to(next_off)?; // next section
     }
     Ok(out)
 }
 
 pub fn find<'a>(secs: &'a [Section], name: &str) -> Option<&'a Section> {
     secs.iter().find(|x| x.name == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Append one section frame to `buf`: `size(u64) | row_count(u64) | name(cstr) | payload`.
+    /// `size` is supplied explicitly so a test can deliberately make it inconsistent.
+    fn push_section(buf: &mut Vec<u8>, size: u64, rows: u64, name: &str, payload: &[u8]) {
+        buf.extend_from_slice(&size.to_le_bytes());
+        buf.extend_from_slice(&rows.to_le_bytes());
+        buf.extend_from_slice(name.as_bytes());
+        buf.push(0); // NUL
+        buf.extend_from_slice(payload);
+    }
+
+    /// A well-formed section size = row_count(8) + name + NUL + payload.
+    fn frame_size(name: &str, payload_len: usize) -> u64 {
+        (8 + name.len() + 1 + payload_len) as u64
+    }
+
+    /// Write `bytes` to a unique temp file and open a `Snap` over it (mirrors the on-disk path).
+    fn snap_over(bytes: &[u8], tag: &str) -> Snap {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let i = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "snapshot-load-reader-test-{}-{tag}-{i}.bin",
+            std::process::id()
+        ));
+        let mut f = File::create(&path).unwrap();
+        f.write_all(bytes).unwrap();
+        f.flush().unwrap();
+        drop(f);
+        Snap::open(path.to_str().unwrap()).unwrap()
+    }
+
+    /// header = magic(u32 LE) | file_format_version(u32 LE)
+    fn header() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&MAGIC.to_le_bytes());
+        v.extend_from_slice(&FILE_FORMAT_VERSION.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn minimal_section_list_parses() {
+        // header + two well-formed sections + end marker.
+        let mut buf = header();
+        push_section(&mut buf, frame_size("alpha", 3), 1, "alpha", &[0xaa, 0xbb, 0xcc]);
+        push_section(&mut buf, frame_size("beta", 0), 7, "beta", &[]);
+        buf.extend_from_slice(&u64::MAX.to_le_bytes()); // end-of-file marker
+
+        let mut s = snap_over(&buf, "ok");
+        let secs = enumerate_sections(&mut s).unwrap();
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].name, "alpha");
+        assert_eq!(secs[0].rows, 1);
+        assert_eq!(secs[0].payload_len, 3);
+        assert_eq!(secs[1].name, "beta");
+        assert_eq!(secs[1].rows, 7);
+        assert_eq!(secs[1].payload_len, 0);
+        // alpha's payload starts right after its own header bytes.
+        let mut s2 = snap_over(&buf, "ok2");
+        s2.seek_to(secs[0].payload_off).unwrap();
+        let mut p = vec![0u8; 3];
+        s2.read_buf(&mut p).unwrap();
+        assert_eq!(p, [0xaa, 0xbb, 0xcc]);
+    }
+
+    #[test]
+    fn end_marker_stops_enumeration() {
+        // One real section, then the end marker, then GARBAGE that must never be parsed.
+        let mut buf = header();
+        push_section(&mut buf, frame_size("only", 2), 1, "only", &[0x01, 0x02]);
+        buf.extend_from_slice(&u64::MAX.to_le_bytes()); // end marker
+        buf.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0x00, 0x11]); // trailing junk, never read
+
+        let mut s = snap_over(&buf, "end");
+        let secs = enumerate_sections(&mut s).unwrap();
+        assert_eq!(secs.len(), 1, "enumeration stops at the end marker");
+        assert_eq!(secs[0].name, "only");
+    }
+
+    #[test]
+    fn malformed_size_underflow_bails_not_panics() {
+        // size smaller than the mandatory header (row_count 8 + name + NUL) would underflow
+        // `size - header` → a bogus huge payload_len. Must surface a clean Err, not panic.
+        let mut buf = header();
+        // name "x" → header_bytes = 8 + 1 + 1 = 10; declare size = 5 (< 10).
+        push_section(&mut buf, 5, 0, "x", &[]);
+        buf.extend_from_slice(&u64::MAX.to_le_bytes());
+
+        let mut s = snap_over(&buf, "underflow");
+        let err = enumerate_sections(&mut s).unwrap_err();
+        assert!(
+            err.to_string().contains("malformed framing"),
+            "expected a framing error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn section_past_eof_bails_not_panics() {
+        // A size that points the next section past the file length must bail (OOB guard), not seek
+        // wild / produce a bogus huge payload_len.
+        let mut buf = header();
+        // Declare a size far larger than the bytes actually present.
+        push_section(&mut buf, 10_000, 1, "huge", &[0x01, 0x02]);
+        // (no end marker / not enough bytes for the declared size)
+
+        let mut s = snap_over(&buf, "pasteof");
+        let err = enumerate_sections(&mut s).unwrap_err();
+        assert!(
+            err.to_string().contains("past file length"),
+            "expected an EOF-overrun error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn bad_magic_bails() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        buf.extend_from_slice(&FILE_FORMAT_VERSION.to_le_bytes());
+        buf.extend_from_slice(&u64::MAX.to_le_bytes());
+        let mut s = snap_over(&buf, "magic");
+        let err = enumerate_sections(&mut s).unwrap_err();
+        assert!(err.to_string().contains("bad magic"), "got: {err}");
+    }
 }

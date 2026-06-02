@@ -46,34 +46,40 @@ fn read_varuint(b: &[u8]) -> Option<(u64, usize)> {
     }
 }
 
-/// Byte length of a serialized fc `public_key` (variant `[u8 type][data]`).
+/// Byte length of a serialized fc `public_key` (variant `[u8 type][data]`). All offset arithmetic
+/// is checked — `slen` is an untrusted varuint and could otherwise wrap `usize`.
 fn public_key_len(b: &[u8]) -> Option<usize> {
     match b.first()? {
         0 | 1 => Some(1 + 33), // K1 / R1: 33-byte compressed point
         2 => {
             // WebAuthn: 33-byte key + u8 user_presence + string rpid
-            let mut o = 1 + 33 + 1;
+            let o = 1 + 33 + 1;
             let (slen, k) = read_varuint(b.get(o..)?)?;
-            o += k + slen as usize;
-            Some(o)
+            // o + k + slen, all checked.
+            o.checked_add(k)?.checked_add(usize::try_from(slen).ok()?)
         }
         _ => None,
     }
 }
 
-/// Byte length of a serialized `authority`.
+/// Byte length of a serialized `authority`. `nk`/`na`/`nw` are untrusted varuint counts, so all
+/// offset math uses checked add/mul (returning None on overflow — the caller already bails).
 fn authority_len(b: &[u8]) -> Option<usize> {
     let mut o = 4usize; // threshold u32
     let (nk, k) = read_varuint(b.get(o..)?)?;
-    o += k;
+    o = o.checked_add(k)?;
     for _ in 0..nk {
-        o += public_key_len(b.get(o..)?)?;
-        o += 2; // weight u16
+        o = o.checked_add(public_key_len(b.get(o..)?)?)?;
+        o = o.checked_add(2)?; // weight u16
     }
     let (na, k) = read_varuint(b.get(o..)?)?;
-    o += k + na as usize * 18; // permission_level(16) + weight(2)
+    // permission_level(16) + weight(2) = 18 bytes per entry.
+    let na_bytes = usize::try_from(na).ok()?.checked_mul(18)?;
+    o = o.checked_add(k)?.checked_add(na_bytes)?;
     let (nw, k) = read_varuint(b.get(o..)?)?;
-    o += k + nw as usize * 6; // wait_sec(4) + weight(2)
+    // wait_sec(4) + weight(2) = 6 bytes per entry.
+    let nw_bytes = usize::try_from(nw).ok()?.checked_mul(6)?;
+    o = o.checked_add(k)?.checked_add(nw_bytes)?;
     Some(o)
 }
 
@@ -177,7 +183,8 @@ pub fn decode_permissions_bufs(
     let mut broke_early = false;
 
     for _ in 0..perm_rows {
-        if o + 40 > pbuf.len() {
+        // overflow-safe form of `o + 40 > pbuf.len()` (o is an accumulated, untrusted offset).
+        if pbuf.len().saturating_sub(o) < 40 {
             bail!("permission_object: truncated fixed fields at offset {o}");
         }
         let g = |j: usize| u64::from_le_bytes(pbuf[o + j..o + j + 8].try_into().unwrap());

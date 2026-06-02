@@ -196,7 +196,17 @@ pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Ve
     for _ in 0..sec.rows {
         let name = s.u64()?;
         let _creation_date = s.u32()?;
-        let abi_len = s.varuint()? as usize;
+        let abi_len_u = s.varuint()?;
+        // `abi_len` is an untrusted varuint driving `vec![0u8; abi_len]`; reject a length that cannot
+        // fit in the bytes remaining before the section end (prevents a huge alloc on malformed input).
+        let remaining = end.saturating_sub(s.pos());
+        if abi_len_u > remaining {
+            bail!(
+                "account_object: abi length {abi_len_u} exceeds {remaining} bytes remaining in section at offset {}",
+                s.pos()
+            );
+        }
+        let abi_len = abi_len_u as usize;
         if abi_len == 0 {
             continue;
         }

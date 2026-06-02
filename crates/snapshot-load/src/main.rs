@@ -83,7 +83,7 @@ struct Args {
     /// database_prefix (db name = <prefix>_<chain>)
     #[arg(long, default_value = "hyperion")]
     mongo_prefix: String,
-    /// optional authSource appended to the URI
+    /// optional auth database (applied via the typed credential source, not appended to the URI)
     #[arg(long)]
     mongo_auth_source: Option<String>,
     /// concurrent insert_many writer tasks (in-flight futures)
@@ -111,13 +111,20 @@ fn ensure_decompressed(path: &str) -> Result<String> {
     };
     if !std::path::Path::new(out_path).exists() {
         eprintln!("[snapshot-load] decompressing {path} -> {out_path}");
+        // Decompress to a sibling `.tmp` then atomically rename into place, so an interrupted run
+        // never leaves a half-written `<out>.bin` that a later run's `exists()` check would trust.
+        let tmp_path = format!("{out_path}.tmp");
         let inf = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
         let mut dec =
             ruzstd::StreamingDecoder::new(inf).map_err(|e| anyhow!("zstd init: {e:?}"))?;
-        let mut outf =
-            BufWriter::new(File::create(out_path).with_context(|| format!("create {out_path}"))?);
+        let mut outf = BufWriter::new(
+            File::create(&tmp_path).with_context(|| format!("create {tmp_path}"))?,
+        );
         std::io::copy(&mut dec, &mut outf)?;
         outf.flush()?;
+        drop(outf); // close before rename (Windows: cannot rename an open file)
+        std::fs::rename(&tmp_path, out_path)
+            .with_context(|| format!("rename {tmp_path} -> {out_path}"))?;
     }
     Ok(out_path.to_string())
 }
@@ -493,6 +500,7 @@ fn run_stream<R: Read>(
     stats_only: bool,
     raw: bool,
     mongo_cfg: Option<mongo::MongoCfg>,
+    tee_active: bool,
 ) -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)> {
     // header: magic + file_format_version (mirror enumerate_sections)
     let magic = s.u32()?;
@@ -520,6 +528,9 @@ fn run_stream<R: Read>(
         let rows = s.u64()?;
         let name = s.cstr()?;
         let name_bytes = name.len() as u64 + 1; // + NUL
+        if size < 8 + name_bytes {
+            bail!("malformed section framing: size {size} < header for '{name}'");
+        }
         let payload_off = after_size + 8 + name_bytes;
         let payload_len = size - 8 - name_bytes;
         let sec = Section {
@@ -575,11 +586,22 @@ fn run_stream<R: Read>(
                     raw,
                     mongo_cfg,
                     move |sink| {
-                        if name == "contract_tables" {
-                            tables::walk_v6(&mut s, &sec, t, limit, sink)
+                        let ps = if name == "contract_tables" {
+                            tables::walk_v6(&mut s, &sec, t, limit, sink)?
                         } else {
-                            tables::walk_v8(&mut s, &sec, &interesting, limit, sink)
+                            tables::walk_v8(&mut s, &sec, &interesting, limit, sink)?
+                        };
+                        // With --tee, the on-disk .bin must mirror EVERY source byte. The walk stops
+                        // at the row section's end (and `--limit` stops it even earlier), so drain the
+                        // remainder of the stream to EOF — this is also what triggers the TeeReader's
+                        // final EOF flush, making the teed file byte-identical to the source.
+                        if tee_active {
+                            let drained = s.drain_to_eof()?;
+                            eprintln!(
+                                "[snapshot-load] --tee: drained {drained} trailing bytes to complete the .bin"
+                            );
                         }
+                        Ok(ps)
                     },
                 );
             }
@@ -604,6 +626,7 @@ fn run_stream_permissions<R: Read>(
     out: &mut dyn Write,
     limit: Option<u64>,
     stats_only: bool,
+    tee_active: bool,
 ) -> Result<perms::PermStats> {
     let magic = s.u32()?;
     if magic != MAGIC {
@@ -626,6 +649,9 @@ fn run_stream_permissions<R: Read>(
         let rows = s.u64()?;
         let name = s.cstr()?;
         let name_bytes = name.len() as u64 + 1;
+        if size < 8 + name_bytes {
+            bail!("malformed section framing: size {size} < header for '{name}'");
+        }
         let payload_off = after_size + 8 + name_bytes;
         let payload_len = size - 8 - name_bytes;
 
@@ -649,10 +675,18 @@ fn run_stream_permissions<R: Read>(
                 s.read_into(payload_len as usize, &mut lbuf)?;
                 let (pbuf, perm_rows) = perm_buf
                     .ok_or_else(|| anyhow!("permission_link_object before permission_object"))?;
-                return perms::decode_permissions_bufs(
+                let st = perms::decode_permissions_bufs(
                     &lbuf, rows, &pbuf, perm_rows, &abi_raw, names, eosio, block_num, out, limit,
                     stats_only,
-                );
+                )?;
+                // With --tee, mirror the rest of the source bytes to disk (and trigger the EOF flush).
+                if tee_active {
+                    let drained = s.drain_to_eof()?;
+                    eprintln!(
+                        "[snapshot-load] --tee: drained {drained} trailing bytes to complete the .bin"
+                    );
+                }
+                return Ok(st);
             }
             _ => {
                 s.seek_to(payload_off + payload_len)?;
@@ -714,28 +748,23 @@ fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
     if args.raw {
         bail!("--raw and --mongo are mutually exclusive (raw emits hex, not decodable docs)");
     }
-    let mut uri = base_uri.clone();
-    if let Some(src) = &args.mongo_auth_source {
-        if uri.contains("?authSource=") || uri.contains("&authSource=") {
-            // already present
-        } else if uri.contains('?') {
-            uri.push_str(&format!("&authSource={src}"));
-        } else {
-            uri.push_str(&format!("/?authSource={src}"));
-        }
-    }
+    // --mongo-auth-source is applied via the typed credential `source` inside the sink (see
+    // mongo::run_writer), NOT string-appended to the URI.
+    let uri = base_uri.clone();
     let writers = args.mongo_writers.max(1);
     let db_name = format!("{}_{}", args.mongo_prefix, chain);
     eprintln!(
-        "[snapshot-load][mongo] {uri} -> db={db_name} | writers={writers} batch={} pool={} drop={} index={}",
+        "[snapshot-load][mongo] {uri} -> db={db_name} | writers={writers} batch={} pool={} drop={} index={} authSource={}",
         args.mongo_batch,
         args.mongo_pool.unwrap_or(writers as u32 + 2),
         args.mongo_drop,
         !args.mongo_no_index,
+        args.mongo_auth_source.as_deref().unwrap_or("<uri-default>"),
     );
     Ok(Some(mongo::MongoCfg {
         uri,
         db_name,
+        auth_source: args.mongo_auth_source.clone(),
         writers,
         batch: args.mongo_batch.max(1),
         pool: args.mongo_pool.unwrap_or(writers as u32 + 2),
@@ -837,6 +866,7 @@ fn run_url_path(args: &Args) -> Result<()> {
             &mut *out,
             args.limit,
             args.stats_only,
+            args.tee.is_some(),
         )?;
         out.flush()?;
         eprintln!("[snapshot-load] done in {:.1?}", t0.elapsed());
@@ -857,6 +887,7 @@ fn run_url_path(args: &Args) -> Result<()> {
         args.stats_only,
         args.raw,
         mongo_cfg,
+        args.tee.is_some(),
     )?;
     report_run(args, t0, &ps, &ws, &ms);
     Ok(())

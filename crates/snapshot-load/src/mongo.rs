@@ -1,10 +1,11 @@
 //! High-throughput MongoDB sink — the parallel "saturate the sink" writer (mirrors es-load).
 //!
 //! Decode workers send typed `(collection, serde_json::Value)` docs over a crossbeam channel. A single
-//! **bridge thread** owns a current-thread tokio runtime, accumulates per-collection batches of
-//! `--mongo-batch` docs, and drives `--mongo-writers` concurrent `insert_many(ordered(false))` futures
-//! over one pooled `Client` via `buffer_unordered`. Write concern is `w:1, journal:false` (bulk-load
-//! speed). Indexes are built AFTER the load (mirroring the sync modules), skippable for benchmarking.
+//! **bridge thread** owns a multi-thread tokio runtime (`run_sink`), accumulates per-collection batches
+//! of `--mongo-batch` docs, and drives `--mongo-writers` concurrent `insert_many(ordered(false))`
+//! futures over one pooled `Client` via `buffer_unordered`. Write concern is `w:1, journal:false`
+//! (bulk-load speed). Indexes are built AFTER the load (mirroring the sync modules), skippable for
+//! benchmarking.
 //!
 //! `proposals` are a special case: they require a `(proposer, proposal_name)` join against `approvals2`
 //! carrier docs, so they are buffered in the bridge thread and merged + written at end-of-stream.
@@ -17,7 +18,8 @@ use std::time::Instant;
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
-use mongodb::options::{Acknowledgment, ClientOptions, IndexOptions, WriteConcern};
+use mongodb::error::{Error as MongoError, ErrorKind};
+use mongodb::options::{Acknowledgment, ClientOptions, Credential, IndexOptions, WriteConcern};
 use mongodb::{Client, IndexModel};
 
 use crate::map::{COLL_ACCOUNTS, COLL_PROPOSALS, COLL_VOTERS};
@@ -26,6 +28,9 @@ use crate::map::{COLL_ACCOUNTS, COLL_PROPOSALS, COLL_VOTERS};
 pub struct MongoCfg {
     pub uri: String,
     pub db_name: String,
+    /// Optional auth database, applied via the typed credential `source` (NOT string-appended to the
+    /// URI). `None` leaves whatever the URI specifies (or the driver default).
+    pub auth_source: Option<String>,
     pub writers: usize,
     pub batch: usize,
     pub pool: u32,
@@ -66,6 +71,13 @@ async fn run_writer(
     let mut opts = ClientOptions::parse(&cfg.uri).await?;
     opts.max_pool_size = Some(cfg.pool);
     opts.min_pool_size = Some(cfg.writers as u32);
+    // Apply --mongo-auth-source via the typed credential `source` rather than string-appending
+    // `?authSource=` to the URI (which mishandles URIs that already carry query params / options).
+    if let Some(src) = &cfg.auth_source {
+        opts.credential
+            .get_or_insert_with(Credential::default)
+            .source = Some(src.clone());
+    }
     opts.write_concern = Some(
         WriteConcern::builder()
             .w(Acknowledgment::Nodes(1))
@@ -96,8 +108,11 @@ async fn run_writer(
     let per_coll = Arc::new(std::sync::Mutex::new(HashMap::<&'static str, u64>::new()));
     let drop_dynamic = cfg.drop;
     let db_for_drop = db.clone();
-    let dropped: Arc<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
-        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    // tokio Mutex (NOT std): the "drop this newly-seen dynamic collection" decision must be held
+    // ACROSS the async `drop().await`, so a concurrent batch for the same collection waits for the
+    // drop to complete before inserting (else its inserts could land and then be deleted by the drop).
+    let dropped: Arc<tokio::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new()));
 
     // Accumulator thread: groups docs per collection into batches, buffers proposals for the join.
     let acc_batch_tx = batch_tx.clone();
@@ -169,12 +184,15 @@ async fn run_writer(
                     && coll != COLL_ACCOUNTS
                     && coll != COLL_PROPOSALS
                 {
-                    let need = { dropped.lock().unwrap().insert(coll) };
-                    if need {
+                    // Hold the set guard across the drop await: the first batch for `coll` performs
+                    // the drop while later batches block here until it returns, guaranteeing no insert
+                    // races ahead of (and is then wiped by) the collection drop.
+                    let mut seen = dropped.lock().await;
+                    if seen.insert(coll) {
                         db_for_drop.collection::<Document>(coll).drop().await.ok();
                     }
                 }
-                let n = docs_vec.len() as u64;
+                let attempted = docs_vec.len();
                 match db
                     .collection::<Document>(coll)
                     .insert_many(docs_vec)
@@ -184,10 +202,15 @@ async fn run_writer(
                     Ok(r) => {
                         docs.fetch_add(r.inserted_ids.len() as u64, Relaxed);
                     }
-                    Err(_) => {
-                        // Unordered insert: count attempted; partial successes still landed server-side.
-                        docs.fetch_add(n, Relaxed);
+                    Err(e) => {
+                        // Count ONLY docs that actually landed. For an unordered insert the driver
+                        // surfaces per-document failures in `write_errors`, so inserted = attempted -
+                        // failures. For any other error (connection drop, etc.) we cannot know, so add
+                        // 0 rather than inflating the counter with the full attempted batch.
+                        let inserted = inserted_from_err(&e, attempted);
+                        docs.fetch_add(inserted, Relaxed);
                         errors.fetch_add(1, Relaxed);
+                        eprintln!("[snapshot-load][mongo] insert_many error in {coll}: {e}");
                     }
                 }
                 batches.fetch_add(1, Relaxed);
@@ -232,6 +255,18 @@ async fn run_writer(
     Ok(stats)
 }
 
+/// Best-effort count of docs that actually landed when an unordered `insert_many` errored. The
+/// driver reports per-document failures in `write_errors`, so `attempted - write_errors` is the
+/// number inserted server-side. Any non-`InsertMany` error (connection drop, write-concern failure
+/// with no per-doc detail, …) is treated as 0 inserted so the counter is never inflated.
+fn inserted_from_err(e: &MongoError, attempted: usize) -> u64 {
+    if let ErrorKind::InsertMany(ime) = e.kind.as_ref() {
+        let failed = ime.write_errors.as_ref().map_or(0, Vec::len);
+        return attempted.saturating_sub(failed) as u64;
+    }
+    0
+}
+
 /// Buffer a proposals-channel BSON doc into either the proposal map or the approvals map (carrier
 /// docs). The doc was already BSON-encoded by the worker; we just key it and (for proposals) fix up
 /// the expiration Date.
@@ -262,12 +297,15 @@ fn fixup_expiration(doc: &mut Document) {
         _ => None,
     };
     if let Some(s) = s {
-        // abieos renders "YYYY-MM-DDTHH:MM:SS.sss" (no zone). Append Z to parse as UTC.
-        let rfc = if s.ends_with('Z') || s.contains('+') {
-            s.clone()
-        } else {
-            format!("{s}Z")
-        };
+        // abieos renders "YYYY-MM-DDTHH:MM:SS.sss" (no zone). Append Z to parse as UTC — but only if
+        // the string does not ALREADY carry a zone. A zone is a trailing 'Z' or a +HH:MM / -HH:MM
+        // offset AFTER the date's 'T'. (The earlier `contains('+')` check missed negative offsets,
+        // and a plain date contains '-' separators, so scan only the time part for the offset sign.)
+        let has_zone = s.ends_with('Z')
+            || s.rsplit_once('T').is_some_and(|(_, time)| {
+                time.contains('+') || time.contains('-')
+            });
+        let rfc = if has_zone { s.clone() } else { format!("{s}Z") };
         if let Ok(dt) = DateTime::parse_rfc3339_str(&rfc) {
             doc.insert("expiration", Bson::DateTime(dt));
         }

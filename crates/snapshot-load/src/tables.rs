@@ -6,10 +6,25 @@
 
 use std::collections::HashMap;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
 use crate::model::{ProducerStats, RawRow, Targets};
 use crate::reader::{Section, SnapRead, READ_SKIP_MAX, SECONDARY_ROW_SIZES};
+
+/// Read an untrusted per-row value length (varuint) and reject it if it cannot fit in the bytes
+/// remaining before `end` — preventing a `vec![0u8; vlen]` over-allocation (and the subsequent
+/// out-of-section read) on malformed input. Returns the validated length as `usize`.
+fn read_vlen(s: &mut impl SnapRead, end: u64) -> Result<usize> {
+    let vlen = s.varuint()?;
+    let remaining = end.saturating_sub(s.pos());
+    if vlen > remaining {
+        bail!(
+            "row value length {vlen} exceeds {remaining} bytes remaining in section at offset {}",
+            s.pos()
+        );
+    }
+    usize::try_from(vlen).map_err(|_| anyhow!("row value length {vlen} does not fit in usize"))
+}
 
 /// v6: one commingled `contract_tables` section. Per table: `table_id_object` row, then for each of
 /// the 6 index types a `[varuint count][rows]` group. `table_id_object.count` must equal the sum of
@@ -44,7 +59,7 @@ pub fn walk_v6(
                 for _ in 0..n {
                     let pk = s.u64()?;
                     let payer = s.u64()?;
-                    let vlen = s.varuint()? as usize;
+                    let vlen = read_vlen(s, end)?;
                     ps.kv_rows += 1;
                     if selected && !ps.limited {
                         let mut value = vec![0u8; vlen];
@@ -66,7 +81,25 @@ pub fn walk_v6(
                     }
                 }
             } else {
-                let bytes = n * SECONDARY_ROW_SIZES[(idx - 1) as usize];
+                // `n` is an untrusted varuint count: a corrupt value times the fixed row size can
+                // overflow u64 → a tiny wrapped skip → silent stream desync. Use checked_mul.
+                let bytes = n
+                    .checked_mul(SECONDARY_ROW_SIZES[(idx - 1) as usize])
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "v6 secondary index {idx}: count {n} * row size overflows u64 at offset {}",
+                            s.pos()
+                        )
+                    })?;
+                // The whole group must still fit inside the section (guards against a bogus count
+                // that would skip far past `end`).
+                if bytes > end.saturating_sub(s.pos()) {
+                    bail!(
+                        "v6 secondary index {idx}: group of {bytes} bytes exceeds {} remaining in section at offset {}",
+                        end.saturating_sub(s.pos()),
+                        s.pos()
+                    );
+                }
                 if bytes <= READ_SKIP_MAX {
                     s.read_into(bytes as usize, &mut scratch)?;
                 } else {
@@ -150,7 +183,7 @@ pub fn walk_v8(
         for _ in 0..count {
             let pk = s.u64()?;
             let payer = s.u64()?;
-            let vlen = s.varuint()? as usize;
+            let vlen = read_vlen(s, end)?;
             ps.kv_rows += 1;
             if let Some((code, scope, table)) = sel {
                 if !ps.limited {
