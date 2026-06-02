@@ -78,34 +78,38 @@ pub fn for_each_account_row<F: FnMut(&[u8]) -> Result<()>>(deltas: &[u8], mut f:
     let (n_tables, k) =
         read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad table count"))?;
     off += k;
-    for _ in 0..n_tables {
-        let (_variant, k) =
-            read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad variant"))?;
+    if n_tables == 0 {
+        return Ok(()); // empty delta
+    }
+    // `account` is the first table in Leap/Spring's fixed delta order, so we only read the first
+    // table: if it isn't `account` the block has no setabi; if it is, its rows are the only ones we
+    // care about. Either way the dense contract_row table that follows is never walked.
+    let (_variant, k) =
+        read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad variant"))?;
+    off += k;
+    let (name_len, k) =
+        read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad name len"))?;
+    off += k;
+    let name = deltas
+        .get(off..off + name_len)
+        .ok_or_else(|| anyhow!("name oob"))?;
+    off += name_len;
+    let (rows, k) =
+        read_varuint(deltas.get(off..).unwrap_or(&[])).ok_or_else(|| anyhow!("bad rows count"))?;
+    off += k;
+    if name != b"account" {
+        return Ok(());
+    }
+    for _ in 0..rows {
+        off += 1; // present byte
+        let (data_len, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
+            .ok_or_else(|| anyhow!("bad data len"))?;
         off += k;
-        let (name_len, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
-            .ok_or_else(|| anyhow!("bad name len"))?;
-        off += k;
-        let name = deltas
-            .get(off..off + name_len)
-            .ok_or_else(|| anyhow!("name oob"))?;
-        off += name_len;
-        let (rows, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
-            .ok_or_else(|| anyhow!("bad rows count"))?;
-        off += k;
-        let is_account = name == b"account";
-        for _ in 0..rows {
-            off += 1; // present byte
-            let (data_len, k) = read_varuint(deltas.get(off..).unwrap_or(&[]))
-                .ok_or_else(|| anyhow!("bad data len"))?;
-            off += k;
-            if is_account {
-                let data = deltas
-                    .get(off..off + data_len)
-                    .ok_or_else(|| anyhow!("data oob"))?;
-                f(data)?;
-            }
-            off += data_len;
-        }
+        let data = deltas
+            .get(off..off + data_len)
+            .ok_or_else(|| anyhow!("data oob"))?;
+        f(data)?;
+        off += data_len;
     }
     Ok(())
 }
@@ -169,19 +173,67 @@ mod tests {
     }
 
     #[test]
-    fn truncated_delta_errors_not_panics() {
-        // A non-account table row whose data_len runs past the buffer end used to push the
-        // cursor out of bounds; the next read then panicked on `&deltas[off..]`. It must now
-        // surface a clean Err instead.
+    fn account_first_early_exit() {
+        // A non-account FIRST table -> early-exit with Ok, without walking (or even validating)
+        // the rest of the delta. `account` is emitted first, so a different first table means no
+        // setabi; the dense contract_row that follows is never touched. The trailing bytes here
+        // are deliberately malformed to prove we never read them.
         let buf = [
             0x02, // n_tables = 2
             0x00, // table 0: variant
             0x04, 0x74, 0x65, 0x73, 0x74, // name_len 4, "test" (not "account")
             0x01, // rows = 1
             0x01, // present byte
-            0x64, // data_len = 100 — but the buffer ends here
+            0x64, // data_len = 100 — would run off the buffer, but we never get here
         ];
-        // Advancing to table 1 reads at off=110 on a 10-byte buffer: pre-fix panic, now Err.
+        let mut hits = 0;
+        assert!(for_each_account_row(&buf, |_| {
+            hits += 1;
+            Ok(())
+        })
+        .is_ok());
+        assert_eq!(hits, 0, "no account table -> no rows visited");
+    }
+
+    #[test]
+    fn stops_after_account_table() {
+        // `account` first with one row, then a deliberately malformed second table. We must process
+        // the account row and return immediately, never reading the malformed trailing bytes (the
+        // old full walk would have errored trying to parse table 1).
+        let buf = [
+            0x02, // n_tables = 2
+            0x00, // table 0: variant
+            0x07, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, // "account"
+            0x01, // rows = 1
+            0x01, // present byte
+            0x03, 0xde, 0xad, 0xbe, // data_len 3 + the 3-byte account row payload
+            0xff, 0xff, 0xff, // table 1: garbage — must never be read
+        ];
+        let mut seen = 0usize;
+        let r = for_each_account_row(&buf, |row| {
+            seen += 1;
+            assert_eq!(row, &[0xde, 0xad, 0xbe]);
+            Ok(())
+        });
+        assert!(
+            r.is_ok(),
+            "returns after account, ignoring malformed trailing tables"
+        );
+        assert_eq!(seen, 1);
+    }
+
+    #[test]
+    fn truncated_account_table_errors_not_panics() {
+        // When `account` IS the first table, we walk into it — a row whose data_len runs past the
+        // buffer must surface a clean Err, never a panic (the OOB guard).
+        let buf = [
+            0x01, // n_tables = 1
+            0x00, // variant
+            0x07, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, // name_len 7, "account"
+            0x01, // rows = 1
+            0x01, // present byte
+            0x64, // data_len = 100 — but the buffer ends here -> data oob
+        ];
         assert!(for_each_account_row(&buf, |_| Ok(())).is_err());
 
         // Truncated right after the table count is likewise a clean Err, not a panic.
