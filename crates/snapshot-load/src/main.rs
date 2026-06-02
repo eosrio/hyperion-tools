@@ -54,7 +54,8 @@ struct Args {
     /// comma-separated table selectors: `voters` | `accounts` | `*` | `table` | `code:table` | `code:scope:table`
     #[arg(long, default_value = "voters,accounts")]
     tables: String,
-    /// override head block_num (else derived from the snapshot filename)
+    /// override head block_num (else derived from the snapshot filename, or a streamed tar's inner
+    /// `snapshot-<block_id>.bin` entry name)
     #[arg(long)]
     block_num: Option<u32>,
     /// stop after emitting N docs (smoke test; skips the full-consumption invariant)
@@ -440,7 +441,9 @@ impl<R: Read> Read for TeeReader<R> {
 /// Detects kind by URL suffix: `.tar.gz`/`.tgz` (gunzip + untar the single `snapshot-*.bin`),
 /// `.bin.zst`/`.zst` (streaming zstd), or bare `.bin`. The returned reader is forward-only (NOT
 /// seekable). For the `.tar.gz` leg the `tar::Archive` is leaked — acceptable for a one-shot CLI.
-fn open_url_stream(url: &str) -> Result<Box<dyn Read>> {
+/// Returns the inner snapshot filename for tar inputs (`snapshot-<block_id>.bin`) so the caller can
+/// derive block_num from it when the URL basename can't (e.g. a `latest.tar.gz` "latest" pointer).
+fn open_url_stream(url: &str) -> Result<(Box<dyn Read>, Option<String>)> {
     let resp = ureq::get(url)
         .call()
         .with_context(|| format!("GET {url}"))?;
@@ -467,15 +470,15 @@ fn open_url_stream(url: &str) -> Result<Box<dyn Read>> {
                     .unwrap_or("")
                     .starts_with("snapshot")
             {
-                return Ok(Box::new(entry)); // tar::Entry: Read, streams forward from here
+                return Ok((Box::new(entry), Some(name))); // tar::Entry: Read, streams forward from here
             }
         }
         bail!("no snapshot-*.bin entry found in tar stream {url}");
     } else if u.ends_with(".bin.zst") || u.ends_with(".zst") {
         let dec = ruzstd::StreamingDecoder::new(body).map_err(|e| anyhow!("zstd init: {e:?}"))?;
-        Ok(Box::new(dec))
+        Ok((Box::new(dec), None))
     } else if u.ends_with(".bin") {
-        Ok(Box::new(body))
+        Ok((Box::new(body), None))
     } else {
         bail!(
             "unknown snapshot extension in URL (expected .tar.gz/.tgz, .bin.zst/.zst, .bin): {url}"
@@ -714,13 +717,20 @@ fn run_stream_permissions<R: Read>(
 /// Build the forward-only `StreamSnap` over the URL's decompressed body, optionally tee'd to disk.
 /// `block_num` is required up front (computed by the caller) because the streamed body's URL may not
 /// carry a parseable height, and a forward stream cannot be re-opened to look.
-fn open_stream_snap(url: &str, tee: Option<&str>) -> Result<StreamSnap<BufReader<Box<dyn Read>>>> {
-    let raw = open_url_stream(url)?;
+/// Buffered forward-only streaming reader over the raw snapshot `.bin` bytes (HTTP body → optional
+/// gunzip+untar or zstd → optional tee), wrapped in `StreamSnap`.
+type SnapStream = StreamSnap<BufReader<Box<dyn Read>>>;
+
+fn open_stream_snap(url: &str, tee: Option<&str>) -> Result<(SnapStream, Option<String>)> {
+    let (raw, inner_name) = open_url_stream(url)?;
     let raw: Box<dyn Read> = match tee {
         Some(p) => Box::new(TeeReader::new(raw, p)?),
         None => raw,
     };
-    Ok(StreamSnap::new(BufReader::with_capacity(1 << 20, raw)))
+    Ok((
+        StreamSnap::new(BufReader::with_capacity(1 << 20, raw)),
+        inner_name,
+    ))
 }
 
 /// Parse the `--tables` contract-table selectors into resolved `Targets` (shared by both paths).
@@ -857,16 +867,31 @@ fn run_url_path(args: &Args) -> Result<()> {
     }
 
     let t0 = Instant::now();
-    let basename = url.split(['?', '#']).next().unwrap_or(url);
-    let block_num = resolve_block_num(args.block_num, basename)?;
+
+    // Build targets / mongo config up front (cheap, validates --tables/--mongo) so a bad arg fails
+    // before we open the network stream. `permissions` is a native path needing neither.
+    let main_cfg = if want_permissions {
+        None
+    } else {
+        Some((build_targets(&specs, &names)?, build_mongo_cfg(args)?))
+    };
+
     eprintln!("[snapshot-load] streaming from {url}");
-    eprintln!("[snapshot-load] head block_num={block_num}");
     if args.tee.is_some() && args.limit.is_some() {
         eprintln!("[snapshot-load] note: --tee forces a full read; --limit only short-circuits the decode walk and would truncate the teed .bin");
     }
 
+    // Open the stream first: a `.tar.gz` yields its inner `snapshot-<block_id>.bin` entry name, which
+    // is the authoritative block_num source when the URL basename has none (e.g. `latest.tar.gz`).
+    let (s, inner_name) = open_stream_snap(url, args.tee.as_deref())?;
+    let url_basename = url.split(['?', '#']).next().unwrap_or(url);
+    if let Some(n) = &inner_name {
+        eprintln!("[snapshot-load] tar entry {n}");
+    }
+    let block_num = resolve_block_num(args.block_num, inner_name.as_deref().unwrap_or(url_basename))?;
+    eprintln!("[snapshot-load] head block_num={block_num}");
+
     if want_permissions {
-        let s = open_stream_snap(url, args.tee.as_deref())?;
         let mut out: Box<dyn Write> = match &args.out {
             Some(p) => Box::new(BufWriter::with_capacity(
                 1 << 20,
@@ -890,9 +915,7 @@ fn run_url_path(args: &Args) -> Result<()> {
         return Ok(());
     }
 
-    let t = build_targets(&specs, &names)?;
-    let mongo_cfg = build_mongo_cfg(args)?;
-    let s = open_stream_snap(url, args.tee.as_deref())?;
+    let (t, mongo_cfg) = main_cfg.expect("main_cfg built when !want_permissions");
     let (ps, ws, ms) = run_stream(
         s,
         &t,

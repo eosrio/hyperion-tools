@@ -120,7 +120,33 @@ write 1.8 s → ~623 K docs/s, indexes 3.5 s, grand total 5.4 s, 0 errors** (wri
 only validated token contracts are written, mirroring `sync-accounts` `scanABIs`).
 
 `block_num` is derived from the snapshot filename (EOSUSA `snapshot-<64-hex block_id>.bin` → first 4 bytes
-of the block_id; EOS Nation `snapshot-...-<decimal>.bin[.zst]` → trailing digits), or pass `--block-num`.
+of the block_id; EOS Nation `snapshot-...-<decimal>.bin[.zst]` → trailing digits). When streaming a
+`.tar.gz` it is derived instead from the **tar's inner `snapshot-<block_id>.bin` entry name** — so a
+"latest" pointer like `latest.tar.gz` (whose URL basename carries no block id) still resolves. Pass
+`--block-num` to override.
+
+## Streaming directly from a download (`--snapshot-url`)
+
+Instead of `--snapshot <file>`, point at a URL with `--snapshot-url` to **decode + index straight off the
+HTTP download** — no separate download/extract step. One forward pass overlaps download, decompression
+(gunzip for `.tar.gz`/`.tgz`, streaming zstd for `.bin.zst`/`.zst`), decode and the Mongo writes, so a
+live Hyperion can be spun up from current state in roughly the time it takes to pull the snapshot once.
+The streamed pipeline reuses the exact same workers + sink as the seek path and is validated
+byte-identical to it.
+
+```bash
+# stream a "latest" snapshot straight into a local mongo:8 — block_num comes from the tar entry name
+snapshot-load --snapshot-url https://example.org/snaps/telos/latest.tar.gz \
+  --chain telos --tables accounts --mongo "mongodb://localhost:27017" --mongo-drop
+
+# stream + decode to NDJSON while also saving the raw .bin for nodeos (--tee mirrors every byte)
+snapshot-load --snapshot-url https://example.org/snaps/telos/latest.tar.gz \
+  --tee ./snapshot.bin --out state.ndjson
+```
+
+`--snapshot-url` accepts `.tar.gz` | `.tgz` | `.bin.zst` | `.zst` | `.bin`. The stream is forward-only, so
+`--inspect` (which needs random access) is unavailable in this mode. `--tee <path>` writes the raw
+decompressed `.bin` alongside indexing (it forces a full read to EOF so the saved file is complete).
 
 ## Architecture
 
