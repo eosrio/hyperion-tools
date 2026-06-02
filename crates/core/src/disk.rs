@@ -94,6 +94,13 @@ fn read_varuint_r<R: std::io::Read>(r: &mut R) -> Result<u64> {
     }
 }
 
+/// SHiP delta table names are short (`account`, `contract_row`, ...); a longer one is a corrupt
+/// or misaligned entry, not a real table. Bounds the name allocation in the streaming path.
+const MAX_TABLE_NAME_LEN: usize = 64;
+/// A single `account` row (one account_object, including its ABI) is at most a few MB; a larger
+/// length is corruption. Bounds the per-row allocation so a bad entry can't OOM/abort the scan.
+const MAX_ROW_BYTES: usize = 64 << 20;
+
 /// Stream-inflate a state-history entry only as far as the `account` table, emitting any
 /// setabi rows, then stop. Used for *huge* entries (a snapshot init-delta spans thousands of
 /// 128K records): we read just the compressed prefix up to the account table and let the
@@ -105,7 +112,7 @@ fn scan_account_streaming_entry<R: std::io::Read>(
     block_num: u32,
     sink: &std::sync::mpsc::Sender<String>,
 ) -> Result<()> {
-    use std::io::{self, Read};
+    use std::io::Read;
     // payload prefix: [u32 s][optional u64 decompressed_size when s==1]
     let mut s4 = [0u8; 4];
     log.read_exact(&mut s4)?;
@@ -115,40 +122,39 @@ fn scan_account_streaming_entry<R: std::io::Read>(
     }
     let mut z = flate2::read::ZlibDecoder::new(log);
     let n_tables = read_varuint_r(&mut z)?;
-    for ti in 0..n_tables {
-        let _variant = read_varuint_r(&mut z)?;
-        let name_len = read_varuint_r(&mut z)? as usize;
-        let mut name = vec![0u8; name_len];
-        z.read_exact(&mut name)?;
-        let n_rows = read_varuint_r(&mut z)?;
-        let is_account = name == b"account";
-        // `account` is the first table in Leap/Spring's fixed delta order, so if the first present
-        // table isn't `account`, this block carries no setabi — stop before inflating any further
-        // (the dense contract_row table that typically follows is never decompressed or walked).
-        if !is_account && ti == 0 {
-            return Ok(());
+    if n_tables == 0 {
+        return Ok(()); // empty delta
+    }
+    // `account` is the first table in Leap/Spring's fixed delta order, so we only read the first
+    // table: if it isn't `account` the block carries no setabi and we stop before inflating any
+    // further (the dense contract_row that typically follows is never decompressed); if it IS
+    // `account`, its rows are the only ones we care about.
+    let _variant = read_varuint_r(&mut z)?;
+    let name_len = read_varuint_r(&mut z)? as usize;
+    if name_len > MAX_TABLE_NAME_LEN {
+        bail!("table name length {name_len} > {MAX_TABLE_NAME_LEN}: corrupt/misaligned entry");
+    }
+    let mut name = vec![0u8; name_len];
+    z.read_exact(&mut name)?;
+    let n_rows = read_varuint_r(&mut z)?;
+    if name != b"account" {
+        return Ok(());
+    }
+    for _ in 0..n_rows {
+        let mut present = [0u8; 1];
+        z.read_exact(&mut present)?;
+        let data_len = read_varuint_r(&mut z)? as usize;
+        if data_len > MAX_ROW_BYTES {
+            bail!("account row length {data_len} > {MAX_ROW_BYTES}: corrupt/misaligned entry");
         }
-        for _ in 0..n_rows {
-            let mut present = [0u8; 1];
-            z.read_exact(&mut present)?;
-            let data_len = read_varuint_r(&mut z)?;
-            if is_account {
-                let mut data = vec![0u8; data_len as usize];
-                z.read_exact(&mut data)?;
-                match account_setabi(abieos, &data) {
-                    Ok(Some((acct, abi_hex))) => {
-                        let _ = sink.send(build_abi_doc(abieos, &acct, block_num, &abi_hex));
-                    }
-                    Ok(None) => {}
-                    Err(e) => eprintln!("[disk] block {block_num}: account row: {e}"),
-                }
-            } else {
-                // skip this row's data without materialising it
-                io::copy(&mut z.by_ref().take(data_len), &mut io::sink())?;
+        let mut data = vec![0u8; data_len];
+        z.read_exact(&mut data)?;
+        match account_setabi(abieos, &data) {
+            Ok(Some((acct, abi_hex))) => {
+                let _ = sink.send(build_abi_doc(abieos, &acct, block_num, &abi_hex));
             }
-        }
-        if is_account {
-            return Ok(()); // account table done — caller seeks past the rest of the delta
+            Ok(None) => {}
+            Err(e) => eprintln!("[disk] block {block_num}: account row: {e}"),
         }
     }
     Ok(())

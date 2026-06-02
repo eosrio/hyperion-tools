@@ -125,7 +125,7 @@ async fn scan_range(
         }
         tx.send(Message::Binary(build_ack(1).into())).await.ok();
         processed += 1;
-        if processed % 20000 == 0 {
+        if processed.is_multiple_of(20000) {
             eprintln!("[c{id}] {processed} blocks ({found} ABIs) at {block_num}");
         }
         if block_num >= end {
