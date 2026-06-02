@@ -282,8 +282,9 @@ pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Ve
         }
         // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX length bails instead of truncating
         // (a no-op on 64-bit; correct on a 32-bit target).
-        let abi_len = usize::try_from(abi_len_u)
-            .map_err(|_| anyhow::anyhow!("account_object: abi length {abi_len_u} overflows usize"))?;
+        let abi_len = usize::try_from(abi_len_u).map_err(|_| {
+            anyhow::anyhow!("account_object: abi length {abi_len_u} overflows usize")
+        })?;
         if abi_len == 0 {
             continue;
         }
@@ -329,7 +330,9 @@ mod tests {
     use super::transfer_fields_match;
 
     fn abi_with_transfer(fields: &str) -> String {
-        format!(r#"{{"version":"eosio::abi/1.2","structs":[{{"name":"transfer","base":"","fields":[{fields}]}}]}}"#)
+        format!(
+            r#"{{"version":"eosio::abi/1.2","structs":[{{"name":"transfer","base":"","fields":[{fields}]}}]}}"#
+        )
     }
 
     #[test]
@@ -374,7 +377,8 @@ mod tests {
 
     #[test]
     fn no_transfer_struct_rejected() {
-        let abi = r#"{"version":"eosio::abi/1.2","structs":[{"name":"issue","base":"","fields":[]}]}"#;
+        let abi =
+            r#"{"version":"eosio::abi/1.2","structs":[{"name":"issue","base":"","fields":[]}]}"#;
         assert!(!transfer_fields_match(abi));
     }
 
@@ -415,14 +419,20 @@ mod tests {
         let mk_abi = |transfer_fields: &str| -> String {
             let mut s = String::new();
             s.push_str(r#"{"version":"eosio::abi/1.1","types":[],"structs":["#);
-            s.push_str(r#"{"name":"account","base":"","fields":[{"name":"balance","type":"asset"}]},"#);
+            s.push_str(
+                r#"{"name":"account","base":"","fields":[{"name":"balance","type":"asset"}]},"#,
+            );
             s.push_str(r#"{"name":"currency_stats","base":"","fields":[{"name":"supply","type":"asset"},{"name":"max_supply","type":"asset"},{"name":"issuer","type":"name"}]},"#);
             s.push_str(r#"{"name":"transfer","base":"","fields":["#);
             s.push_str(transfer_fields);
             s.push_str(r#"]}],"#);
-            s.push_str(r#""actions":[{"name":"transfer","type":"transfer","ricardian_contract":""}],"#);
+            s.push_str(
+                r#""actions":[{"name":"transfer","type":"transfer","ricardian_contract":""}],"#,
+            );
             s.push_str(r#""tables":[{"name":"accounts","index_type":"i64","key_names":[],"key_types":[],"type":"account"},{"name":"stat","index_type":"i64","key_names":[],"key_types":[],"type":"currency_stats"}],"#);
-            s.push_str(r#""ricardian_clauses":[],"error_messages":[],"abi_extensions":[],"variants":[]}"#);
+            s.push_str(
+                r#""ricardian_clauses":[],"error_messages":[],"abi_extensions":[],"variants":[]}"#,
+            );
             s
         };
         let token_abi = mk_abi(
@@ -436,7 +446,10 @@ mod tests {
         let tkn = abieos.string_to_name("tkn").unwrap();
         let nft = abieos.string_to_name("nft").unwrap();
         let mut map: HashMap<u64, Vec<u8>> = HashMap::new();
-        map.insert(tkn, abieos.abi_json_to_bin(&token_abi).expect("pack token abi"));
+        map.insert(
+            tkn,
+            abieos.abi_json_to_bin(&token_abi).expect("pack token abi"),
+        );
         map.insert(nft, abieos.abi_json_to_bin(&nft_abi).expect("pack nft abi"));
 
         let mut reg = AbiRegistry::new(Arc::new(map));
