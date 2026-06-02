@@ -524,6 +524,11 @@ fn run_stream<R: Read>(
         if size == u64::MAX {
             bail!("hit end-marker before any row section (no contract_tables/key_value_object)");
         }
+        // EARLY guard (forward stream): `size` must cover at least row_count(8) BEFORE we read 8 bytes
+        // of `rows`; on `size < 8` those 8 bytes would come from the next frame, desyncing the scan.
+        if size < 8 {
+            bail!("malformed section framing: size {size} < 8 (cannot hold row_count)");
+        }
         let after_size = s.pos();
         let rows = s.u64()?;
         let name = s.cstr()?;
@@ -645,6 +650,11 @@ fn run_stream_permissions<R: Read>(
         if size == u64::MAX {
             bail!("hit end-marker before permission_link_object");
         }
+        // EARLY guard (forward stream): `size` must cover at least row_count(8) BEFORE we read 8 bytes
+        // of `rows`; on `size < 8` those 8 bytes would come from the next frame, desyncing the scan.
+        if size < 8 {
+            bail!("malformed section framing: size {size} < 8 (cannot hold row_count)");
+        }
         let after_size = s.pos();
         let rows = s.u64()?;
         let name = s.cstr()?;
@@ -666,13 +676,19 @@ fn run_stream_permissions<R: Read>(
                 abi_raw = load_abis(&mut s, &sec)?;
             }
             "eosio::chain::permission_object" => {
+                // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX payload bails instead of
+                // truncating (a no-op on 64-bit; correct on a 32-bit target).
+                let plen = usize::try_from(payload_len)
+                    .map_err(|_| anyhow!("permission_object payload_len {payload_len} overflows usize"))?;
                 let mut buf = Vec::new();
-                s.read_into(payload_len as usize, &mut buf)?;
+                s.read_into(plen, &mut buf)?;
                 perm_buf = Some((buf, rows));
             }
             "eosio::chain::permission_link_object" => {
+                let plen = usize::try_from(payload_len)
+                    .map_err(|_| anyhow!("permission_link_object payload_len {payload_len} overflows usize"))?;
                 let mut lbuf = Vec::new();
-                s.read_into(payload_len as usize, &mut lbuf)?;
+                s.read_into(plen, &mut lbuf)?;
                 let (pbuf, perm_rows) = perm_buf
                     .ok_or_else(|| anyhow!("permission_link_object before permission_object"))?;
                 let st = perms::decode_permissions_bufs(

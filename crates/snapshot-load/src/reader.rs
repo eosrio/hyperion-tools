@@ -321,6 +321,13 @@ pub fn enumerate_sections(s: &mut Snap) -> Result<Vec<Section>> {
         if size == u64::MAX {
             break; // end-of-file marker
         }
+        // EARLY guard: `size` must cover at least row_count(8). Check BEFORE reading `rows`/`name`,
+        // because a `size < 8` would otherwise let us consume 8 bytes of `rows` from the NEXT frame
+        // before the later `size >= header_bytes` check bails — desyncing the parse. (The full
+        // `size >= 8 + name + NUL` check still runs after the name is read.)
+        if size < 8 {
+            bail!("section at offset {start}: size {size} < 8 (cannot hold row_count) — malformed framing");
+        }
         let after_size = s.pos;
         let rows = s.u64()?;
         let name = s.cstr()?;

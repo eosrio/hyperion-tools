@@ -206,7 +206,10 @@ pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Ve
                 s.pos()
             );
         }
-        let abi_len = abi_len_u as usize;
+        // 64-bit on disk; `try_from` (not `as`) so a >usize::MAX length bails instead of truncating
+        // (a no-op on 64-bit; correct on a 32-bit target).
+        let abi_len = usize::try_from(abi_len_u)
+            .map_err(|_| anyhow::anyhow!("account_object: abi length {abi_len_u} overflows usize"))?;
         if abi_len == 0 {
             continue;
         }

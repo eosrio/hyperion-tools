@@ -19,7 +19,7 @@ use anyhow::{anyhow, Result};
 use futures::stream::StreamExt;
 use mongodb::bson::{doc, Bson, DateTime, Document};
 use mongodb::error::{Error as MongoError, ErrorKind};
-use mongodb::options::{Acknowledgment, ClientOptions, Credential, IndexOptions, WriteConcern};
+use mongodb::options::{Acknowledgment, ClientOptions, IndexOptions, WriteConcern};
 use mongodb::{Client, IndexModel};
 
 use crate::map::{COLL_ACCOUNTS, COLL_PROPOSALS, COLL_VOTERS};
@@ -73,10 +73,13 @@ async fn run_writer(
     opts.min_pool_size = Some(cfg.writers as u32);
     // Apply --mongo-auth-source via the typed credential `source` rather than string-appending
     // `?authSource=` to the URI (which mishandles URIs that already carry query params / options).
+    // Only set it when the URI ALREADY carries a credential: `get_or_insert_with(Credential::default)`
+    // would fabricate a username-less credential on a credential-less URI, which the driver rejects at
+    // connect time. authSource without auth is meaningless anyway.
     if let Some(src) = &cfg.auth_source {
-        opts.credential
-            .get_or_insert_with(Credential::default)
-            .source = Some(src.clone());
+        if let Some(cred) = &mut opts.credential {
+            cred.source = Some(src.clone());
+        }
     }
     opts.write_concern = Some(
         WriteConcern::builder()
@@ -91,7 +94,9 @@ async fn run_writer(
     // We only know the special names up front; dynamic ones are dropped lazily on first batch below.
     if cfg.drop {
         for c in [COLL_VOTERS, COLL_ACCOUNTS, COLL_PROPOSALS] {
-            db.collection::<Document>(c).drop().await.ok();
+            if let Err(e) = db.collection::<Document>(c).drop().await {
+                eprintln!("[snapshot-load][mongo] drop {c} failed: {e}");
+            }
         }
     }
 
@@ -108,11 +113,14 @@ async fn run_writer(
     let per_coll = Arc::new(std::sync::Mutex::new(HashMap::<&'static str, u64>::new()));
     let drop_dynamic = cfg.drop;
     let db_for_drop = db.clone();
-    // tokio Mutex (NOT std): the "drop this newly-seen dynamic collection" decision must be held
-    // ACROSS the async `drop().await`, so a concurrent batch for the same collection waits for the
-    // drop to complete before inserting (else its inserts could land and then be deleted by the drop).
-    let dropped: Arc<tokio::sync::Mutex<std::collections::HashSet<&'static str>>> =
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new()));
+    // tokio RwLock (NOT std, NOT a plain Mutex): once a dynamic collection has been dropped, every
+    // subsequent batch only takes a *concurrent read* lock to confirm it (the common case — so the
+    // parallel writers don't serialize on a global lock). Only the FIRST batch for a newly-seen
+    // collection upgrades to the write lock, which is held ACROSS the async `drop().await` so a
+    // concurrent first-batch for the same collection waits for the drop to complete before inserting
+    // (else its inserts could land and then be deleted by the drop) — preserving the race fix.
+    let dropped: Arc<tokio::sync::RwLock<std::collections::HashSet<&'static str>>> =
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new()));
 
     // Accumulator thread: groups docs per collection into batches, buffers proposals for the join.
     let acc_batch_tx = batch_tx.clone();
@@ -184,12 +192,19 @@ async fn run_writer(
                     && coll != COLL_ACCOUNTS
                     && coll != COLL_PROPOSALS
                 {
-                    // Hold the set guard across the drop await: the first batch for `coll` performs
-                    // the drop while later batches block here until it returns, guaranteeing no insert
-                    // races ahead of (and is then wiped by) the collection drop.
-                    let mut seen = dropped.lock().await;
-                    if seen.insert(coll) {
-                        db_for_drop.collection::<Document>(coll).drop().await.ok();
+                    // Fast path: already dropped → a concurrent READ lock only (no serialization).
+                    if !dropped.read().await.contains(coll) {
+                        // First sight: upgrade to the WRITE lock and hold it across the drop await, so
+                        // the first batch for `coll` performs the drop while later batches block here
+                        // until it returns — guaranteeing no insert races ahead of (and is then wiped
+                        // by) the collection drop. Re-check under the write lock to settle the race
+                        // between a concurrent first-batch's read and this write.
+                        let mut w = dropped.write().await;
+                        if w.insert(coll) {
+                            if let Err(e) = db_for_drop.collection::<Document>(coll).drop().await {
+                                eprintln!("[snapshot-load][mongo] drop {coll} failed: {e}");
+                            }
+                        }
                     }
                 }
                 let attempted = docs_vec.len();
