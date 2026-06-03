@@ -67,7 +67,7 @@ curl -s localhost:9200/_cluster/health?wait_for_status=yellow\&timeout=60s
 ./scripts/apply-templates.sh          # reads CHAIN/ES from .env
 
 # 3. produce reader output (example: WAX actions for a small range)
-#    (run from the abi-scanner repo root, against your local state-history)
+#    (run from the hyperion-tools repo root, against your local state-history)
 action-proto \
   --from-disk /path/to/state-history \
   --blocks-dir /path/to/blocks \
@@ -126,8 +126,8 @@ alone was ~27% of the index. The template therefore:
 
 Everything the real queries need is preserved (sort by `global_sequence`, `act.account`/`act.name`,
 `@transfer.*`, `receipts.receiver`, `trx_id` search). This is a **mapping** change — works on ES 8.x
-and 9.x alike. *(The delta template is still the faithful Hyperion mapping; tuning it is a TODO once
-measured.)*
+and 9.x alike. The delta template currently mirrors the stock Hyperion mapping and can be tuned after
+the same measurement pass.
 
 **`logsdb` index mode** (ES ≥ 8.17 / 9.x): set `INDEX_MODE=logsdb` in `.env` (or env). It adds a few
 more storage points and indexes slightly faster, and is **fully query-compatible** — `act.data` is

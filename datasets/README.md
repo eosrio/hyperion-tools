@@ -10,14 +10,14 @@ Every contract ABI version (`setabi`) on WAX mainnet, in the Hyperion `<chain>-a
 {"account":"eosio.token","block":49,"abi":"{...}","abi_hex":"0e…","actions":["transfer","…"],"tables":["accounts","stat"]}
 ```
 
-- **Latest:** <https://github.com/eosrio/abi-scanner/releases/latest/download/wax-abi.ndjson.zst> (~7 MB zstd, ~562 MB decompressed, 44,406 ABI versions)
+- **Latest:** <https://github.com/eosrio/hyperion-tools/releases/latest/download/wax-abi.ndjson.zst> (small zstd asset, hundreds of MB decompressed)
 - Each release is **stamped by the last indexed block** — tag `wax-abi-<block>` — so the tag tells you exactly where to resume.
 
 ### Download & use
 
 ```bash
 curl -L -o wax-abi.ndjson.zst \
-  https://github.com/eosrio/abi-scanner/releases/latest/download/wax-abi.ndjson.zst
+  https://github.com/eosrio/hyperion-tools/releases/latest/download/wax-abi.ndjson.zst
 zstd -d wax-abi.ndjson.zst   # -> wax-abi.ndjson
 ```
 

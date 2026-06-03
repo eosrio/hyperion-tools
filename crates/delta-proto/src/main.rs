@@ -1,11 +1,11 @@
-//! delta-proto — PROTOTYPE: a direct-from-disk Hyperion *delta* indexer.
+//! delta-proto — experimental direct-from-disk Hyperion *delta* indexer.
 //!
 //! Reads `chain_state_history` off disk in parallel (no nodeos, no SHiP), walks the
 //! `contract_row` table deltas, decodes each row's `value` against the contract ABI that
 //! was active *at that block* (looked up in an abi-scanner ABI index), and emits Hyperion
 //! `<chain>-delta-v1`-shaped NDJSON. It exists to prove the engine generalises far beyond
-//! ABI extraction — the `account` table was just table 0 of ~19. Throughput + memory are
-//! the point; this is a prototype, not the shipped tool.
+//! ABI extraction — the `account` table was just table 0 of ~19. Throughput and bounded
+//! memory are the focus.
 //!
 //! Decode path (rs_abieos 0.6 `AbiHandle`, rust-backend): every (account, valid_from) ABI
 //! version is parsed once into a standalone `AbiHandle` and kept in a per-worker registry —
@@ -29,7 +29,7 @@ use hyperion_ship::delta::read_varuint;
 use hyperion_ship::disk::{decode_payload, is_ship_magic};
 
 #[derive(Parser, Debug)]
-#[command(about = "PROTOTYPE: decode contract_row deltas directly from the state-history log.")]
+#[command(about = "Experimental: decode contract_row deltas directly from the state-history log.")]
 struct Args {
     /// nodeos state-history dir (chain_state_history.{log,index})
     #[arg(long)]
