@@ -86,19 +86,35 @@ impl AppState {
     /// Serve a cached aggregate count, refreshing it in the background when stale or absent. Never
     /// blocks the request on the underlying scan: returns the last-known value (or 0 if never
     /// computed) and spawns at most one refresh per key. Mirrors cc32d9's count cron.
+    ///
+    /// Part of the key (contract/symbol for `/holdercount`) is unauthenticated caller input, so the
+    /// cache is bounded: a brand-new key is admitted only while under `MAX_COUNT_KEYS` (after
+    /// evicting expired entries). This caps both map growth and background-scan spawns from an
+    /// attacker enumerating junk tokens. Existing keys always refresh.
     pub async fn cached_count<F, Fut>(&self, key: String, compute: F) -> u64
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Option<u64>> + Send + 'static,
     {
-        let (value, stale) = {
+        const MAX_COUNT_KEYS: usize = 4096;
+        let (value, stale, is_new, at_cap) = {
             let c = self.counts.read().await;
             match c.get(&key) {
-                Some(e) => (e.value, e.at.elapsed() > self.count_ttl),
-                None => (0, true),
+                Some(e) => (e.value, e.at.elapsed() > self.count_ttl, false, false),
+                None => (0, true, true, c.len() >= MAX_COUNT_KEYS),
             }
         };
         if stale {
+            // Bound unauthenticated cache growth: for a new key at capacity, evict expired entries
+            // first; if still full, refuse to admit/scan it (serve the default 0).
+            if is_new && at_cap {
+                let mut c = self.counts.write().await;
+                let ttl = self.count_ttl;
+                c.retain(|_, e| e.at.elapsed() <= ttl);
+                if c.len() >= MAX_COUNT_KEYS {
+                    return value;
+                }
+            }
             // Single-flight: only spawn if no refresh is already in flight for this key.
             let mut inflight = self.refreshing.lock().await;
             if inflight.insert(key.clone()) {
