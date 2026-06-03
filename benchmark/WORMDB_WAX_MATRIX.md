@@ -1,5 +1,36 @@
 # WAX-scale Light-API serving: WormDB (mmap segment) vs Rust+Mongo
 
+> ## Update — binary segment + WebSocket API (2026-06-03 re-validation)
+>
+> Everything below was the first WAX run (a 13–14 GB segment of **pre-rendered JSON**, HTTP only).
+> Since then the segment moved to a **compact binary encoding**, gained two reverse-index tables
+> (`token_holders`, `pub_keys`), and the **cc32d9 WebSocket JSON-RPC API**. Re-measured at WAX scale:
+>
+> | | old (JSON segment) | **new (binary segment)** |
+> |---|--:|--:|
+> | segment file | ~14 GB | **7.04 GB** (balances 0.78 + accinfo 3.55 + token_holders 0.57 + pub_keys 0.66 GB blob) |
+> | boot (mmap) | < 1 s | **54 ms** |
+> | idle RSS | ~20 MiB | **20 MiB** |
+> | RSS under HTTP battery | ~25 MiB | **23 MiB** |
+> | endpoints working **standalone** (no feed/loader) | balances, accinfo, account, networks | **+ topholders, holdercount, usercount** (the two new tables) |
+>
+> **HTTP throughput holds** (c=50, binary segment, Docker): usercount 27.1K · balances 26.9K ·
+> accinfo 24.7K · account 23.7K · topholders 23.9K · holdercount 27.0K — flat ~24–27K, p99 ~4 ms.
+> All byte-parity vs light-api. (`holdercount` was 177 rps until an O(1) count was added to the
+> `token_holders` blob header — it counted 12.48M lines per request; now a single read.)
+>
+> **WebSocket `get_token_holders` at scale** — streamed **all 12,481,173 holders** of
+> `eosio.token/WAX` over the WS API: **883,261 rows/s**, 1.75 GB of JSON, 14.1 s end-to-end, first row
+> at 190 ms, **RSS held at 23 MiB** throughout (mmap — no memory blowup streaming the chain's largest
+> token). All 4 WS methods (`get_networks`, `get_balances`, `get_token_holders`,
+> `get_accounts_from_keys`) parity-verified.
+>
+> **Headline:** the binary segment is **half the size** of the JSON one *and* serves more endpoints
+> standalone, at the same flat ~25K-rps / tens-of-MiB-resident profile — now with the full HTTP **and**
+> WebSocket cc32d9 surface.
+
+---
+
 The [Libre matrix](WORMDB_MATRIX.md) showed WormDB winning by compiling the API into the database —
 but at 358K accounts everything fits in RAM. **WAX is ~60× bigger** (21.75M account universe, 17.57M
 balance-holders, 43.6M permissions), and it breaks the original WormDB prototype, which stored

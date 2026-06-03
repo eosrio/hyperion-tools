@@ -1,0 +1,20 @@
+{
+  "data": "/data",
+  "store": { "persistence": "none" },
+  "server": { "port": 6389 },
+  "gateway": { "enabled": true, "port": 6390 },
+  "lightapi_segment": "/data/wax.wseg",
+  "lightapi": {
+    "networks": [
+      {
+        "chain": "wax",
+        "systoken": "WAX",
+        "decimals": 8,
+        "chainid": "1064487b3cd1a897ce03ae5b6a865651747e2e152090f99c1d19d44e01aea5a4",
+        "description": "WAX Mainnet",
+        "rex_enabled": false,
+        "block_num": 437909753
+      }
+    ]
+  }
+}
