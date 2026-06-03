@@ -1,0 +1,21 @@
+# WAX-scale benchmark config — single network, points at the bench Mongo container (port 27017)
+# holding hyperion_wax (28.1M accounts / 43.6M permissions / 32M pub_keys, loaded from the v6 snapshot).
+
+[mongo]
+uri = "mongodb://127.0.0.1:27017"
+prefix = "hyperion"
+max_pool_size = 128
+
+[server]
+bind = "0.0.0.0"
+port = 7001
+
+[[networks]]
+name = "wax"
+chainid = "1064487b3cd1a897ce03ae5b6a865651747e2e152090f99c1d19d44e01aea5a4"
+systoken = "WAX"
+decimals = 8
+production = 1
+rex_enabled = false
+description = "WAX Mainnet"
+sync_threshold_secs = 30

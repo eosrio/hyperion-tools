@@ -1,0 +1,26 @@
+[package]
+name = "light-api"
+description = "High-performance tokio + axum server reproducing the cc32d9 eosio_light_api HTTP API over the per-chain MongoDB written by snapshot-load / maintained by a Hyperion deployment."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { workspace = true }            # multi-thread runtime + concurrency primitives
+mongodb = { workspace = true }          # async driver; one pooled Client shared across handlers
+serde = { workspace = true }            # config + response struct (de)serialization
+serde_json = { workspace = true }       # Value plumbing + ?pretty=1 rendering
+toml = { workspace = true }             # parse light-api.toml
+anyhow = { workspace = true }           # startup error plumbing
+clap = { workspace = true }             # CLI args (config path + overrides)
+futures = { workspace = true }          # join_all / buffer_unordered fan-out across chains
+hex = { workspace = true }              # codehash validation
+# axum HTTP stack (tokio/tower/hyper). Kept crate-local until adopted elsewhere in the workspace.
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

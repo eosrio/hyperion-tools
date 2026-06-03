@@ -1,0 +1,49 @@
+# Light API server configuration.
+#
+# Serves the cc32d9 eosio_light_api HTTP API from the per-chain MongoDB databases written by
+# snapshot-load (and maintained live by a Hyperion deployment). A network named `eos` is served from
+# the Mongo database `<prefix>_eos`.
+
+[mongo]
+uri = "mongodb://127.0.0.1:27017"
+prefix = "hyperion"
+# auth_source = "admin"      # only applied when the URI carries credentials
+max_pool_size = 64
+
+[server]
+bind = "0.0.0.0"
+port = 7000
+# threads = 8                # omit -> tokio default (number of CPUs)
+
+# One [[networks]] block per chain you serve. The static fields below populate the cc32d9 `chain{}`
+# metadata; block_num / block_time / sync are read live from Mongo.
+
+[[networks]]
+name = "eos"
+chainid = "aca376f206b8fc25a6ed44dbdc66547c36c6c33e3a119ffbeaef943642f0e906"
+systoken = "EOS"
+decimals = 4
+production = 1
+rex_enabled = true
+description = "EOS Mainnet"
+sync_threshold_secs = 30
+
+[[networks]]
+name = "telos"
+chainid = "4667b205c6838ef70ff7988f6e8257e8be0e1284a2f59699054a018f743b1d11"
+systoken = "TLOS"
+decimals = 4
+production = 1
+rex_enabled = true
+description = "Telos Mainnet"
+sync_threshold_secs = 30
+
+[[networks]]
+name = "wax"
+chainid = "1064487b3cd1a897ce03ae5b6a865651747e2e152090f99c1d19d44e01aea5a4"
+systoken = "WAX"
+decimals = 8
+production = 1
+rex_enabled = false
+description = "WAX Mainnet"
+sync_threshold_secs = 30
