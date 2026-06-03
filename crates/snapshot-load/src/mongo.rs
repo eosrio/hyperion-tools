@@ -22,7 +22,9 @@ use mongodb::error::{Error as MongoError, ErrorKind};
 use mongodb::options::{Acknowledgment, ClientOptions, IndexOptions, WriteConcern};
 use mongodb::{Client, IndexModel};
 
-use crate::map::{COLL_ACCOUNTS, COLL_PROPOSALS, COLL_VOTERS};
+use crate::map::{
+    COLL_ACCOUNTS, COLL_CODEHASH, COLL_PERMISSIONS, COLL_PROPOSALS, COLL_PUB_KEYS, COLL_VOTERS,
+};
 
 /// Sink configuration assembled from CLI args.
 pub struct MongoCfg {
@@ -36,6 +38,14 @@ pub struct MongoCfg {
     pub pool: u32,
     pub drop: bool,
     pub no_index: bool,
+    /// Build only the indexes the Light-API serving path needs (drops the `permissions` unique
+    /// `{account,perm_name}` + `last_updated`/`linked_actions` and the `pub_keys` `account` indexes).
+    /// At chain scale (WAX: 43M permissions, 32M pub_keys) the post-load index build dominates total
+    /// time; the dropped indexes aren't on any read path.
+    pub lean_index: bool,
+    /// Non-dynamic collections to drop up front (when `drop`). Lets a permissions-only pass drop just
+    /// `permissions`/`pub_keys` without wiping the `voters`/`accounts`/`proposals` from a prior pass.
+    pub special_drops: Vec<&'static str>,
 }
 
 /// Final per-phase metrics, reported by the caller.
@@ -93,7 +103,7 @@ async fn run_writer(
     // Optionally drop the special + any seen dynamic collections before load (idempotent re-runs).
     // We only know the special names up front; dynamic ones are dropped lazily on first batch below.
     if cfg.drop {
-        for c in [COLL_VOTERS, COLL_ACCOUNTS, COLL_PROPOSALS] {
+        for c in &cfg.special_drops {
             if let Err(e) = db.collection::<Document>(c).drop().await {
                 eprintln!("[snapshot-load][mongo] drop {c} failed: {e}");
             }
@@ -191,6 +201,9 @@ async fn run_writer(
                     && coll != COLL_VOTERS
                     && coll != COLL_ACCOUNTS
                     && coll != COLL_PROPOSALS
+                    && coll != COLL_PERMISSIONS
+                    && coll != COLL_PUB_KEYS
+                    && coll != COLL_CODEHASH
                 {
                     // Fast path: already dropped → a concurrent READ lock only (no serialization).
                     if !dropped.read().await.contains(coll) {
@@ -262,7 +275,7 @@ async fn run_writer(
             if *count == 0 {
                 continue;
             }
-            build_indexes(&db, coll).await?;
+            build_indexes(&db, coll, cfg.lean_index).await?;
         }
         stats.index_secs = t.elapsed().as_secs_f64();
     }
@@ -354,11 +367,28 @@ fn merge_proposals(
 
 /// Create the post-load indexes for a collection, mirroring the sync modules. Unknown (dynamic)
 /// collections get the 5 `@`-field contract-state indexes.
-async fn build_indexes(db: &mongodb::Database, coll: &str) -> Result<()> {
+async fn build_indexes(db: &mongodb::Database, coll: &str, lean: bool) -> Result<()> {
     let c = db.collection::<Document>(coll);
     let unique = || IndexOptions::builder().unique(true).build();
     let mk = |keys: Document| IndexModel::builder().keys(keys).build();
     let mk_u = |keys: Document| IndexModel::builder().keys(keys).options(unique()).build();
+
+    // Lean mode keeps only the read-path indexes for the two huge collections — at WAX scale this
+    // turns four foreground builds over 43M/32M docs into one or two.
+    if lean {
+        match coll {
+            COLL_PERMISSIONS => {
+                c.create_indexes(vec![mk(doc! { "account": 1 })]).await?;
+                return Ok(());
+            }
+            COLL_PUB_KEYS => {
+                c.create_indexes(vec![mk(doc! { "key": 1 }), mk(doc! { "key_pub": 1 })])
+                    .await?;
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
 
     let models: Vec<IndexModel> = match coll {
         COLL_VOTERS => vec![
@@ -371,13 +401,49 @@ async fn build_indexes(db: &mongodb::Database, coll: &str) -> Result<()> {
             mk(doc! { "scope": 1 }),
             mk(doc! { "symbol": 1 }),
             mk_u(doc! { "code": 1, "scope": 1, "symbol": 1 }),
+            // Light-API /topholders: top balances of a (contract, symbol) by amount desc.
+            mk(doc! { "code": 1, "symbol": 1, "amount": -1 }),
         ],
+        COLL_PERMISSIONS => vec![
+            mk(doc! { "account": 1 }),
+            mk_u(doc! { "account": 1, "perm_name": 1 }),
+            mk(doc! { "last_updated": -1 }),
+            mk(doc! { "linked_actions.account": 1, "linked_actions.action": 1 }),
+        ],
+        COLL_PUB_KEYS => vec![
+            mk(doc! { "key": 1 }),
+            mk(doc! { "key_pub": 1 }),
+            mk(doc! { "account": 1 }),
+            mk(doc! { "account": 1, "perm": 1 }),
+        ],
+        COLL_CODEHASH => vec![mk_u(doc! { "account": 1 }), mk(doc! { "code_hash": 1 })],
         COLL_PROPOSALS => vec![
             mk(doc! { "proposal_name": 1 }),
             mk(doc! { "proposer": 1 }),
             mk(doc! { "expiration": -1 }),
             mk(doc! { "provided_approvals.actor": 1 }),
             mk(doc! { "requested_approvals.actor": 1 }),
+        ],
+        // Light-API read-path indexes on the eosio system tables (dynamic collections, matched by name).
+        // userres carries /topram (ram_bytes) + /topstake (numeric `stake`, emitted by map_userres);
+        // delband carries accinfo's delegated_to (`from`) + delegated_from (`to`) joins.
+        "eosio-userres" => vec![
+            mk(doc! { "@pk": -1 }),
+            mk(doc! { "@scope": 1 }),
+            mk(doc! { "@block_num": -1 }),
+            mk(doc! { "@block_time": -1 }),
+            mk(doc! { "@payer": 1 }),
+            mk(doc! { "ram_bytes": -1 }),
+            mk(doc! { "stake": -1 }),
+        ],
+        "eosio-delband" => vec![
+            mk(doc! { "@pk": -1 }),
+            mk(doc! { "@scope": 1 }),
+            mk(doc! { "@block_num": -1 }),
+            mk(doc! { "@block_time": -1 }),
+            mk(doc! { "@payer": 1 }),
+            mk(doc! { "to": 1 }),
+            mk(doc! { "from": 1 }),
         ],
         _ => vec![
             mk(doc! { "@pk": -1 }),

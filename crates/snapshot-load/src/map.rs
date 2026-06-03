@@ -16,6 +16,11 @@ use crate::model::AbiRegistry;
 pub const COLL_VOTERS: &str = "voters";
 pub const COLL_ACCOUNTS: &str = "accounts";
 pub const COLL_PROPOSALS: &str = "proposals";
+/// Light-API native collections (permissions are decoded off a separate native path; see `perms.rs`).
+pub const COLL_PERMISSIONS: &str = "permissions";
+pub const COLL_PUB_KEYS: &str = "pub_keys";
+/// Per-account contract code hash, for cc32d9 `/codehash` (from `account_metadata_object`).
+pub const COLL_CODEHASH: &str = "account_codehash";
 
 /// Decoded-row context handed to the mappers — names already rendered to strings.
 pub struct RowCtx<'a> {
@@ -27,6 +32,10 @@ pub struct RowCtx<'a> {
     pub block_num: u32,
     /// Whether `code` is a validated standard token contract (only meaningful for `accounts` rows).
     pub token_ok: bool,
+    /// Emit the additive Light-API fields (e.g. `accounts.decimals`/`amount_str`/`amount_num`). Gated
+    /// ON for the Mongo sink / `--tables lightapi`, OFF for plain NDJSON so the existing byte-exact
+    /// `accounts` line is unchanged.
+    pub lightapi_fields: bool,
 }
 
 /// Route a decoded row to its (collection, doc). Returns `None` when the row cannot be mapped to the
@@ -41,6 +50,7 @@ pub fn map_row(ctx: &RowCtx, data: Value, reg: &mut AbiRegistry) -> Option<(&'st
         (_, "accounts") => map_account(ctx, data).map(|d| (COLL_ACCOUNTS, d)),
         ("eosio.msig", "proposal") => Some((COLL_PROPOSALS, map_proposal(ctx, data, reg))),
         ("eosio.msig", "approvals2") => Some((COLL_PROPOSALS, map_approvals2(ctx, data))),
+        ("eosio", "userres") => Some((dynamic_collection(ctx), map_userres(ctx, data))),
         _ => Some((dynamic_collection(ctx), map_dynamic(ctx, data))),
     }
 }
@@ -113,13 +123,24 @@ fn map_account(ctx: &RowCtx, data: Value) -> Option<Value> {
         return None;
     }
     let amount: f64 = amount_s.parse().ok()?;
-    Some(json!({
-        "code": ctx.code,
-        "scope": ctx.scope,
-        "symbol": symbol,
-        "amount": amount,
-        "block_num": ctx.block_num,
-    }))
+    let mut doc = Map::new();
+    doc.insert("code".into(), json!(ctx.code));
+    doc.insert("scope".into(), json!(ctx.scope));
+    doc.insert("symbol".into(), json!(symbol));
+    // `amount` stays an f64 for Hyperion parity (and is the always-present sort key for /topholders).
+    doc.insert("amount".into(), json!(amount));
+    doc.insert("block_num".into(), json!(ctx.block_num));
+    if ctx.lightapi_fields {
+        // Additive Light-API fields, computed from the raw asset string before the lossy f64 parse:
+        //   decimals   = fractional-digit count        (Light API returns it as a string)
+        //   amount_str = exact decimal string           (preserves trailing zeros + big-supply precision)
+        //   amount_num = same f64 (explicit numeric sort companion, mirrors `amount`)
+        let decimals = amount_s.split_once('.').map(|(_, f)| f.len()).unwrap_or(0);
+        doc.insert("decimals".into(), json!(decimals as i32));
+        doc.insert("amount_str".into(), json!(amount_s));
+        doc.insert("amount_num".into(), json!(amount));
+    }
+    Some(Value::Object(doc))
 }
 
 // ── PROPOSALS ──────────────────────────────────────────────────────────────────────────────────
@@ -237,6 +258,33 @@ fn decode_action_data_inplace(action: &mut Value, reg: &mut AbiRegistry) {
     }
 }
 
+// ── USERRES (eosio.userresources) ────────────────────────────────────────────────────────────────
+
+/// `eosio:userres` rows, as the dynamic doc PLUS a numeric `stake` companion (Light-API only).
+///
+/// `/topstake` ranks accounts by `net_weight + cpu_weight`, but those are asset *strings*
+/// ("x.xxxx SYM"). Without a numeric field the server can only sort on a computed `$split` expression
+/// — which no index can serve, so at WAX scale (21.75M rows) it degrades to a full in-memory sort
+/// (~33s/request). Emitting an integer `stake` (sum of both legs in base units) lets the server sort
+/// on an indexed field, exactly as `amount_num` does for `/topholders`. net/cpu share the system
+/// token's precision, so summing base units is exact and monotonic.
+fn map_userres(ctx: &RowCtx, data: Value) -> Value {
+    let stake = ctx.lightapi_fields.then(|| {
+        let leg = |f: &str| {
+            data.get(f)
+                .and_then(Value::as_str)
+                .and_then(asset_units)
+                .unwrap_or(0)
+        };
+        leg("net_weight").saturating_add(leg("cpu_weight"))
+    });
+    let mut doc = map_dynamic(ctx, data);
+    if let (Some(s), Value::Object(map)) = (stake, &mut doc) {
+        map.insert("stake".into(), json!(s));
+    }
+    doc
+}
+
 // ── DYNAMIC CONTRACT-STATE ───────────────────────────────────────────────────────────────────────
 
 /// Every non-special table → the dynamic contract-state doc: `@`-prefixed system fields spread with
@@ -259,6 +307,36 @@ fn map_dynamic(ctx: &RowCtx, data: Value) -> Value {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Parse an asset string ("11.30000000 WAX") to its integer base units (1130000000), ignoring the
+/// symbol. Decimal point dropped, digits concatenated — exact for sorting/summing same-precision legs.
+fn asset_units(s: &str) -> Option<i64> {
+    let num = s.split(' ').next()?;
+    let (int_part, frac) = num.split_once('.').unwrap_or((num, ""));
+    format!("{int_part}{frac}").parse::<i64>().ok()
+}
+
+#[cfg(test)]
+mod asset_units_tests {
+    use super::asset_units;
+
+    #[test]
+    fn parses_assets_to_base_units() {
+        assert_eq!(asset_units("11.30000000 WAX"), Some(1_130_000_000));
+        assert_eq!(asset_units("0.00000000 WAX"), Some(0));
+        assert_eq!(asset_units("1.0000 EOS"), Some(10_000));
+        assert_eq!(asset_units("100 WAX"), Some(100)); // integer asset, no fractional part
+        assert_eq!(asset_units("garbage"), None);
+    }
+
+    #[test]
+    fn sum_is_monotonic_for_same_precision_legs() {
+        // net + cpu (same symbol) → exact integer sum used as the /topstake sort key.
+        let net = asset_units("5.00000000 WAX").unwrap();
+        let cpu = asset_units("6.30000000 WAX").unwrap();
+        assert_eq!(net + cpu, 1_130_000_000);
+    }
+}
 
 /// abieos renders float64 as a JSON string already; keep strings as-is, stringify numbers, default "".
 fn value_to_str(v: Option<&Value>) -> String {

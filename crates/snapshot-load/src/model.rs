@@ -302,6 +302,38 @@ pub fn load_abis(s: &mut impl SnapRead, sec: &Section) -> Result<HashMap<u64, Ve
     Ok(map)
 }
 
+/// Parse the `account_metadata_object` section → `(account_name u64, code_hash [u8;32])` for every
+/// account that actually has a contract (non-zero hash). The snapshot row is a fixed 86 bytes in
+/// Spring's `FC_REFLECT` order:
+///   name(u64) | recv/auth/code/abi_sequence(4×u64) | code_hash(32) | last_code_update(i64)
+///   | flags(u32) | vm_type(u8) | vm_version(u8)
+/// so `code_hash` is at offset 40. Powers cc32d9 `/codehash` (account ↔ contract hash).
+pub fn load_codehashes(s: &mut impl SnapRead, sec: &Section) -> Result<Vec<(u64, [u8; 32])>> {
+    s.seek_to(sec.payload_off)?;
+    let end = sec.payload_off + sec.payload_len;
+    let mut out = Vec::new();
+    let mut skip4 = [0u8; 32]; // recv/auth/code/abi sequences
+    let mut tail = [0u8; 14]; // last_code_update(8) + flags(4) + vm_type(1) + vm_version(1)
+    for _ in 0..sec.rows {
+        let name = s.u64()?;
+        s.read_buf(&mut skip4)?;
+        let mut hash = [0u8; 32];
+        s.read_buf(&mut hash)?;
+        s.read_buf(&mut tail)?;
+        if hash != [0u8; 32] {
+            out.push((name, hash));
+        }
+    }
+    if s.pos() != end {
+        bail!(
+            "account_metadata_object walk desync: consumed to {} but section ends at {}",
+            s.pos(),
+            end
+        );
+    }
+    Ok(out)
+}
+
 /// Format one row as a Hyperion-shaped NDJSON line (trailing newline included). On `Dec::Ok` the
 /// decoded JSON is embedded under `data`; otherwise the raw value is emitted as hex under `value`.
 pub fn format_line(names: &Abieos, row: &RawRow, block: u32, dec: &Dec, decoded: &str) -> String {

@@ -17,7 +17,10 @@ use std::io::Write;
 
 use anyhow::{anyhow, bail, Result};
 use rs_abieos::{AbiHandle, Abieos};
+use serde_json::{json, Value};
 
+use crate::map::{COLL_PERMISSIONS, COLL_PUB_KEYS};
+use crate::mongo::SinkItem;
 use crate::reader::{find, Section, SnapRead};
 
 #[derive(Default, Debug)]
@@ -259,6 +262,177 @@ pub fn decode_permissions_bufs(
                 }
             }
             writeln!(out, "],\"present\":true}}")?;
+        }
+
+        if matches!(limit, Some(l) if st.permissions >= l) {
+            broke_early = true;
+            break;
+        }
+    }
+
+    if !broke_early && o != pbuf.len() {
+        bail!(
+            "permission_object walk DESYNC: consumed {} of {} bytes",
+            o,
+            pbuf.len()
+        );
+    }
+    Ok(st)
+}
+
+/// Mongo variant of [`decode_permissions`]: emits structured `permissions` docs plus the `pub_keys`
+/// reverse index into the shared sink channel. Reuses the same low-level walk (parse helpers above);
+/// the NDJSON path is left byte-for-byte untouched. Each authority key entry carries BOTH the modern
+/// `public_key` (`PUB_…`) and the legacy `pubkey` (`EOS…`) forms so cc32d9 `/key` matches either.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_permissions_mongo(
+    s: &mut impl SnapRead,
+    secs: &[Section],
+    abi_raw: &HashMap<u64, Vec<u8>>,
+    names: &Abieos,
+    eosio: u64,
+    block_num: u32,
+    tx: &crossbeam_channel::Sender<SinkItem>,
+    limit: Option<u64>,
+) -> Result<PermStats> {
+    let perm_sec = find(secs, "eosio::chain::permission_object")
+        .ok_or_else(|| anyhow!("no permission_object section"))?;
+    let link_sec = find(secs, "eosio::chain::permission_link_object")
+        .ok_or_else(|| anyhow!("no permission_link_object section"))?;
+    let lbuf = read_section_bytes(s, link_sec)?;
+    let pbuf = read_section_bytes(s, perm_sec)?;
+
+    let mut st = PermStats::default();
+
+    // 1. links: (account, required_permission) -> [(code, action)]
+    if lbuf.len() as u64 != link_sec.rows * 32 {
+        bail!(
+            "permission_link_object: expected rows*32 = {} bytes but section payload is {}",
+            link_sec.rows * 32,
+            lbuf.len()
+        );
+    }
+    let mut links: HashMap<(u64, u64), Vec<(u64, u64)>> = HashMap::new();
+    for i in 0..link_sec.rows as usize {
+        let o = i * 32;
+        let f = |j: usize| u64::from_le_bytes(lbuf[o + j..o + j + 8].try_into().unwrap());
+        let (account, _code, _msg, required_permission) = (f(0), f(8), f(16), f(24));
+        links
+            .entry((account, required_permission))
+            .or_default()
+            .push((f(8), f(16)));
+        st.links += 1;
+    }
+
+    let mut eosio_abi: Option<AbiHandle> = abi_raw
+        .get(&eosio)
+        .and_then(|b| AbiHandle::from_bin(b).ok());
+    let n = |v: u64| names.name_to_string(v).unwrap_or_else(|_| v.to_string());
+
+    let mut o = 0usize;
+    let mut auth_json = String::new();
+    let mut ts_json = String::new();
+    let mut broke_early = false;
+
+    for _ in 0..perm_sec.rows {
+        if pbuf.len().saturating_sub(o) < 40 {
+            bail!("permission_object: truncated fixed fields at offset {o}");
+        }
+        let g = |j: usize| u64::from_le_bytes(pbuf[o + j..o + j + 8].try_into().unwrap());
+        let (parent, owner, name) = (g(0), g(8), g(16));
+        let last_updated = &pbuf[o + 24..o + 32];
+        let auth_off = o + 40;
+        let alen = authority_len(
+            pbuf.get(auth_off..)
+                .ok_or_else(|| anyhow!("authority oob"))?,
+        )
+        .ok_or_else(|| anyhow!("bad authority at offset {auth_off}"))?;
+        let auth_bytes = pbuf
+            .get(auth_off..auth_off + alen)
+            .ok_or_else(|| anyhow!("authority slice oob at {auth_off}"))?;
+        o = auth_off + alen;
+        if owner == 0 && name == 0 {
+            continue;
+        }
+        st.permissions += 1;
+
+        // required_auth: decoded authority Value, or hex string on failure.
+        let auth_ok = eosio_abi.as_mut().is_some_and(|h| {
+            h.bin_to_json_into("authority", auth_bytes, &mut auth_json)
+                .is_ok()
+        });
+        let mut required_auth: Value = if auth_ok {
+            st.auth_decoded += 1;
+            serde_json::from_str(&auth_json).unwrap_or_else(|_| json!(hex::encode(auth_bytes)))
+        } else {
+            st.auth_fallback += 1;
+            json!(hex::encode(auth_bytes))
+        };
+
+        let account = n(owner);
+        let perm_name = n(name);
+
+        // Enrich each key with dual forms and emit pub_keys docs.
+        if let Some(keys) = required_auth.get_mut("keys").and_then(Value::as_array_mut) {
+            for k in keys.iter_mut() {
+                let modern = k
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let legacy = crate::keyfmt::k1_to_legacy(&modern);
+                let stored = legacy.clone().unwrap_or_else(|| modern.clone());
+                if let Value::Object(m) = k {
+                    m.insert("public_key".into(), json!(modern));
+                    m.insert("pubkey".into(), json!(stored));
+                }
+                let pk = json!({
+                    "account": account,
+                    "perm": perm_name,
+                    "block_num": block_num,
+                    "present": true,
+                    "key": stored,
+                    "key_pub": modern,
+                });
+                if let Ok(d) = mongodb::bson::to_document(&pk) {
+                    let _ = tx.send((COLL_PUB_KEYS, d));
+                }
+            }
+        }
+
+        // last_updated: ISO string via the eosio ABI, else raw µs i64.
+        let ts_ok = eosio_abi.as_mut().is_some_and(|h| {
+            h.bin_to_json_into("time_point", last_updated, &mut ts_json)
+                .is_ok()
+        });
+        let last_updated_val: Value = if ts_ok {
+            serde_json::from_str(&ts_json)
+                .unwrap_or_else(|_| json!(i64::from_le_bytes(last_updated.try_into().unwrap())))
+        } else {
+            json!(i64::from_le_bytes(last_updated.try_into().unwrap()))
+        };
+
+        let linked: Vec<Value> = links
+            .get(&(owner, name))
+            .map(|la| {
+                la.iter()
+                    .map(|(code, action)| json!({"account": n(*code), "action": n(*action)}))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let doc = json!({
+            "block_num": block_num,
+            "last_updated": last_updated_val,
+            "account": account,
+            "perm_name": perm_name,
+            "parent": n(parent),
+            "required_auth": required_auth,
+            "linked_actions": linked,
+            "present": true,
+        });
+        if let Ok(d) = mongodb::bson::to_document(&doc) {
+            let _ = tx.send((COLL_PERMISSIONS, d));
         }
 
         if matches!(limit, Some(l) if st.permissions >= l) {

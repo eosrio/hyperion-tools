@@ -8,6 +8,7 @@
 //! each own an `AbiHandle` registry (`Send`, not `Sync`) and decode in parallel; one writer drains
 //! NDJSON. Bounded channels provide backpressure → bounded memory for EOS-scale (18 GB+) snapshots.
 
+mod keyfmt;
 mod map;
 mod model;
 mod mongo;
@@ -102,6 +103,10 @@ struct Args {
     /// skip building indexes after load (for pure decode+write benchmarking)
     #[arg(long, default_value_t = false)]
     mongo_no_index: bool,
+    /// build only the Light-API read-path indexes (skips the costly permissions/pub_keys indexes the
+    /// serving path never uses) — strongly recommended for large chains like WAX
+    #[arg(long, default_value_t = false)]
+    mongo_lean_index: bool,
 }
 
 /// If `path` ends in `.zst`, decompress (pure-Rust ruzstd) to the same path without the suffix
@@ -183,6 +188,9 @@ where
     P: FnOnce(&mut dyn FnMut(RawRow) -> Result<()>) -> Result<ProducerStats>,
 {
     let n_workers = threads.max(1);
+    // Emit the additive Light-API doc fields when writing to Mongo (OFF for plain NDJSON → existing
+    // byte-exact lines unchanged). Computed before `mongo_cfg` is moved into the sink match below.
+    let lightapi_fields = mongo_cfg.is_some();
     let abi_raw = Arc::new(abi_raw);
     let (row_tx, row_rx) = crossbeam_channel::bounded::<RawRow>(n_workers * 8192);
 
@@ -283,6 +291,7 @@ where
                                         payer: &payer,
                                         block_num,
                                         token_ok,
+                                        lightapi_fields,
                                     };
                                     map::map_row(&ctx, data, &mut reg)
                                 })
@@ -762,6 +771,97 @@ fn build_targets(specs: &[&str], names: &Abieos) -> Result<Targets> {
     Ok(Targets { filters })
 }
 
+/// Contract tables the `lightapi` preset loads (besides the native `permissions` pass). These feed
+/// the cc32d9 resources/rex/topram/topstake/balances endpoints. Missing collections on a given chain
+/// (e.g. no REX on some chains) simply yield empty sections — tolerated downstream.
+const LIGHTAPI_TABLES: &[&str] = &[
+    "voters",
+    "accounts",
+    "eosio:global",
+    "eosio:userres",
+    "eosio:delband",
+    "eosio:rexbal",
+    "eosio:rexfund",
+    "eosio:rexpool",
+];
+
+/// Parse the `--tables` selector list, expanding the `lightapi` preset. Returns
+/// `(table_specs, want_permissions, lightapi_preset)` where `table_specs` is the contract-table
+/// selectors with the native `permissions` selector removed.
+fn parse_table_specs(tables: &str) -> (Vec<&str>, bool, bool) {
+    let mut specs: Vec<&str> = tables
+        .split(',')
+        .map(|x| x.trim())
+        .filter(|x| !x.is_empty())
+        .collect();
+    let preset = specs.contains(&"lightapi");
+    if preset {
+        specs.retain(|s| *s != "lightapi");
+        for t in LIGHTAPI_TABLES {
+            if !specs.contains(t) {
+                specs.push(t);
+            }
+        }
+    }
+    let want_permissions = preset || specs.contains(&"permissions");
+    let table_specs: Vec<&str> = specs.into_iter().filter(|s| *s != "permissions").collect();
+    (table_specs, want_permissions, preset)
+}
+
+/// Run the native-section pass straight into MongoDB (a self-contained sink), emitting the
+/// `permissions` collection, the `pub_keys` reverse index, and `account_codehash` (for `/codehash`).
+/// Used by `--tables lightapi`/permissions when `--mongo` is set. Returns the permission stats.
+#[allow(clippy::too_many_arguments)]
+fn load_permissions_to_mongo(
+    s: &mut Snap,
+    secs: &[Section],
+    abi_raw: &HashMap<u64, Vec<u8>>,
+    names: &Abieos,
+    eosio: u64,
+    block_num: u32,
+    cfg: mongo::MongoCfg,
+    limit: Option<u64>,
+) -> Result<perms::PermStats> {
+    let (tx, rx) = crossbeam_channel::bounded::<mongo::SinkItem>(8192);
+    let handle = std::thread::spawn(move || mongo::run_sink(cfg, rx));
+    let pst =
+        perms::decode_permissions_mongo(s, secs, abi_raw, names, eosio, block_num, &tx, limit);
+
+    // account_codehash (account ↔ contract hash) from the account_metadata_object section, if present.
+    let mut codehashes = 0u64;
+    if let Some(meta_sec) = find(secs, "eosio::chain::account_metadata_object") {
+        match model::load_codehashes(s, meta_sec) {
+            Ok(rows) => {
+                for (name, hash) in rows {
+                    let acct = names
+                        .name_to_string(name)
+                        .unwrap_or_else(|_| name.to_string());
+                    let d = mongodb::bson::doc! {
+                        "account": acct,
+                        "code_hash": hex::encode(hash),
+                        "block_num": block_num as i64,
+                    };
+                    if tx.send((map::COLL_CODEHASH, d)).is_ok() {
+                        codehashes += 1;
+                    }
+                }
+            }
+            Err(e) => eprintln!("[snapshot-load][mongo] account_codehash skipped: {e}"),
+        }
+    }
+
+    drop(tx); // close → sink drains and builds indexes
+    let ms = handle
+        .join()
+        .map_err(|_| anyhow!("mongo permissions sink panicked"))??;
+    let pst = pst?;
+    eprintln!(
+        "[snapshot-load][mongo] permissions: {} docs in {:.1}s | errors={} | {} permissions, {} links, {} codehashes",
+        ms.docs, ms.write_secs, ms.errors, pst.permissions, pst.links, codehashes
+    );
+    Ok(pst)
+}
+
 /// Build the optional Mongo sink config from CLI args (shared by both paths). NDJSON is the default
 /// when `--mongo` is absent (returns `None`).
 fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
@@ -797,7 +897,24 @@ fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
         pool: args.mongo_pool.unwrap_or(writers as u32 + 2),
         drop: args.mongo_drop,
         no_index: args.mongo_no_index,
+        lean_index: args.mongo_lean_index,
+        special_drops: vec![map::COLL_VOTERS, map::COLL_ACCOUNTS, map::COLL_PROPOSALS],
     }))
+}
+
+/// Mongo config for the permissions pass: same connection, but only drops `permissions`/`pub_keys`
+/// (so a single `lightapi` invocation can load contract tables and permissions without one pass
+/// wiping the other's collections).
+fn build_perms_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
+    let mut cfg = build_mongo_cfg(args)?;
+    if let Some(c) = &mut cfg {
+        c.special_drops = vec![
+            map::COLL_PERMISSIONS,
+            map::COLL_PUB_KEYS,
+            map::COLL_CODEHASH,
+        ];
+    }
+    Ok(cfg)
 }
 
 /// Print the producer/decode/mongo summary block (shared by both paths).
@@ -856,14 +973,16 @@ fn run_url_path(args: &Args) -> Result<()> {
             .map_err(|e| anyhow!("string_to_name({x}): {e:?}"))
     };
 
-    let specs: Vec<&str> = args
-        .tables
-        .split(',')
-        .map(|x| x.trim())
-        .filter(|x| !x.is_empty())
-        .collect();
-    let want_permissions = specs.contains(&"permissions");
-    if want_permissions && specs.len() != 1 {
+    let (table_specs, want_permissions, lightapi_preset) = parse_table_specs(&args.tables);
+    // Permissions-to-Mongo (and thus the `lightapi` preset) needs random access to interleave the
+    // native permission sections with the contract-table pass; it is seek-path only for now.
+    if lightapi_preset {
+        bail!("--tables lightapi is supported on the seek path only (--snapshot <file>); download the snapshot then load it");
+    }
+    if want_permissions && args.mongo.is_some() {
+        bail!("loading `permissions` into --mongo is supported on the seek path only (--snapshot <file>) for now");
+    }
+    if want_permissions && !table_specs.is_empty() {
         bail!("`permissions` is a native section, not a contract table — run it alone: --tables permissions");
     }
 
@@ -874,7 +993,7 @@ fn run_url_path(args: &Args) -> Result<()> {
     let main_cfg = if want_permissions {
         None
     } else {
-        Some((build_targets(&specs, &names)?, build_mongo_cfg(args)?))
+        Some((build_targets(&table_specs, &names)?, build_mongo_cfg(args)?))
     };
 
     eprintln!("[snapshot-load] streaming from {url}");
@@ -953,18 +1072,9 @@ fn main() -> Result<()> {
             .map_err(|e| anyhow!("string_to_name({x}): {e:?}"))
     };
 
-    // --tables selectors. `permissions` is special (a native section, not a contract table) and must be
-    // run on its own; all other selectors are contract-table filters parsed in the pipeline branch below.
-    let specs: Vec<&str> = args
-        .tables
-        .split(',')
-        .map(|x| x.trim())
-        .filter(|x| !x.is_empty())
-        .collect();
-    let want_permissions = specs.contains(&"permissions");
-    if want_permissions && specs.len() != 1 {
-        bail!("`permissions` is a native section, not a contract table — run it alone: --tables permissions");
-    }
+    // --tables selectors, expanding the `lightapi` preset. `permissions` is a native section (not a
+    // contract table); `table_specs` excludes it and it is loaded by a dedicated pass.
+    let (table_specs, want_permissions, lightapi_preset) = parse_table_specs(&args.tables);
 
     let t0 = Instant::now();
     let snap_path = ensure_decompressed(args.snapshot.as_deref().unwrap())?;
@@ -1025,36 +1135,70 @@ fn main() -> Result<()> {
         t0.elapsed()
     );
 
-    // Permissions: native sections (`permission_object` / `permission_link_object`), decoded by a
-    // dedicated single-threaded path (different decode from the contract-table pipeline).
+    let mongo_cfg = build_mongo_cfg(&args)?;
+    if lightapi_preset && mongo_cfg.is_none() {
+        bail!("--tables lightapi requires --mongo (it bootstraps the Light-API collections into MongoDB)");
+    }
+    // Over NDJSON, `permissions` must be the sole selector (native single-threaded decode). With
+    // --mongo it is loaded as a dedicated pass that can accompany the contract-table pipeline.
+    if want_permissions && mongo_cfg.is_none() && !table_specs.is_empty() {
+        bail!("`permissions` is a native section — over NDJSON run it alone (--tables permissions), or use --mongo to load it alongside contract tables");
+    }
+
+    // Permissions native pass (`permission_object` / `permission_link_object`).
     if want_permissions {
-        let mut out: Box<dyn Write> = match &args.out {
-            Some(p) => Box::new(BufWriter::with_capacity(
-                1 << 20,
-                File::create(p).with_context(|| format!("create {p}"))?,
-            )),
-            None => Box::new(BufWriter::new(std::io::stdout())),
-        };
-        let pst = perms::decode_permissions(
-            &mut s,
-            &secs,
-            &abi_raw,
-            &names,
-            nm("eosio")?,
-            block_num,
-            &mut *out,
-            args.limit,
-            args.stats_only,
-        )?;
-        out.flush()?;
+        match &mongo_cfg {
+            // To Mongo: emit the `permissions` collection + `pub_keys` reverse index.
+            Some(_) => {
+                let pcfg = build_perms_mongo_cfg(&args)?
+                    .expect("perms mongo cfg present when mongo_cfg is Some");
+                load_permissions_to_mongo(
+                    &mut s,
+                    &secs,
+                    &abi_raw,
+                    &names,
+                    nm("eosio")?,
+                    block_num,
+                    pcfg,
+                    args.limit,
+                )?;
+            }
+            // NDJSON standalone (sole selector — guarded above).
+            None => {
+                let mut out: Box<dyn Write> = match &args.out {
+                    Some(p) => Box::new(BufWriter::with_capacity(
+                        1 << 20,
+                        File::create(p).with_context(|| format!("create {p}"))?,
+                    )),
+                    None => Box::new(BufWriter::new(std::io::stdout())),
+                };
+                let pst = perms::decode_permissions(
+                    &mut s,
+                    &secs,
+                    &abi_raw,
+                    &names,
+                    nm("eosio")?,
+                    block_num,
+                    &mut *out,
+                    args.limit,
+                    args.stats_only,
+                )?;
+                out.flush()?;
+                eprintln!("[snapshot-load] done in {:.1?}", t0.elapsed());
+                eprintln!("[snapshot-load] permissions {pst:#?}");
+                return Ok(());
+            }
+        }
+    }
+
+    // No contract-table selectors left (permissions-only Mongo run) → done.
+    if table_specs.is_empty() {
         eprintln!("[snapshot-load] done in {:.1?}", t0.elapsed());
-        eprintln!("[snapshot-load] permissions {pst:#?}");
         return Ok(());
     }
 
     // Contract-table selectors + optional Mongo sink (shared with the streaming path).
-    let t = build_targets(&specs, &names)?;
-    let mongo_cfg = build_mongo_cfg(&args)?;
+    let t = build_targets(&table_specs, &names)?;
 
     let (ps, ws, ms) = run_pipeline(
         s,

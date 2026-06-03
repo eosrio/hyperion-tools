@@ -22,6 +22,10 @@ tar = { workspace = true }        # untar the single snapshot-*.bin from a .tar.
 flate2 = { workspace = true }     # GzDecoder for the .tar.gz leg
 # MongoDB sink (high-throughput parallel insert_many). Async tokio API, default features
 # (rustls-tls + bson-2); `mongodb::bson` provides Document/to_document. Needs Rust >= 1.88 (MSRV).
-mongodb = "3.7"
+mongodb = { workspace = true }
 tokio = { workspace = true }   # current-thread/multi-thread runtime for the async writer bridge
 futures = { workspace = true } # buffer_unordered over concurrent insert_many futures
+# Light-API pub_keys reverse index: convert abieos' PUB_K1_ keys to the legacy EOS… form so /key
+# queries match either encoding. base58 + ripemd160 checksum, pure-Rust (no C toolchain).
+bs58 = "0.5"
+ripemd = "0.1"
