@@ -107,6 +107,11 @@ struct Args {
     /// serving path never uses) — strongly recommended for large chains like WAX
     #[arg(long, default_value_t = false)]
     mongo_lean_index: bool,
+
+    /// Build a WormDB Light-API segment (.wseg) at this path directly from the snapshot — NO Mongo.
+    /// Use with `--tables lightapi` on the seek path (a local `.bin`); `--chain` sets the name.
+    #[arg(long)]
+    wseg: Option<String>,
 }
 
 /// If `path` ends in `.zst`, decompress (pure-Rust ruzstd) to the same path without the suffix
@@ -179,6 +184,9 @@ fn run_workers_and_sink<P>(
     stats_only: bool,
     raw: bool,
     mongo_cfg: Option<mongo::MongoCfg>,
+    // When set, mapped docs go to this external channel (the .wseg Builder sink) instead of an
+    // internal Mongo/NDJSON sink; the caller owns the draining thread.
+    items_tx: Option<crossbeam_channel::Sender<mongo::SinkItem>>,
     produce: P,
 ) -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)>
 where
@@ -190,14 +198,16 @@ where
     let n_workers = threads.max(1);
     // Emit the additive Light-API doc fields when writing to Mongo (OFF for plain NDJSON → existing
     // byte-exact lines unchanged). Computed before `mongo_cfg` is moved into the sink match below.
-    let lightapi_fields = mongo_cfg.is_some();
+    let lightapi_fields = mongo_cfg.is_some() || items_tx.is_some();
     let abi_raw = Arc::new(abi_raw);
     let (row_tx, row_rx) = crossbeam_channel::bounded::<RawRow>(n_workers * 8192);
 
     // Build the chosen sink channel + the thread that drains it.
     let (line_tx, line_rx) = crossbeam_channel::bounded::<String>(n_workers * 8192);
     let (mongo_tx, mongo_rx) = crossbeam_channel::bounded::<mongo::SinkItem>(n_workers * 8192);
-    let out_chan = if mongo_cfg.is_some() {
+    let out_chan = if let Some(tx) = &items_tx {
+        OutChan::Mongo(tx.clone()) // route mapped docs to the external .wseg Builder sink
+    } else if mongo_cfg.is_some() {
         OutChan::Mongo(mongo_tx.clone())
     } else {
         OutChan::Ndjson(line_tx.clone())
@@ -209,31 +219,38 @@ where
         |scope| -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)> {
             // sink thread: NDJSON writer OR Mongo bridge (parallel writers). Exactly one branch runs, so
             // each receiver is consumed in exactly one place.
-            let (writer, mongo_handle) = match mongo_cfg {
-                Some(cfg) => {
-                    drop(line_rx); // unused in mongo mode
-                    let h = scope.spawn(move || -> Result<mongo::MongoStats> {
-                        mongo::run_sink(cfg, mongo_rx)
-                    });
-                    (None, Some(h))
-                }
-                None => {
-                    drop(mongo_rx); // unused in NDJSON mode
-                    let w = scope.spawn(move || -> Result<()> {
-                        let mut out: Box<dyn Write> = match out_path {
-                            Some(p) => Box::new(BufWriter::with_capacity(
-                                1 << 20,
-                                File::create(&p).with_context(|| format!("create {p}"))?,
-                            )),
-                            None => Box::new(BufWriter::new(std::io::stdout())),
-                        };
-                        for line in line_rx.iter() {
-                            out.write_all(line.as_bytes())?;
-                        }
-                        out.flush()?;
-                        Ok(())
-                    });
-                    (Some(w), None)
+            let (writer, mongo_handle) = if items_tx.is_some() {
+                // The external .wseg Builder drains the items channel — no internal sink here.
+                drop(line_rx);
+                drop(mongo_rx);
+                (None, None)
+            } else {
+                match mongo_cfg {
+                    Some(cfg) => {
+                        drop(line_rx); // unused in mongo mode
+                        let h = scope.spawn(move || -> Result<mongo::MongoStats> {
+                            mongo::run_sink(cfg, mongo_rx)
+                        });
+                        (None, Some(h))
+                    }
+                    None => {
+                        drop(mongo_rx); // unused in NDJSON mode
+                        let w = scope.spawn(move || -> Result<()> {
+                            let mut out: Box<dyn Write> = match out_path {
+                                Some(p) => Box::new(BufWriter::with_capacity(
+                                    1 << 20,
+                                    File::create(&p).with_context(|| format!("create {p}"))?,
+                                )),
+                                None => Box::new(BufWriter::new(std::io::stdout())),
+                            };
+                            for line in line_rx.iter() {
+                                out.write_all(line.as_bytes())?;
+                            }
+                            out.flush()?;
+                            Ok(())
+                        });
+                        (Some(w), None)
+                    }
                 }
             };
 
@@ -380,6 +397,7 @@ fn run_pipeline(
     stats_only: bool,
     raw: bool,
     mongo_cfg: Option<mongo::MongoCfg>,
+    items_tx: Option<crossbeam_channel::Sender<mongo::SinkItem>>,
 ) -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)> {
     run_workers_and_sink(
         abi_raw,
@@ -389,6 +407,7 @@ fn run_pipeline(
         stats_only,
         raw,
         mongo_cfg,
+        items_tx,
         |sink| {
             if chain_version < 7 {
                 let ct = find(secs, "contract_tables")
@@ -601,6 +620,7 @@ fn run_stream<R: Read>(
                     stats_only,
                     raw,
                     mongo_cfg,
+                    None, // --wseg uses the seek path; streaming has no external Builder sink
                     move |sink| {
                         let ps = if name == "contract_tables" {
                             tables::walk_v6(&mut s, &sec, t, limit, sink)?
@@ -859,6 +879,42 @@ fn load_permissions_to_mongo(
         "[snapshot-load][mongo] permissions: {} docs in {:.1}s | errors={} | {} permissions, {} links, {} codehashes",
         ms.docs, ms.write_secs, ms.errors, pst.permissions, pst.links, codehashes
     );
+    Ok(pst)
+}
+
+/// Permissions native pass that sends `permissions` + `pub_keys` + `account_codehash` docs to an
+/// external sink channel (the `.wseg` Builder) — same decode as the Mongo path, no internal sink.
+#[allow(clippy::too_many_arguments)]
+fn load_permissions_to_sink(
+    s: &mut Snap,
+    secs: &[Section],
+    abi_raw: &HashMap<u64, Vec<u8>>,
+    names: &Abieos,
+    eosio: u64,
+    block_num: u32,
+    tx: &crossbeam_channel::Sender<mongo::SinkItem>,
+    limit: Option<u64>,
+) -> Result<perms::PermStats> {
+    let pst =
+        perms::decode_permissions_mongo(s, secs, abi_raw, names, eosio, block_num, tx, limit)?;
+    if let Some(meta_sec) = find(secs, "eosio::chain::account_metadata_object") {
+        match model::load_codehashes(s, meta_sec) {
+            Ok(rows) => {
+                for (name, hash) in rows {
+                    let acct = names
+                        .name_to_string(name)
+                        .unwrap_or_else(|_| name.to_string());
+                    let d = mongodb::bson::doc! {
+                        "account": acct,
+                        "code_hash": hex::encode(hash),
+                        "block_num": block_num as i64,
+                    };
+                    let _ = tx.send((map::COLL_CODEHASH, d));
+                }
+            }
+            Err(e) => eprintln!("[snapshot-load] account_codehash skipped: {e}"),
+        }
+    }
     Ok(pst)
 }
 
@@ -1135,6 +1191,59 @@ fn main() -> Result<()> {
         t0.elapsed()
     );
 
+    // ── --wseg: build a WormDB Light-API segment straight from the snapshot — no MongoDB ──
+    // One push-based Builder, fed by BOTH native passes (permissions + contract tables) via a single
+    // channel; the sink thread owns the Builder and writes the .wseg when both passes finish.
+    if let Some(wseg_out) = args.wseg.clone() {
+        let chain = args.chain.as_deref().unwrap_or("chain").to_string();
+        let (tx, rx) = crossbeam_channel::unbounded::<mongo::SinkItem>();
+        let out = wseg_out.clone();
+        let sink = std::thread::spawn(move || -> Result<(usize, usize)> {
+            let mut b = wseg_build::Builder::new();
+            for (coll, doc) in rx.iter() {
+                b.push(coll, &doc);
+            }
+            b.finish(&out).map_err(anyhow::Error::from)
+        });
+        if want_permissions {
+            load_permissions_to_sink(
+                &mut s,
+                &secs,
+                &abi_raw,
+                &names,
+                nm("eosio")?,
+                block_num,
+                &tx,
+                args.limit,
+            )?;
+        }
+        if !table_specs.is_empty() {
+            let t = build_targets(&table_specs, &names)?;
+            run_pipeline(
+                s,
+                &secs,
+                chain_version,
+                abi_raw,
+                &t,
+                block_num,
+                args.threads,
+                None,
+                args.limit,
+                args.stats_only,
+                args.raw,
+                None,
+                Some(tx.clone()),
+            )?;
+        }
+        drop(tx);
+        let (holders, accounts) = sink.join().map_err(|_| anyhow!("wseg sink panicked"))??;
+        eprintln!(
+            "[snapshot-load] wrote {wseg_out} (chain {chain}): {holders} holders, {accounts} accounts, in {:.1?}",
+            t0.elapsed()
+        );
+        return Ok(());
+    }
+
     let mongo_cfg = build_mongo_cfg(&args)?;
     if lightapi_preset && mongo_cfg.is_none() {
         bail!("--tables lightapi requires --mongo (it bootstraps the Light-API collections into MongoDB)");
@@ -1213,6 +1322,7 @@ fn main() -> Result<()> {
         args.stats_only,
         args.raw,
         mongo_cfg,
+        None,
     )?;
 
     report_run(&args, t0, &ps, &ws, &ms);

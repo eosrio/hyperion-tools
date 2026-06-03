@@ -29,3 +29,6 @@ futures = { workspace = true } # buffer_unordered over concurrent insert_many fu
 # queries match either encoding. base58 + ripemd160 checksum, pure-Rust (no C toolchain).
 bs58 = "0.5"
 ripemd = "0.1"
+# Build a WormDB Light-API segment (.wseg) directly from the snapshot (no Mongo) via the shared
+# push-based Builder.
+wseg-build = { path = "../wseg-build" }
