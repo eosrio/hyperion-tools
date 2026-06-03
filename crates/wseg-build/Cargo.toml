@@ -22,3 +22,7 @@ mongodb = { workspace = true }          # async driver — same version as light
 clap = { workspace = true }             # CLI args
 anyhow = { workspace = true }           # error plumbing
 futures = { workspace = true }          # TryStreamExt cursor streaming
+# Binary accinfo compaction: bs58-decode the stored EOS/PUB_K1 key strings to extract the 33-byte
+# point + the two 4-byte checksums, so the segment stores 41 bytes/key instead of ~110 bytes of
+# strings (the procedure base58-re-encodes both forms at request time).
+bs58 = "0.5"

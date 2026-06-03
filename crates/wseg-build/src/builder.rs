@@ -51,17 +51,10 @@ fn bson_i64(b: Option<&Bson>) -> Option<i64> {
     }
 }
 
+use crate::binfmt::{self, Perm};
+
 type Resources = (i64, i64, i64); // net, cpu, ram
 type Deleg = (String, i64, i64); // peer, cpu, net
-
-#[derive(Default, Clone)]
-struct Perm {
-    perm_name: String,
-    threshold: i64,
-    keys: Vec<(String, String, i64)>, // pubkey(EOS), public_key(PUB_K1), weight
-    accounts: Vec<(String, String, i64)>, // actor, permission, weight
-    linked: Vec<(String, String)>,    // code(account), type(action)
-}
 
 #[derive(Default)]
 pub struct Builder {
@@ -265,11 +258,12 @@ impl Builder {
 
         let mut acc_index: Vec<IndexEntry> = Vec::with_capacity(accts.len());
         let mut acc_arena: Vec<u8> = Vec::new();
-        let mut frag = String::with_capacity(2048);
+        let mut rec: Vec<u8> = Vec::with_capacity(512);
         let empty: Vec<Perm> = Vec::new();
         for key in accts {
-            render_fragment(
-                &mut frag,
+            // Compact binary record (procedure renders it to cc32d9 JSON at request time).
+            binfmt::encode(
+                &mut rec,
                 self.resources.get(&key),
                 self.perms.get(&key).unwrap_or(&empty),
                 self.deleg_to.get(&key),
@@ -279,9 +273,9 @@ impl Builder {
             acc_index.push(IndexEntry {
                 key,
                 off: acc_arena.len() as u64,
-                len: frag.len() as u32,
+                len: rec.len() as u32,
             });
-            acc_arena.extend_from_slice(frag.as_bytes());
+            acc_arena.extend_from_slice(&rec);
         }
         let accounts = acc_index.len();
         let accinfo_tbl = Table {
