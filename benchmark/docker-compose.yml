@@ -1,0 +1,119 @@
+# Light API parity + operator benchmark: OUR stack (snapshot-load + MongoDB + light-api) vs the
+# cc32d9 reference stack (Spring nodeos + SHiP + Chronicle + MariaDB + Perl), both fed the SAME
+# Libre portable snapshot. See README.md and COMPARISON.md.
+#
+#   docker compose --profile ours up        # just our stack (fast)
+#   docker compose --profile cc32d9 up       # just the reference stack
+#   docker compose up                        # everything (default profile covers both)
+#
+# Run from this directory. Build contexts are relative to it.
+
+name: lightapi-bench
+
+x-default: &default
+  restart: unless-stopped
+
+services:
+  # ── shared: download + extract the Libre snapshot once, derive its head block_num ───────────────
+  snapshot-fetch:
+    build: ./snapshot
+    environment:
+      SNAPSHOT_URL: ${SNAPSHOT_URL:-https://snapshots.eosusa.io/snaps/libre/libre-2026-06-01_00-00.tar.gz}
+    volumes:
+      - snapshot_data:/snapshot
+      # Pre-placed local snapshots (gitignored). If a file matching the SNAPSHOT_URL basename exists
+      # here, it is used instead of downloading — avoids re-hitting the provider's rate limit.
+      - ./.snapshots:/local:ro
+    restart: "no"
+
+  # ── OUR STACK ───────────────────────────────────────────────────────────────────────────────────
+  mongodb:
+    <<: *default
+    image: mongo:8
+    profiles: ["ours", "all"]
+    command: ["--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-2}"]
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ours-loader:
+    build:
+      context: ..
+      dockerfile: benchmark/ours/Dockerfile
+    image: lightapi-bench/ours:latest
+    profiles: ["ours", "all"]
+    command: ["/entrypoint-loader.sh"]
+    environment:
+      CHAIN: libre
+      MONGO_URI: mongodb://mongodb:27017
+    depends_on:
+      snapshot-fetch:
+        condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - snapshot_data:/snapshot:ro
+    restart: "no"
+
+  ours-light-api:
+    <<: *default
+    image: lightapi-bench/ours:latest
+    profiles: ["ours", "all"]
+    command: ["/entrypoint-server.sh"]
+    depends_on:
+      ours-loader:
+        condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "${OURS_PORT:-7000}:7000"
+
+  # ── cc32d9 REFERENCE STACK ──────────────────────────────────────────────────────────────────────
+  cc32d9-nodeos:
+    <<: *default
+    build: ./cc32d9/nodeos
+    profiles: ["cc32d9", "all"]
+    environment:
+      LIBRE_P2P_PEERS: ${LIBRE_P2P_PEERS:-}
+    volumes:
+      - snapshot_data:/snapshot:ro
+      - nodeos_data:/srv/libre/data
+    depends_on:
+      snapshot-fetch:
+        condition: service_completed_successfully
+    ports:
+      - "${NODEOS_HTTP_PORT:-8888}:8888" # chain API (optional, for inspection)
+    # SHiP is on 8080 (internal only); chronicle reaches it over the compose network.
+
+  cc32d9-lightapi:
+    <<: *default
+    build: ./cc32d9/lightapi
+    profiles: ["cc32d9", "all"]
+    environment:
+      NODEOS_HOST: cc32d9-nodeos
+      SHIP_PORT: "8080"
+      STARMAN_WORKERS: ${STARMAN_WORKERS:-32}
+    volumes:
+      - snapshot_data:/snapshot:ro
+      - mariadb_data:/var/lib/mysql
+      - chronicle_data:/srv/libre/chronicle-data
+    depends_on:
+      cc32d9-nodeos:
+        condition: service_started
+      snapshot-fetch:
+        condition: service_completed_successfully
+    ports:
+      - "${CC32D9_PORT:-5001}:5001" # cc32d9 HTTP API
+
+volumes:
+  snapshot_data:
+  mongo_data:
+  nodeos_data:
+  mariadb_data:
+  chronicle_data:

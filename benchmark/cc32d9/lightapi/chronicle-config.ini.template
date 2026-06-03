@@ -1,0 +1,10 @@
+host = ##SHIP_HOST##
+port = ##SHIP_PORT##
+mode = scan
+receiver-state-db-size = 16384
+plugin = exp_ws_plugin
+exp-ws-host = 127.0.0.1
+exp-ws-port = ##DBWRITE_PORT##
+exp-ws-bin-header = true
+skip-block-events = true
+skip-traces = true

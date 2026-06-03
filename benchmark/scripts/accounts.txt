@@ -1,0 +1,14 @@
+# Accounts to parity-check (one per line; # = comment). System accounts exist on every Antelope
+# chain, so they are reliable across both APIs. Add real Libre accounts of interest below.
+eosio
+eosio.token
+eosio.ram
+eosio.ramfee
+eosio.stake
+eosio.names
+eosio.saving
+eosio.bpay
+eosio.vpay
+eosio.msig
+eosio.wrap
+eosio.rex

@@ -1,0 +1,18 @@
+[mongo]
+uri = "mongodb://mongodb:27017"
+prefix = "hyperion"
+max_pool_size = 64
+
+[server]
+bind = "0.0.0.0"
+port = 7000
+
+[[networks]]
+name = "libre"
+chainid = "38b1d7815474d0c60683ecbea321d723e83f5da6ae5f1c1f9fecc69d9ba96465"
+systoken = "LIBRE"
+decimals = 4
+production = 1
+rex_enabled = false
+description = "Libre"
+sync_threshold_secs = 30
