@@ -10,23 +10,29 @@ reports the real lag.
 
 - A node with `state_history_plugin` enabled (`state-history-endpoint`, default `:8080`) and the chain
   HTTP API reachable (default `:8888`).
-- **[bun](https://bun.sh)** (`curl -fsSL https://bun.sh/install | bash`) — or use the prebuilt
-  `lightapi-ship-feed` binary in this folder if present.
+- **[bun](https://bun.sh)** — install with `curl -fsSL https://bun.sh/install | bash`. The feed ships
+  as a single self-contained `lightapi-ship-feed.js` (all dependencies bundled — no `bun install`).
 
 ## Run
 
 ```bash
 cd feed
-bun install        # first time (pulls @wharfkit/antelope)
 
 SHIP=ws://127.0.0.1:8080/ \
 CHAIN_API=http://127.0.0.1:8888 \
 CHAIN=wax \
 PORT=6389 \
-bun src/bin/lightapi-ship-feed.ts
+START=<block_num from step 2> \
+bun lightapi-ship-feed.js
 ```
 
-(`PORT` is WormDB's WormWire port — 6389 by default. `CHAIN` must match the chain you configured.)
+- `SHIP` — your node's `state-history-endpoint` (the State-History websocket).
+- `CHAIN_API` — your node's `http-server-address` (chain HTTP API).
+- `CHAIN` — must match the `chain` set in `wormdb.json`.
+- `PORT` — WormDB's **WormWire** port (`6389` by default; that's `--port`, not the HTTP `:6390`).
+- `START` — the `block_num` printed when you built the segment (step 2). The feed replays from there,
+  so no change between the snapshot and now is missed. Omit (or set `0`) to start at the node's
+  current LIB instead — only safe if you start the feed right after building the segment.
 
 You'll see `[ship] block <N> bal=… acci=…` as blocks arrive, and:
 
