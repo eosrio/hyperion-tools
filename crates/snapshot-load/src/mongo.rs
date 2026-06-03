@@ -378,7 +378,9 @@ async fn build_indexes(db: &mongodb::Database, coll: &str, lean: bool) -> Result
     if lean {
         match coll {
             COLL_PERMISSIONS => {
-                c.create_indexes(vec![mk(doc! { "account": 1 })]).await?;
+                // {account} for reads + {block_num} for the live feed's "changed since N" poll.
+                c.create_indexes(vec![mk(doc! { "account": 1 }), mk(doc! { "block_num": 1 })])
+                    .await?;
                 return Ok(());
             }
             COLL_PUB_KEYS => {
@@ -403,12 +405,16 @@ async fn build_indexes(db: &mongodb::Database, coll: &str, lean: bool) -> Result
             mk_u(doc! { "code": 1, "scope": 1, "symbol": 1 }),
             // Light-API /topholders: top balances of a (contract, symbol) by amount desc.
             mk(doc! { "code": 1, "symbol": 1, "amount": -1 }),
+            // Live feed: "changed since block N" poll.
+            mk(doc! { "block_num": 1 }),
         ],
         COLL_PERMISSIONS => vec![
             mk(doc! { "account": 1 }),
             mk_u(doc! { "account": 1, "perm_name": 1 }),
             mk(doc! { "last_updated": -1 }),
             mk(doc! { "linked_actions.account": 1, "linked_actions.action": 1 }),
+            // Live feed: "changed since block N" poll.
+            mk(doc! { "block_num": 1 }),
         ],
         COLL_PUB_KEYS => vec![
             mk(doc! { "key": 1 }),
