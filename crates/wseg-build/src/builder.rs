@@ -380,6 +380,8 @@ impl Builder {
             anyhow_u16(hdr.len())?;
             th_arena.extend_from_slice(&(hdr.len() as u16).to_le_bytes());
             th_arena.extend_from_slice(hdr.as_bytes());
+            // holder count (u32) so /holdercount is O(1) instead of scanning every line.
+            th_arena.extend_from_slice(&(holders.len() as u32).to_le_bytes());
             for (acct, _units, amount) in &holders {
                 th_arena.extend_from_slice(acct.as_bytes());
                 th_arena.push(b'\t');
