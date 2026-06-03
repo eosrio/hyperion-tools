@@ -8,6 +8,14 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+name = "wseg_build"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wseg-build"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { workspace = true }            # async runtime for the Mongo stream
 mongodb = { workspace = true }          # async driver — same version as light-api / snapshot-load
