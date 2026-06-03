@@ -49,4 +49,14 @@ mod tests {
         assert_ne!(encode("waxupbitcold"), encode("eosio.token"));
         assert_ne!(encode("a"), encode("b"));
     }
+
+    #[test]
+    fn token_key_matches_zig() {
+        // FNV1a-64 of "eosio.token:WAX" — cross-checked against WormDB's name.zig tokenKey.
+        assert_eq!(crate::builder::token_key("eosio.token", "WAX"), 13053440730298864435);
+        assert_ne!(
+            crate::builder::token_key("eosio.token", "WAX"),
+            crate::builder::token_key("eosio.token", "EOS")
+        );
+    }
 }

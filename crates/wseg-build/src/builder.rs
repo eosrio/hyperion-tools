@@ -18,6 +18,30 @@ use crate::wseg::{write_segment, IndexEntry, Table};
 
 pub const TABLE_BALANCES: u32 = 0;
 pub const TABLE_ACCINFO: u32 = 5;
+pub const TABLE_TOKEN_HOLDERS: u32 = 6;
+pub const TABLE_PUB_KEYS: u32 = 7;
+
+/// FNV1a-64 of a string (used for the token and pub-key table keys). Matches the Zig `fnv1a64`.
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Segment key for a public key string (EOS… or PUB_K1_…).
+pub fn key_hash(pubkey: &str) -> u64 {
+    fnv1a64(pubkey)
+}
+
+fn anyhow_u16(n: usize) -> std::io::Result<()> {
+    if n > u16::MAX as usize {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "token id too long"));
+    }
+    Ok(())
+}
 
 /// "113.00000000 WAX" -> 11300000000 (base units, exact).
 fn asset_units(s: &str) -> i64 {
@@ -59,12 +83,50 @@ type Deleg = (String, i64, i64); // peer, cpu, net
 #[derive(Default)]
 pub struct Builder {
     balances: HashMap<u64, Vec<u8>>,
+    /// (contract, symbol) -> holders, for the token_holders table (HTTP topholders/holdercount +
+    /// WS get_token_holders). Each entry: (holder account string, sort units i128, amount string).
+    token_holders: HashMap<(String, String), Vec<(String, i128, String)>>,
     resources: HashMap<u64, Resources>,
     deleg_to: HashMap<u64, Vec<Deleg>>,
     deleg_from: HashMap<u64, Vec<Deleg>>,
     codehash: HashMap<u64, String>,
     perms: HashMap<u64, Vec<Perm>>,
+    /// modern (PUB_K1) key string -> (legacy EOS form, holders[(account, perm, weight)]), for the
+    /// pub_keys table (HTTP /key + WS get_accounts_from_keys).
+    key_holders: HashMap<String, (String, Vec<(String, String, i64)>)>,
     pub rows: u64,
+}
+
+/// Sortable integer units from an asset amount string ("123.4567" -> 1234567), sign-aware. i128 so
+/// big-supply tokens don't overflow.
+fn amount_units(s: &str) -> i128 {
+    let mut buf = String::with_capacity(s.len());
+    let mut neg = false;
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '-' if i == 0 => neg = true,
+            '.' => {}
+            d if d.is_ascii_digit() => buf.push(d),
+            _ => {}
+        }
+    }
+    let v: i128 = buf.parse().unwrap_or(0);
+    if neg {
+        -v
+    } else {
+        v
+    }
+}
+
+/// Stable key for a (contract, symbol) token: FNV1a-64 of "contract:symbol". Must match the Zig
+/// `core/name.zig` tokenKey so the procedures look up the same entry.
+pub fn token_key(contract: &str, symbol: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in contract.bytes().chain(std::iter::once(b':')).chain(symbol.bytes()) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 impl Builder {
@@ -100,7 +162,8 @@ impl Builder {
                 Err(_) => "0".to_string(),
             },
         };
-        let buf = self.balances.entry(name::encode(scope)).or_default();
+        let holder = name::encode(scope);
+        let buf = self.balances.entry(holder).or_default();
         buf.extend_from_slice(code.as_bytes());
         buf.push(b'\t');
         buf.extend_from_slice(symbol.as_bytes());
@@ -109,6 +172,13 @@ impl Builder {
         buf.push(b'\t');
         buf.extend_from_slice(amount.as_bytes());
         buf.push(b'\n');
+
+        // transpose for the token_holders table (topholders / holdercount / get_token_holders)
+        let _ = holder;
+        self.token_holders
+            .entry((code.to_string(), symbol.to_string()))
+            .or_default()
+            .push((scope.to_string(), amount_units(&amount), amount));
     }
 
     fn push_userres(&mut self, d: &Document) {
@@ -200,6 +270,19 @@ impl Builder {
                 p.linked.push((code.to_string(), typ.to_string()));
             }
         }
+        // pub_keys reverse index: key -> holders (account, perm, weight), for /key + WS keys.
+        let acct = account.to_string();
+        let perm_name = p.perm_name.clone();
+        for (legacy, modern, w) in &p.keys {
+            if modern.is_empty() {
+                continue;
+            }
+            self.key_holders
+                .entry(modern.clone())
+                .or_insert_with(|| (legacy.clone(), Vec::new()))
+                .1
+                .push((acct.clone(), perm_name.clone(), *w));
+        }
         self.perms.entry(name::encode(account)).or_default().push(p);
     }
 
@@ -284,7 +367,56 @@ impl Builder {
             arena: acc_arena,
         };
 
-        write_segment(out, vec![balances_tbl, accinfo_tbl])?;
+        // token_holders table: per (contract,symbol), holders sorted by amount desc. Serves HTTP
+        // topholders (first N), holdercount (line count), and WS get_token_holders (stream all).
+        // Blob: [u16 hdr_len]["contract:symbol"] then "account\tamount\n" lines (amount-desc).
+        let mut th_index: Vec<IndexEntry> = Vec::with_capacity(self.token_holders.len());
+        let mut th_arena: Vec<u8> = Vec::new();
+        for ((contract, symbol), mut holders) in self.token_holders.drain() {
+            // sort by units desc, tiebreak by account asc for determinism
+            holders.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            let off = th_arena.len();
+            let hdr = format!("{contract}:{symbol}");
+            anyhow_u16(hdr.len())?;
+            th_arena.extend_from_slice(&(hdr.len() as u16).to_le_bytes());
+            th_arena.extend_from_slice(hdr.as_bytes());
+            for (acct, _units, amount) in &holders {
+                th_arena.extend_from_slice(acct.as_bytes());
+                th_arena.push(b'\t');
+                th_arena.extend_from_slice(amount.as_bytes());
+                th_arena.push(b'\n');
+            }
+            let len = th_arena.len() - off;
+            th_index.push(IndexEntry { key: token_key(&contract, &symbol), off: off as u64, len: len as u32 });
+        }
+        let tokens = th_index.len();
+        let token_holders_tbl = Table { table_id: TABLE_TOKEN_HOLDERS, index: th_index, arena: th_arena };
+
+        // pub_keys table: key -> holders. Blob = "account\tperm\tweight\n" lines; indexed under BOTH
+        // the EOS and PUB_K1 hashes (two index entries → one blob) so a query in either form matches.
+        let mut pk_index: Vec<IndexEntry> = Vec::with_capacity(self.key_holders.len() * 2);
+        let mut pk_arena: Vec<u8> = Vec::new();
+        for (modern, (legacy, rows)) in self.key_holders.drain() {
+            let off = pk_arena.len();
+            for (acct, perm, w) in &rows {
+                pk_arena.extend_from_slice(acct.as_bytes());
+                pk_arena.push(b'\t');
+                pk_arena.extend_from_slice(perm.as_bytes());
+                pk_arena.push(b'\t');
+                pk_arena.extend_from_slice(w.to_string().as_bytes());
+                pk_arena.push(b'\n');
+            }
+            let len = (pk_arena.len() - off) as u32;
+            pk_index.push(IndexEntry { key: key_hash(&modern), off: off as u64, len });
+            if !legacy.is_empty() && legacy != modern {
+                pk_index.push(IndexEntry { key: key_hash(&legacy), off: off as u64, len });
+            }
+        }
+        let keys = pk_index.len();
+        let pub_keys_tbl = Table { table_id: TABLE_PUB_KEYS, index: pk_index, arena: pk_arena };
+
+        write_segment(out, vec![balances_tbl, accinfo_tbl, token_holders_tbl, pub_keys_tbl])?;
+        eprintln!("[wseg] tokens={tokens} pub_key_index_entries={keys}");
         Ok((holders, accounts))
     }
 }
