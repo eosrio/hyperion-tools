@@ -1,0 +1,4 @@
+# Prebuilt binaries (wormdb is private; shipped only in the out-of-band tarball) and packaged drops.
+bin/
+*.tar.gz
+data/
