@@ -162,7 +162,7 @@ impl Seg {
             .step_by(step)
             .map(|i| self.entry(t, i))
             .collect();
-        v.sort_unstable_by(|a, b| b.2.cmp(&a.2)); // by posting/blob size desc
+        v.sort_unstable_by_key(|e| std::cmp::Reverse(e.2)); // by posting/blob size desc
         v
     }
 }
@@ -508,7 +508,7 @@ fn run_workload(seg: &Seg, n: usize, base_rss: f64) {
             let (_, off, len) = datas[rng.pick(datas.len())];
             h ^= page(seg, TABLE_AA_DATA_ATTR, off, len);
         } else if sorted_cnt > 100 {
-            let k = (rng.next() as usize % (sorted_cnt - 100)).max(0);
+            let k = rng.next() as usize % (sorted_cnt - 100);
             if let Some(tt) = seg.tables.get(&TABLE_AA_SORTED_ID) {
                 let b = seg.blob(tt, sorted_off, (4 + sorted_cnt * 8) as u32);
                 for j in k..k + 100 {
