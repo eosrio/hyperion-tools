@@ -8,6 +8,8 @@
 //! each own an `AbiHandle` registry (`Send`, not `Sync`) and decode in parallel; one writer drains
 //! NDJSON. Bounded channels provide backpressure → bounded memory for EOS-scale (18 GB+) snapshots.
 
+mod atomicassets;
+mod atomicmarket;
 mod keyfmt;
 mod map;
 mod model;
@@ -178,6 +180,9 @@ enum OutChan {
 #[allow(clippy::too_many_arguments)]
 fn run_workers_and_sink<P>(
     abi_raw: HashMap<u64, Vec<u8>>,
+    // The AtomicAssets schema-format registry (empty for non-`atomic` runs), shared read-only across
+    // workers so `map_row` can decode `serialized_data` blobs.
+    schema_reg: Arc<atomicassets::SchemaRegistry>,
     block_num: u32,
     threads: usize,
     out_path: Option<String>,
@@ -260,6 +265,7 @@ where
             for _ in 0..n_workers {
                 let row_rx = row_rx.clone();
                 let abi_raw = Arc::clone(&abi_raw);
+                let schema_reg = Arc::clone(&schema_reg);
                 let out_chan = Arc::clone(&out_chan);
                 workers.push(scope.spawn(move || -> WorkerStats {
                     let names = Abieos::new();
@@ -310,7 +316,7 @@ where
                                         token_ok,
                                         lightapi_fields,
                                     };
-                                    map::map_row(&ctx, data, &mut reg)
+                                    map::map_row(&ctx, data, &mut reg, &schema_reg)
                                 })
                         } else {
                             None
@@ -389,6 +395,7 @@ fn run_pipeline(
     secs: &[Section],
     chain_version: u32,
     abi_raw: HashMap<u64, Vec<u8>>,
+    schema_reg: Arc<atomicassets::SchemaRegistry>,
     t: &Targets,
     block_num: u32,
     threads: usize,
@@ -401,6 +408,7 @@ fn run_pipeline(
 ) -> Result<(ProducerStats, WorkerStats, Option<mongo::MongoStats>)> {
     run_workers_and_sink(
         abi_raw,
+        schema_reg,
         block_num,
         threads,
         out_path,
@@ -614,6 +622,7 @@ fn run_stream<R: Read>(
                 );
                 return run_workers_and_sink(
                     abi_raw,
+                    Arc::new(atomicassets::SchemaRegistry::default()), // atomic preset is seek-only
                     block_num,
                     threads,
                     out_path,
@@ -805,17 +814,18 @@ const LIGHTAPI_TABLES: &[&str] = &[
     "eosio:rexpool",
 ];
 
-/// Parse the `--tables` selector list, expanding the `lightapi` preset. Returns
-/// `(table_specs, want_permissions, lightapi_preset)` where `table_specs` is the contract-table
-/// selectors with the native `permissions` selector removed.
-fn parse_table_specs(tables: &str) -> (Vec<&str>, bool, bool) {
+/// Parse the `--tables` selector list, expanding the `lightapi` and `atomicassets`/`atomicmarket`/
+/// `atomic` presets. Returns `(table_specs, want_permissions, lightapi_preset, atomic_preset)` where
+/// `table_specs` is the contract-table selectors with the native `permissions` selector removed and
+/// `atomic_preset` flags an AtomicAssets/AtomicMarket run (which needs the schema-registry pre-pass).
+fn parse_table_specs(tables: &str) -> (Vec<&str>, bool, bool, bool) {
     let mut specs: Vec<&str> = tables
         .split(',')
         .map(|x| x.trim())
         .filter(|x| !x.is_empty())
         .collect();
-    let preset = specs.contains(&"lightapi");
-    if preset {
+    let lightapi_preset = specs.contains(&"lightapi");
+    if lightapi_preset {
         specs.retain(|s| *s != "lightapi");
         for t in LIGHTAPI_TABLES {
             if !specs.contains(t) {
@@ -823,9 +833,39 @@ fn parse_table_specs(tables: &str) -> (Vec<&str>, bool, bool) {
             }
         }
     }
-    let want_permissions = preset || specs.contains(&"permissions");
+    // AtomicAssets / AtomicMarket presets: `atomicassets`, `atomicmarket`, or `atomic` (both).
+    let want_aa = specs
+        .iter()
+        .any(|s| matches!(*s, "atomicassets" | "atomic"));
+    let want_am = specs
+        .iter()
+        .any(|s| matches!(*s, "atomicmarket" | "atomic"));
+    let atomic_preset = want_aa || want_am;
+    if atomic_preset {
+        specs.retain(|s| !matches!(*s, "atomic" | "atomicassets" | "atomicmarket"));
+        if want_aa {
+            for t in atomicassets::ATOMICASSETS_TABLES {
+                if !specs.contains(t) {
+                    specs.push(t);
+                }
+            }
+        }
+        if want_am {
+            for t in atomicmarket::ATOMICMARKET_TABLES {
+                if !specs.contains(t) {
+                    specs.push(t);
+                }
+            }
+        }
+    }
+    let want_permissions = lightapi_preset || specs.contains(&"permissions");
     let table_specs: Vec<&str> = specs.into_iter().filter(|s| *s != "permissions").collect();
-    (table_specs, want_permissions, preset)
+    (
+        table_specs,
+        want_permissions,
+        lightapi_preset,
+        atomic_preset,
+    )
 }
 
 /// Run the native-section pass straight into MongoDB (a self-contained sink), emitting the
@@ -924,6 +964,15 @@ fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
     let Some(base_uri) = &args.mongo else {
         return Ok(None);
     };
+    // The drop set depends on the preset: an `atomic` run owns the AtomicAssets/AtomicMarket
+    // collections, NOT voters/accounts/proposals — so `--mongo-drop` doesn't wipe a prior lightapi
+    // load's collections (mirrors how `build_perms_mongo_cfg` narrows the set to permissions/pub_keys).
+    let atomic_preset = parse_table_specs(&args.tables).3;
+    let special_drops = if atomic_preset {
+        atomicassets::all_collections()
+    } else {
+        vec![map::COLL_VOTERS, map::COLL_ACCOUNTS, map::COLL_PROPOSALS]
+    };
     let chain = args
         .chain
         .as_deref()
@@ -954,7 +1003,7 @@ fn build_mongo_cfg(args: &Args) -> Result<Option<mongo::MongoCfg>> {
         drop: args.mongo_drop,
         no_index: args.mongo_no_index,
         lean_index: args.mongo_lean_index,
-        special_drops: vec![map::COLL_VOTERS, map::COLL_ACCOUNTS, map::COLL_PROPOSALS],
+        special_drops,
     }))
 }
 
@@ -1029,11 +1078,17 @@ fn run_url_path(args: &Args) -> Result<()> {
             .map_err(|e| anyhow!("string_to_name({x}): {e:?}"))
     };
 
-    let (table_specs, want_permissions, lightapi_preset) = parse_table_specs(&args.tables);
+    let (table_specs, want_permissions, lightapi_preset, atomic_preset) =
+        parse_table_specs(&args.tables);
     // Permissions-to-Mongo (and thus the `lightapi` preset) needs random access to interleave the
     // native permission sections with the contract-table pass; it is seek-path only for now.
     if lightapi_preset {
         bail!("--tables lightapi is supported on the seek path only (--snapshot <file>); download the snapshot then load it");
+    }
+    // The AtomicAssets/AtomicMarket preset needs a two-pass (schema-format registry) over the
+    // contract-table section, which requires random access — seek path only.
+    if atomic_preset {
+        bail!("--tables atomicassets/atomicmarket/atomic is supported on the seek path only (--snapshot <file>); download the snapshot then load it");
     }
     if want_permissions && args.mongo.is_some() {
         bail!("loading `permissions` into --mongo is supported on the seek path only (--snapshot <file>) for now");
@@ -1128,9 +1183,10 @@ fn main() -> Result<()> {
             .map_err(|e| anyhow!("string_to_name({x}): {e:?}"))
     };
 
-    // --tables selectors, expanding the `lightapi` preset. `permissions` is a native section (not a
-    // contract table); `table_specs` excludes it and it is loaded by a dedicated pass.
-    let (table_specs, want_permissions, lightapi_preset) = parse_table_specs(&args.tables);
+    // --tables selectors, expanding the `lightapi` + `atomic` presets. `permissions` is a native
+    // section (not a contract table); `table_specs` excludes it and it is loaded by a dedicated pass.
+    let (table_specs, want_permissions, lightapi_preset, atomic_preset) =
+        parse_table_specs(&args.tables);
 
     let t0 = Instant::now();
     let snap_path = ensure_decompressed(args.snapshot.as_deref().unwrap())?;
@@ -1224,6 +1280,7 @@ fn main() -> Result<()> {
                 &secs,
                 chain_version,
                 abi_raw,
+                Arc::new(atomicassets::SchemaRegistry::default()), // --wseg is Light-API only
                 &t,
                 block_num,
                 args.threads,
@@ -1306,6 +1363,23 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // AtomicAssets/AtomicMarket: a seek-path pre-pass over `schemas` + `config` builds the
+    // schema-format registry so the main pass can decode every `serialized_data` blob. `s` stays
+    // re-seekable (the walkers seek back to the section start), so the main `run_pipeline` is intact.
+    let schema_reg = if atomic_preset {
+        let reg =
+            atomicassets::build_schema_registry(&mut s, &secs, chain_version, &abi_raw, &names)?;
+        eprintln!(
+            "[snapshot-load] atomicassets: schema registry = {} (collection,schema) formats + {} collection-format fields ({:.1?})",
+            reg.schema_count(),
+            reg.collection_format_len(),
+            t0.elapsed()
+        );
+        Arc::new(reg)
+    } else {
+        Arc::new(atomicassets::SchemaRegistry::default())
+    };
+
     // Contract-table selectors + optional Mongo sink (shared with the streaming path).
     let t = build_targets(&table_specs, &names)?;
 
@@ -1314,6 +1388,7 @@ fn main() -> Result<()> {
         &secs,
         chain_version,
         abi_raw,
+        schema_reg,
         &t,
         block_num,
         args.threads,

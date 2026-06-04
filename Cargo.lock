@@ -2132,6 +2132,7 @@ name = "snapshot-load"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomicdata",
  "bs58",
  "clap",
  "crossbeam-channel",

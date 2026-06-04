@@ -10,6 +10,8 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::atomicassets::{self, SchemaRegistry};
+use crate::atomicmarket;
 use crate::model::AbiRegistry;
 
 /// Canonical Mongo collection names (mirrors `manager.class.ts` / the sync modules).
@@ -44,13 +46,71 @@ pub struct RowCtx<'a> {
 /// that the proposals merge step consumes (they are never written verbatim).
 ///
 /// `reg` is the per-worker ABI registry, needed only to decode `proposal.packed_transaction` actions.
-pub fn map_row(ctx: &RowCtx, data: Value, reg: &mut AbiRegistry) -> Option<(&'static str, Value)> {
+/// `schema_reg` is the (read-only, shared) AtomicAssets schema-format registry — empty for every
+/// non-`atomic` run, so its lookups are never reached off the atomicassets arms.
+pub fn map_row(
+    ctx: &RowCtx,
+    data: Value,
+    reg: &mut AbiRegistry,
+    schema_reg: &SchemaRegistry,
+) -> Option<(&'static str, Value)> {
     match (ctx.code, ctx.table) {
         ("eosio", "voters") => map_voter(ctx, data).map(|d| (COLL_VOTERS, d)),
         (_, "accounts") => map_account(ctx, data).map(|d| (COLL_ACCOUNTS, d)),
         ("eosio.msig", "proposal") => Some((COLL_PROPOSALS, map_proposal(ctx, data, reg))),
         ("eosio.msig", "approvals2") => Some((COLL_PROPOSALS, map_approvals2(ctx, data))),
         ("eosio", "userres") => Some((dynamic_collection(ctx), map_userres(ctx, data))),
+        // AtomicAssets state (the `atomicassets`/`atomic` preset). `assets`/`templates`/`collections`
+        // decode their `serialized_data` against `schema_reg`.
+        ("atomicassets", "schemas") => Some((
+            atomicassets::COLL_AA_SCHEMAS,
+            atomicassets::map_schema(ctx, data),
+        )),
+        ("atomicassets", "collections") => Some((
+            atomicassets::COLL_AA_COLLECTIONS,
+            atomicassets::map_collection(ctx, data, schema_reg),
+        )),
+        ("atomicassets", "templates") => Some((
+            atomicassets::COLL_AA_TEMPLATES,
+            atomicassets::map_template(ctx, data, schema_reg),
+        )),
+        ("atomicassets", "assets") => Some((
+            atomicassets::COLL_AA_ASSETS,
+            atomicassets::map_asset(ctx, data, schema_reg),
+        )),
+        ("atomicassets", "offers") => Some((
+            atomicassets::COLL_AA_OFFERS,
+            atomicassets::map_offer(ctx, data),
+        )),
+        ("atomicassets", "config") => Some((
+            atomicassets::COLL_AA_CONFIG,
+            atomicassets::map_config(ctx, data),
+        )),
+        // AtomicMarket state (the `atomicmarket`/`atomic` preset).
+        ("atomicmarket", "sales") => Some((
+            atomicmarket::COLL_AM_SALES,
+            atomicmarket::map_sale(ctx, data),
+        )),
+        ("atomicmarket", "auctions") => Some((
+            atomicmarket::COLL_AM_AUCTIONS,
+            atomicmarket::map_auction(ctx, data),
+        )),
+        ("atomicmarket", "buyoffers") => Some((
+            atomicmarket::COLL_AM_BUYOFFERS,
+            atomicmarket::map_buyoffer(ctx, data),
+        )),
+        ("atomicmarket", "tbuyoffers") => Some((
+            atomicmarket::COLL_AM_TEMPLATE_BUYOFFERS,
+            atomicmarket::map_template_buyoffer(ctx, data),
+        )),
+        ("atomicmarket", "marketplaces") => Some((
+            atomicmarket::COLL_AM_MARKETPLACES,
+            atomicmarket::map_marketplace(ctx, data),
+        )),
+        ("atomicmarket", "config") => Some((
+            atomicmarket::COLL_AM_CONFIG,
+            atomicmarket::map_config(ctx, data),
+        )),
         _ => Some((dynamic_collection(ctx), map_dynamic(ctx, data))),
     }
 }

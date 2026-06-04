@@ -22,6 +22,14 @@ use mongodb::error::{Error as MongoError, ErrorKind};
 use mongodb::options::{Acknowledgment, ClientOptions, IndexOptions, WriteConcern};
 use mongodb::{Client, IndexModel};
 
+use crate::atomicassets::{
+    COLL_AA_ASSETS, COLL_AA_COLLECTIONS, COLL_AA_CONFIG, COLL_AA_OFFERS, COLL_AA_SCHEMAS,
+    COLL_AA_TEMPLATES,
+};
+use crate::atomicmarket::{
+    COLL_AM_AUCTIONS, COLL_AM_BUYOFFERS, COLL_AM_CONFIG, COLL_AM_MARKETPLACES, COLL_AM_SALES,
+    COLL_AM_TEMPLATE_BUYOFFERS,
+};
 use crate::map::{
     COLL_ACCOUNTS, COLL_CODEHASH, COLL_PERMISSIONS, COLL_PROPOSALS, COLL_PUB_KEYS, COLL_VOTERS,
 };
@@ -197,14 +205,7 @@ async fn run_writer(
             let dropped = dropped.clone();
             let db_for_drop = db_for_drop.clone();
             async move {
-                if drop_dynamic
-                    && coll != COLL_VOTERS
-                    && coll != COLL_ACCOUNTS
-                    && coll != COLL_PROPOSALS
-                    && coll != COLL_PERMISSIONS
-                    && coll != COLL_PUB_KEYS
-                    && coll != COLL_CODEHASH
-                {
+                if drop_dynamic && !is_named_collection(coll) {
                     // Fast path: already dropped → a concurrent READ lock only (no serialization).
                     if !dropped.read().await.contains(coll) {
                         // First sight: upgrade to the WRITE lock and hold it across the drop await, so
@@ -365,6 +366,23 @@ fn merge_proposals(
     out
 }
 
+/// Named collections — dropped up front via `special_drops` and given dedicated `build_indexes`
+/// arms — so the per-batch lazy-drop path skips them (else a first batch would re-drop, racing the
+/// up-front drop). Covers the eosio/Light-API collections plus every AtomicAssets/AtomicMarket
+/// collection (by `atomicassets-`/`atomicmarket-` prefix).
+fn is_named_collection(coll: &str) -> bool {
+    matches!(
+        coll,
+        COLL_VOTERS
+            | COLL_ACCOUNTS
+            | COLL_PROPOSALS
+            | COLL_PERMISSIONS
+            | COLL_PUB_KEYS
+            | COLL_CODEHASH
+    ) || coll.starts_with("atomicassets-")
+        || coll.starts_with("atomicmarket-")
+}
+
 /// Create the post-load indexes for a collection, mirroring the sync modules. Unknown (dynamic)
 /// collections get the 5 `@`-field contract-state indexes.
 async fn build_indexes(db: &mongodb::Database, coll: &str, lean: bool) -> Result<()> {
@@ -451,6 +469,86 @@ async fn build_indexes(db: &mongodb::Database, coll: &str, lean: bool) -> Result
             mk(doc! { "to": 1 }),
             mk(doc! { "from": 1 }),
         ],
+        // ── AtomicAssets state (the `atomicassets`/`atomic` preset) ──────────────────────────────
+        // The faceted query surface: filter by owner/collection/schema/template + decoded `data.*`
+        // attributes (a single wildcard index serves arbitrary `data:key=value` filters, mirroring
+        // eosio-contract-api's combined-data GIN). `block_num` powers the live "changed since" feed.
+        COLL_AA_ASSETS => vec![
+            mk_u(doc! { "asset_id": 1 }),
+            mk(doc! { "owner": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "schema_name": 1 }),
+            mk(doc! { "template_id": 1 }),
+            mk(doc! { "collection_name": 1, "template_id": 1 }),
+            mk(doc! { "data.$**": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AA_TEMPLATES => vec![
+            mk_u(doc! { "template_id": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "schema_name": 1 }),
+            mk(doc! { "data.$**": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AA_SCHEMAS => vec![
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "schema_name": 1 }),
+            mk_u(doc! { "collection_name": 1, "schema_name": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AA_COLLECTIONS => vec![
+            mk_u(doc! { "collection_name": 1 }),
+            mk(doc! { "author": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AA_OFFERS => vec![
+            mk_u(doc! { "offer_id": 1 }),
+            mk(doc! { "sender": 1 }),
+            mk(doc! { "recipient": 1 }),
+            mk(doc! { "sender_asset_ids": 1 }),
+            mk(doc! { "recipient_asset_ids": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AA_CONFIG => vec![mk_u(doc! { "contract": 1 })],
+        // ── AtomicMarket state (the `atomicmarket`/`atomic` preset) ──────────────────────────────
+        COLL_AM_SALES => vec![
+            mk_u(doc! { "sale_id": 1 }),
+            mk(doc! { "seller": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "state": 1 }),
+            mk(doc! { "asset_ids": 1 }),
+            mk(doc! { "offer_id": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AM_AUCTIONS => vec![
+            mk_u(doc! { "auction_id": 1 }),
+            mk(doc! { "seller": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "state": 1 }),
+            mk(doc! { "end_time": 1 }),
+            mk(doc! { "asset_ids": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AM_BUYOFFERS => vec![
+            mk_u(doc! { "buyoffer_id": 1 }),
+            mk(doc! { "buyer": 1 }),
+            mk(doc! { "seller": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "asset_ids": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AM_TEMPLATE_BUYOFFERS => vec![
+            mk_u(doc! { "buyoffer_id": 1 }),
+            mk(doc! { "buyer": 1 }),
+            mk(doc! { "template_id": 1 }),
+            mk(doc! { "collection_name": 1 }),
+            mk(doc! { "block_num": 1 }),
+        ],
+        COLL_AM_MARKETPLACES => vec![
+            mk_u(doc! { "marketplace_name": 1 }),
+            mk(doc! { "creator": 1 }),
+        ],
+        COLL_AM_CONFIG => vec![mk_u(doc! { "market_contract": 1 })],
         _ => vec![
             mk(doc! { "@pk": -1 }),
             mk(doc! { "@scope": 1 }),

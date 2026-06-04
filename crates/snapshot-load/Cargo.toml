@@ -32,3 +32,6 @@ ripemd = "0.1"
 # Build a WormDB Light-API segment (.wseg) directly from the snapshot (no Mongo) via the shared
 # push-based Builder.
 wseg-build = { path = "../wseg-build" }
+# Decode AtomicAssets `serialized_data` blobs (the `atomicassets`/`atomic` preset) — the on-chain
+# eosio::atomicdata format, driven by each row's schema/collection `format`.
+atomicdata = { path = "../atomicdata" }
