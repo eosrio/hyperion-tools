@@ -1,4 +1,4 @@
-# Build context = repo root (see docker-compose.yml: context: ..). Builds the two binaries our stack
+# Build context = repo root (see docker-compose.yml: context: ../..). Builds the two binaries our stack
 # needs (snapshot-load = loader, light-api = server) and ships them on a slim runtime.
 FROM rust:1-bookworm AS builder
 WORKDIR /build

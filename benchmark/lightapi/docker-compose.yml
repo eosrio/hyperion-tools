@@ -44,8 +44,8 @@ services:
 
   ours-loader:
     build:
-      context: ..
-      dockerfile: benchmark/ours/Dockerfile
+      context: ../..
+      dockerfile: benchmark/lightapi/ours/Dockerfile
     image: lightapi-bench/ours:latest
     profiles: ["ours", "all"]
     command: ["/entrypoint-loader.sh"]

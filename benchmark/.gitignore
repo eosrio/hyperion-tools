@@ -1,4 +1,6 @@
-.env
-.snapshots/
+# Local benchmark artifacts — large and regenerable, never committed. Patterns are recursive so they
+# cover both this level and the per-benchmark subfolders (lightapi/, future atomicassets/, …).
 *.wseg
+.snapshots/
+.env
 wax-accounts.txt

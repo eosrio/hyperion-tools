@@ -43,7 +43,7 @@ just read that same snapshot directly instead of streaming it through a node.
 | Endpoint parity | 16/16 shapes match | (reference) |
 
 *Measured on Docker Desktop / Windows; a Linux host lifts both. Reproduce with the harness in
-`benchmark/`. Full detail + methodology in `COMPARISON.md`.*
+`benchmark/lightapi/`. Full detail + methodology in `COMPARISON.md`.*
 
 Parity was verified by diffing every endpoint against the cc32d9 reference stack on the identical
 snapshot — and that process found and fixed several shape bugs in our first cut (e.g. `/balances`
@@ -66,7 +66,7 @@ to full state in seconds instead of hours.
 
 ## Try it / help us
 
-Benchmark harness (both stacks, same Libre snapshot): `benchmark/` in `eosrio/hyperion-tools`.
+Benchmark harness (both stacks, same Libre snapshot): `benchmark/lightapi/` in `eosrio/hyperion-tools`.
 Run `parity-check.sh` and open issues for any `DIFF` you find — that feedback directly hardens parity.
 
 Thanks to **cc32d9** for the Light API spec and the reference implementation that made this possible.
