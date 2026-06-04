@@ -128,19 +128,24 @@ path fast (design from the workflow; both implemented + measured):
    = the mint ordinal (rank within a template), which is **reconstructable from the snapshot** (`ROW_NUMBER()`
    over a template's assets by asset_id). `AtomicBuilder` computes it at `finish()` from the `by_tmpl`
    postings and writes it into each asset's forward record **and** a presorted `TABLE_AA_SORTED_TMPL`
-   ordering. Result — **Q6 "sort by mint" + hydrate 100 results = 3.2 µs, no Elasticsearch.** (Same trick
-   covers the mint/created orderings; only the exact `*_at_time` *display* values and delphi-priced sorts
-   genuinely need ES.)
+   ordering. Result — **Q6 "sort by mint" + hydrate 100 results = 3.9 µs @ 232M** (3.2 µs @ 5M —
+   scale-independent), **no Elasticsearch.** (Same trick covers the mint/created orderings; only the exact
+   `*_at_time` *display* values and delphi-priced sorts genuinely need ES.) Cost: +928 MB (a `u32` per
+   asset) + a 2.8 GB presorted table → the segment grows 22.7 GB → **26 GB**.
 2. **Batch-hydrate displayed history**: the state tier filters+sorts+paginates (µs → a page of 100
    asset_ids), then history is fetched with **one** ES `mget`/terms query *for the whole page* (not
    per-asset), only when a history field is shown, and cached (`minted_at` never changes). Modeled with
    `aa-probe --mock-es-ms 2 --es-display-frac 0.30` (5M segment):
 
-   | | p50 | p99 | p999 |
-   |---|---|---|---|
-   | state-only (no history shown) | 2.1 µs | 76 µs | 104 µs |
-   | + history overlay (30% display, 2 ms ES) | **5.7 µs** | 2.07 ms | 2.09 ms |
+   | (232M, hydrated pages) | p50 | p99 |
+   |---|---|---|
+   | state-only (no history shown) | 2.6 µs | 69 µs |
+   | + history overlay (30% display, 2 ms ES) | **7.4 µs** | 2.05 ms |
 
    The state median is untouched; only the history-displaying fraction pays one ~2 ms ES round-trip, and
    p99 ≈ that single round-trip (not ×100). A request that shows no history, or sorts by a materialized
    key, stays entirely in the µs state path.
+
+   (Note: the varied-key workload here *hydrates* the 100 forward blobs per page — as a real server
+   renders results — which raises the working set to **~5.6 GB** @ 232M vs the 3.9 GB earlier non-hydrating
+   measurement. Still an evictable page cache; throughput 118k req/s, p50 2.6 µs.)
