@@ -1,116 +1,119 @@
-# AtomicAssets API on hyperion-tools — architecture & requirements
+# AtomicAssets API on Hyperion — architecture & delivery plan (4.5)
 
-> How an operator serves the **AtomicAssets API at full parity** as part of *one* stack that also
-> serves **Hyperion v2 + Light API + native chain v1** — storing each datum **once**, in the tier
-> matched to its access pattern, adding **no new database**. AtomicAssets is the proving case (the
-> richest query surface); the same machinery generalizes to every Antelope API shape.
+> **Target: Hyperion 4.5, for existing Hyperion operators.** Serve the **AtomicAssets API at full
+> parity** as part of the stack that already serves Hyperion v2 + Light API + native chain v1 — adding
+> **no new infrastructure**, storing each datum **once**. AtomicAssets is the proving case (the richest
+> query surface); the same machinery generalizes to every Antelope API shape.
 
-## 1. Constraints (non-negotiable)
+## 1. The operator already runs every tier
 
-- **All Antelope API shapes, minimal storage waste** — one stack for Hyperion v2, Light API, AtomicAssets, chain v1.
-- **No extra DB stack.** Reuse only what the operator already runs: **Elasticsearch** (history), **archive-server** (cold), **WormDB** (state / fast in-db apps), **nodeos** (chain). Nothing new — no Postgres, Mongo, Redis, or a bolted-on OLAP engine.
-- **Full parity, or it's pointless.** Partial parity ⇒ operators keep running eosio-contract-api (and its ~1.1 TB Postgres) for the gaps ⇒ **zero** storage reclaimed. Only full parity lets them delete it. Full parity is therefore a *storage* requirement, not a feature wish.
+A Hyperion 4.5 operator already has the whole tiered stack — AtomicAssets serving is **pure software on
+top of it, no new database**:
 
-## 2. The waste we delete
+| tier | already running | role |
+|---|---|---|
+| **history** | **Elasticsearch** | actions + deltas for the whole chain — incl. every `atomicassets`/`atomicmarket` action |
+| **state** | **MongoDB** (since Hyperion v4.0, for state queries) | current contract-table state |
+| **cold** | **archive-server** (new in 4.5) | old `act.data` / `contract_row` payloads from frozen logs |
+| **chain** | **nodeos** | push / live |
 
-eosio-contract-api on WAX = a **second SHiP reader** + **~1.1 TB PostgreSQL** + Redis (64 GB RAM, months to fill). Most of that 1.1 TB is **history — transfers, mints, sales and their indexes — data Hyperion already holds in Elasticsearch.** It is stored twice and read twice. The goal is not a smaller Postgres; it is **don't store or read it twice at all.**
+The operator **deletes their separate eosio-contract-api PostgreSQL (~1.1 TB) + filler + Redis** (and
+the cc32d9 MariaDB for Light API) and serves everything from the Hyperion infra they already run.
 
-## 3. Architecture: one read, three tiers, each datum once
+## 2. Why full parity is the storage win (not a feature wish)
 
-```
-   snapshot ─(bootstrap state)─┐
-                               ▼
-            ┌──────── hyperion-ship: ONE direct-from-disk reader/decoder ────────┐
-            └──────────────────────────────┬───────────────────────────────────-─┘
-                       projects each datum to exactly ONE tier
-   ┌───────────────────────┬───────────────┴───────────────┬───────────────────────┐
-   ▼                       ▼                                ▼                       ▼
- WormDB  (STATE)     Elasticsearch (HISTORY)        archive-server (COLD)      nodeos (CHAIN)
- mmap columnar +     actions/deltas, searchable     frozen SHiP logs,          push / live
- inverted indexes;   — Hyperion v2 already runs it   on-demand hydration
- current contract                                    of old payloads
- tables, all apps
-   └───────────────────────┴───────────────┬───────────────┴───────────────────────┘
-                                            ▼
-        Unified API layer — routes each endpoint to the tier that owns its data
-       (Light API · AtomicAssets · Hyperion v2 · chain v1 — all parity-faithful)
-```
+Partial parity reclaims **zero** storage: operators keep eosio-contract-api (and its ~1.1 TB) running
+for the missing endpoints, so they pay for both stacks. Only **full parity** lets them delete it. And
+most of that 1.1 TB is **history — transfers/mints/sales + indexes — which Hyperion already holds in
+Elasticsearch**, stored twice and read twice. The win is *delete the duplicate*, not shrink it.
 
-- **State → WormDB.** Current contract-table state for *every* contract (system, tokens, atomicassets, atomicmarket, any app), as a compact mmap columnar store with purpose-built indexes; mutated via a live overlay (§5).
-- **History → Elasticsearch.** Actions + deltas. Hyperion v2 already indexes the whole chain here — including every `atomicassets`/`atomicmarket` action — so AtomicAssets activity/logs/transfers/sales-history are *queries over data ES already holds.*
-- **Cold → archive-server.** Old `act.data` / `contract_row` payloads straight from frozen logs, no DB.
-- One **shared reader**; **snapshot-load** bootstraps WormDB state in seconds.
+## 3. Each datum once (no duplication)
 
-No tier re-stores another's data. That single rule *is* the storage-efficiency story.
+- **State → MongoDB** — assets / templates / schemas / collections / offers / market listings, **decoded**.
+- **History → Elasticsearch** — already there; `/logs`, `/transfers`, sales-history are *queries over it*.
+- **Cold → archive-server** — old payloads straight from frozen logs.
+- One shared reader: Hyperion's SHiP indexer keeps state current; `snapshot-load` bootstraps it fast.
 
-## 4. The hard part: WormDB as a *compiled* faceted-query engine for state
+History is never re-stored in the state tier; state is never re-stored in history. That rule *is* the
+storage-efficiency story.
 
-Light-API state = single-key lookups → the u64 `.wseg` segment is perfect. AtomicAssets state =
-**faceted search**: filter on many fields *including decoded attributes*, sort, paginate, join,
-aggregate. The segment must grow a query layer — but a **bounded, compiled** one (the API surface is
-fixed at ~40 endpoints), not a general SQL engine. WormDB adds:
+## 4. Two-track delivery (the strategy)
 
-1. **Columnar forward store** per object (assets / templates / schemas / collections / offers / market listings): parallel typed columns + a primary u64 index for point lookups and joins.
-2. **Inverted indexes (postings)** per filter dimension — `owner`, `collection`, `schema`, `template`, and each queryable **data attribute** (`collection:schema:attr → value`): sorted / roaring u64 posting lists. Multi-filter = **intersect** postings; numeric attrs and prices = **range** over a value-sorted index.
-3. **A few sort orderings** (`asset_id`, `minted`, `updated`, `transferred`, market `price`) as presorted id arrays; merge with the filter intersection, then skip+take for pagination.
-4. **In-process assembly** — resolve an asset's template/schema/collection and merge immutable+mutable `data` at request time from the columnar store (a *join*, not stored denormalized).
-5. **Overlay freshness** — the frozen segment (from snapshot) + a delta overlay the SHiP feed maintains for recent mints/transfers/burns/listings, merged at query time; periodic re-segment bounds the overlay. (The Light-API overlay model, extended to the indexes.)
+The **state tier** has two implementations behind **one substrate-agnostic API** — so 4.5 ships now and
+the efficiency endgame lands later without re-integration or operator disruption:
 
-This is a compiled mini-search-engine — "compile the API into the DB," taken to the query-heavy case.
+- **Track A — MongoDB · ships in 4.5.** Leverage the MongoDB Hyperion already runs. Mongo serves the
+  AtomicAssets query surface natively (compound indexes, range, sort, pagination, aggregation
+  pipeline), and `snapshot-load` already has a high-throughput Mongo sink. Lowest-risk path to full
+  parity on the existing stack.
+- **Track B — WormDB · in parallel, the efficiency endgame.** Extend WormDB into a compiled
+  faceted-query engine (§6) — mmap columnar + inverted indexes, tens-of-MiB resident — and swap it
+  behind the same API when proven. The ultimate hardware-efficiency state tier.
 
-### Why this is *more* storage-efficient than the 1.1 TB Postgres
-- **Normalize, join at request time.** Most assets share a template's `immutable_data`; store the template's data **once** and let each asset carry only `(template_id, owner, mutable_data)`. eosio-contract-api denormalizes per-asset and indexes it → bloat. In-process joins on mmap'd columns are cheap.
-- **Columnar, no row/MVCC/WAL bloat**; postings delta-varint / roaring compressed.
-- **History isn't here** — it's in the ES the operator already runs. WormDB holds only live state.
-- Working hypothesis to validate in step 3: WAX AtomicAssets *current state* ≈ **tens of GB columnar** vs **~1.1 TB** Postgres (state + history + indexes + bloat).
+The API server talks to a **state-store interface**, not to Mongo directly, so Track B drops in behind
+it transparently. The `atomicdata` decoder (§5) and the API/parity work are **shared** by both tracks.
 
-### The gateway gap
-`*_serialized_data` is a **custom schema-driven binary format (`eosio::atomicdata`), not ABI** — `abieos` can't touch it, so today those fields are opaque hex. A Rust decoder driven by `schemas.format` (port of atomicassets-js / the contract's `eosio::atomicdata`) is the prerequisite for any attribute column or index. Bounded, deterministic — **build it first.**
+## 5. The gateway gap (shared by both tracks)
 
-## 5. Endpoint → tier parity map (full coverage)
+`*_serialized_data` is a **custom schema-driven binary format (`eosio::atomicdata`), not ABI** —
+`abieos` can't touch it, so today those fields are opaque hex. A Rust decoder driven by the
+`schemas.format` (port of atomicassets-js / the contract's `eosio::atomicdata`) is the prerequisite for
+storing/indexing decoded attributes in *either* store. Bounded, deterministic — **build it first.**
+
+## 6. Track B: WormDB as a compiled faceted-query engine
+
+The Light-API `.wseg` segment is single-key (perfect for "everything about account X"). AtomicAssets is
+**faceted search** (filter on many fields incl. decoded attributes, sort, paginate, join, aggregate),
+so WormDB grows a **bounded, compiled** query layer (the API is ~40 fixed endpoints, not arbitrary SQL):
+
+1. **Columnar forward store** per object + a primary u64 index for point lookups/joins.
+2. **Inverted indexes (postings)** per filter dimension — owner, collection, schema, template, each queryable **data attribute** — sorted/roaring u64 lists; multi-filter = **intersect**, numeric/price = **range** over a value-sorted index.
+3. **A few presorted orderings** (asset_id, minted, updated, transferred, price); merge with the filter set; skip+take.
+4. **In-process assembly** — resolve template/schema/collection and merge immutable+mutable `data` at request time (a *join*, not stored denormalized).
+5. **Overlay freshness** — frozen segment + SHiP-fed delta overlay, periodic re-segment.
+
+**Why WormDB beats both Postgres and a Mongo state store on footprint:** normalize and join at request
+time (store a template's `immutable_data` **once**; assets carry only `template_id`+`owner`+mutable);
+columnar with no row/MVCC/WAL bloat; history not co-located. Hypothesis to measure: WAX AtomicAssets
+*state* ≈ tens of GB (Postgres) → far smaller columnar, tens-of-MiB resident.
+
+## 7. Endpoint → tier parity map (full coverage)
 
 | endpoint group | tier | notes |
 |---|---|---|
-| `assets`, `templates`, `schemas`, `collections`, `offers` — list/filter/sort/paginate + `data:*` | **WormDB** | the faceted-query engine (§4) |
-| `…/{id}` point reads, `accounts/*` (asset counts per owner/collection) | **WormDB** | point lookup + join; materialized counters |
-| `…/{id}/logs`, `transfers`, `burns` | **ES** | history Hyperion already indexes; an AA-aware query/transform layer |
-| `atomicmarket/sales|auctions|buyoffers` — **active** listings (state filter) | **WormDB** | current listings + price-sorted index for range/sort |
-| `…/sales|auctions` — **historical** (sold/cancelled/expired) | **ES** | completed events |
-| `prices`, `stats/*`, `…/stats`, price/volume graphs, suggested-median | **ES + WormDB** | API layer merges: ES time-series aggregation ⊕ WormDB floor/counts |
-| `marketplaces`, `config` | **WormDB** | small static-ish state |
+| `assets`,`templates`,`schemas`,`collections`,`offers` — list/filter/sort/page + `data:*` | **State** (Mongo→WormDB) | the faceted query surface |
+| `…/{id}` point reads, `accounts/*` counts, `marketplaces`,`config` | **State** | point lookup + join; materialized counts |
+| `…/{id}/logs`, `transfers`, `burns` | **ES** | history Hyperion already indexes (query/transform layer) |
+| `atomicmarket/sales\|auctions\|buyoffers` — **active** (state filter) | **State** | current listings + price index |
+| `…/sales\|auctions` — **historical** (sold/cancelled/expired) | **ES** | completed events |
+| `prices`, `stats/*`, graphs, suggested-median | **ES + State** | API layer merges ES time-series ⊕ state floor/counts |
 
 Every endpoint maps to a tier; the few that **span** tiers (sales-by-state, prices, stats) are
-orchestrated by the unified API layer (WormDB state ⊕ ES history). That orchestration is the price of
-full parity — and full parity is what lets eosio-contract-api be deleted.
+orchestrated by the API layer. Full coverage is the bar — that's what lets eosio-contract-api be deleted.
 
-## 6. Generalizes to all Antelope API shapes
+## 8. Generalizes to all Antelope API shapes
 
-The engine §4 builds for AtomicAssets is the same one that serves the rest:
+Same machinery: **chain v1 reads** (`get_table_rows`/`get_account`/secondary ranges) → state tier;
+**Hyperion v2** (`get_actions`/`get_deltas`) → ES + archive, state helpers → state tier; **Light API** →
+state tier (already on Mongo via the `light-api` crate, and on WormDB via `.wseg`). AtomicAssets is just
+the hardest instance — solving it gives the state tier the faceted-query capability the others reuse.
 
-- **chain v1 reads** — `get_table_rows`, `get_account`, `get_currency_balance`, secondary-index ranges → **WormDB** state (same columnar + index machinery). Push/live → nodeos.
-- **Hyperion v2** — `get_actions`/`get_deltas` → **ES** + **archive-server** (cold); state helpers (`get_voters`, `get_proposals`, `get_tokens`, `get_key_accounts`) → **WormDB**.
-- **Light API** → **WormDB** (done).
-- **AtomicAssets** → **WormDB** (state+market) + **ES** (history) + **archive** (cold).
+## 9. Build sequence
 
-AtomicAssets is simply the hardest instance; solving it gives WormDB the faceted-query capability the others reuse.
+**Track A (4.5):**
+1. `atomicdata` decoder + schema-format registry; validate by diffing decoded `data` vs a live AtomicAssets API.
+2. `snapshot-load --tables atomicassets,atomicmarket` → decode → Mongo collections + AA-specific indexes (fast state bootstrap; **measure the state footprint** — the 4.5 efficiency number).
+3. AtomicAssets API server over the state-store interface: state→Mongo, history→ES, cold→archive — **full endpoint parity**.
+4. Live freshness via Hyperion's existing delta→Mongo pipeline + the decoder (confirm how much it already indexes — §10).
+5. Market aggregation (Mongo pipeline + ES) + delphioracle; the tier-spanning endpoints.
+6. Benchmark vs eosio-contract-api: parity + throughput + **hardware/storage footprint**, as `benchmark/atomicassets/`.
 
-## 7. Build sequence (target = full parity)
+**Track B (parallel):** WormDB faceted-query engine (§6), shared decoder; swap behind the API; re-benchmark the state footprint (tens-of-MiB-resident target).
 
-1. **`atomicdata` decoder** + schema-format registry; validate by diffing decoded `data` vs a live AtomicAssets API. *Gateway — do first.*
-2. **WormDB faceted-query core** — columnar store + inverted/range indexes + intersect/sort/paginate; prove on `/assets` (the worst case).
-3. **State bootstrap** — `snapshot-load --tables atomicassets,atomicmarket` → decoded segment; **measure the state footprint** (first efficiency datapoint).
-4. **Remaining state/market read endpoints** + in-process assembly (joins, data merge).
-5. **History endpoints as an ES projection layer** — parity-faithful `/logs`, `/transfers`, sales-history over the actions Hyperion already indexes.
-6. **Market aggregation** + delphioracle; the tier-spanning endpoints (§5).
-7. **Live overlay + index maintenance** from the SHiP feed; re-segment cadence.
-8. **Benchmark** vs eosio-contract-api as `benchmark/atomicassets/`: parity + throughput + the headline **hardware/storage footprint**.
+## 10. Open questions
 
-Full parity is the bar; the phases are build order, not a place to stop.
-
-## 8. Open design questions (the real ones now)
-
-- **Index maintenance under writes** — frozen postings + overlay delta-index merged at query time, vs an LSM; re-segment cadence vs overlay growth.
-- **Attribute index encoding** — dictionary + roaring per `(collection, schema, attr)`; bounding cardinality across thousands of schemas.
-- **History parity via ES** — reproducing eosio-contract-api's exact `/logs` and market-stats shapes from Hyperion's generic action docs (query/transform layer, possibly a thin AA-aware ES projection).
-- **Tier-spanning endpoints** — the API layer's WormDB-state ⊕ ES-history merge for `sales`(by state), `prices`, `stats`.
-- **Standalone profile** — an AtomicAssets-only operator has no Hyperion ES; do they get history from archive-server + a WormDB activity index, or is the all-APIs operator the only target?
+- **What does Hyperion 4.0+ Mongo already index for atomicassets?** If table deltas already land (raw), Track A is mostly *decode + AA-shaped projection + API* — confirm the existing state pipeline.
+- **Mongo state footprint for WAX AA** — measure early; it's the headline 4.5 efficiency datapoint.
+- **History parity via ES** — reproducing eosio-contract-api's exact `/logs` and market-stats shapes from Hyperion's generic action docs (query/transform, maybe a thin AA-aware ES projection).
+- **Scope of v1 contracts** — atomicmarket + atomictools + delphioracle are entangled (market needs delphi prices); full parity needs all, sequence atomicassets-core → market.
+- **Standalone (non-Hyperion) AA operator** — out of scope for 4.5 (this targets existing Hyperion operators); revisit later.
