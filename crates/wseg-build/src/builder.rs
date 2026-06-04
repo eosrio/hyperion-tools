@@ -41,7 +41,10 @@ pub fn key_hash(pubkey: &str) -> u64 {
 
 fn anyhow_u16(n: usize) -> std::io::Result<()> {
     if n > u16::MAX as usize {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "token id too long"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "token id too long",
+        ));
     }
     Ok(())
 }
@@ -125,7 +128,11 @@ fn amount_units(s: &str) -> i128 {
 /// `core/name.zig` tokenKey so the procedures look up the same entry.
 pub fn token_key(contract: &str, symbol: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in contract.bytes().chain(std::iter::once(b':')).chain(symbol.bytes()) {
+    for b in contract
+        .bytes()
+        .chain(std::iter::once(b':'))
+        .chain(symbol.bytes())
+    {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
@@ -392,10 +399,18 @@ impl Builder {
                 th_arena.push(b'\n');
             }
             let len = th_arena.len() - off;
-            th_index.push(IndexEntry { key: token_key(&contract, &symbol), off: off as u64, len: len as u32 });
+            th_index.push(IndexEntry {
+                key: token_key(&contract, &symbol),
+                off: off as u64,
+                len: len as u32,
+            });
         }
         let tokens = th_index.len();
-        let token_holders_tbl = Table { table_id: TABLE_TOKEN_HOLDERS, index: th_index, arena: th_arena };
+        let token_holders_tbl = Table {
+            table_id: TABLE_TOKEN_HOLDERS,
+            index: th_index,
+            arena: th_arena,
+        };
 
         // pub_keys table: key -> holders. Blob = "account\tperm\tweight\n" lines; indexed under BOTH
         // the EOS and PUB_K1 hashes (two index entries → one blob) so a query in either form matches.
@@ -412,13 +427,25 @@ impl Builder {
                 pk_arena.push(b'\n');
             }
             let len = (pk_arena.len() - off) as u32;
-            pk_index.push(IndexEntry { key: key_hash(&modern), off: off as u64, len });
+            pk_index.push(IndexEntry {
+                key: key_hash(&modern),
+                off: off as u64,
+                len,
+            });
             if !legacy.is_empty() && legacy != modern {
-                pk_index.push(IndexEntry { key: key_hash(&legacy), off: off as u64, len });
+                pk_index.push(IndexEntry {
+                    key: key_hash(&legacy),
+                    off: off as u64,
+                    len,
+                });
             }
         }
         let keys = pk_index.len();
-        let pub_keys_tbl = Table { table_id: TABLE_PUB_KEYS, index: pk_index, arena: pk_arena };
+        let pub_keys_tbl = Table {
+            table_id: TABLE_PUB_KEYS,
+            index: pk_index,
+            arena: pk_arena,
+        };
 
         // top_ram / top_stake tables: account rankings for /topram/N and /topstake/N (N ≤ 1000).
         // One blob per table at sentinel key 0. Capped at TOP_CAP (far above the N ceiling) so the
@@ -443,7 +470,11 @@ impl Builder {
         }
         let top_ram_tbl = Table {
             table_id: TABLE_TOP_RAM,
-            index: vec![IndexEntry { key: 0, off: 0, len: ram_arena.len() as u32 }],
+            index: vec![IndexEntry {
+                key: 0,
+                off: 0,
+                len: ram_arena.len() as u32,
+            }],
             arena: ram_arena,
         };
 
@@ -454,7 +485,11 @@ impl Builder {
             .iter()
             .filter_map(|(&k, &(net, cpu, _ram))| {
                 let s = net.saturating_add(cpu);
-                if s > 0 { Some((s, cpu, net, k)) } else { None }
+                if s > 0 {
+                    Some((s, cpu, net, k))
+                } else {
+                    None
+                }
             })
             .collect();
         stake_rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.3.cmp(&b.3)));
@@ -471,7 +506,11 @@ impl Builder {
         }
         let top_stake_tbl = Table {
             table_id: TABLE_TOP_STAKE,
-            index: vec![IndexEntry { key: 0, off: 0, len: stake_arena.len() as u32 }],
+            index: vec![IndexEntry {
+                key: 0,
+                off: 0,
+                len: stake_arena.len() as u32,
+            }],
             arena: stake_arena,
         };
 
@@ -497,15 +536,31 @@ impl Builder {
                 ch_arena.push(b'\n');
             }
             let len = (ch_arena.len() - off) as u32;
-            ch_index.push(IndexEntry { key: key_hash(hash), off: off as u64, len });
+            ch_index.push(IndexEntry {
+                key: key_hash(hash),
+                off: off as u64,
+                len,
+            });
         }
         let codehashes = ch_index.len();
-        let codehash_tbl = Table { table_id: TABLE_CODEHASH, index: ch_index, arena: ch_arena };
+        let codehash_tbl = Table {
+            table_id: TABLE_CODEHASH,
+            index: ch_index,
+            arena: ch_arena,
+        };
 
-        write_segment(out, vec![
-            balances_tbl, accinfo_tbl, token_holders_tbl, pub_keys_tbl,
-            top_ram_tbl, top_stake_tbl, codehash_tbl,
-        ])?;
+        write_segment(
+            out,
+            vec![
+                balances_tbl,
+                accinfo_tbl,
+                token_holders_tbl,
+                pub_keys_tbl,
+                top_ram_tbl,
+                top_stake_tbl,
+                codehash_tbl,
+            ],
+        )?;
         eprintln!("[wseg] tokens={tokens} pub_key_index_entries={keys} codehashes={codehashes}");
         Ok((holders, accounts))
     }

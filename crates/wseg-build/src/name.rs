@@ -53,7 +53,14 @@ mod tests {
 
     #[test]
     fn decode_round_trips() {
-        for s in ["eosio", "genesis.wax", "eosio.token", "a", "waxupbitcold", "eosio.saving"] {
+        for s in [
+            "eosio",
+            "genesis.wax",
+            "eosio.token",
+            "a",
+            "waxupbitcold",
+            "eosio.saving",
+        ] {
             assert_eq!(decode(encode(s)), s);
         }
         assert_eq!(decode(0), "");
@@ -79,7 +86,10 @@ mod tests {
     #[test]
     fn token_key_matches_zig() {
         // FNV1a-64 of "eosio.token:WAX" — cross-checked against WormDB's name.zig tokenKey.
-        assert_eq!(crate::builder::token_key("eosio.token", "WAX"), 13053440730298864435);
+        assert_eq!(
+            crate::builder::token_key("eosio.token", "WAX"),
+            13053440730298864435
+        );
         assert_ne!(
             crate::builder::token_key("eosio.token", "WAX"),
             crate::builder::token_key("eosio.token", "EOS")
