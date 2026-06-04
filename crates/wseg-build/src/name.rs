@@ -29,9 +29,35 @@ pub fn encode(s: &str) -> u64 {
     value
 }
 
+const CHARMAP: &[u8; 32] = b".12345abcdefghijklmnopqrstuvwxyz";
+
+/// Decode a canonical u64 `name` back to its string (inverse of `encode`, trailing '.' trimmed).
+/// Must match WormDB `core/name.zig` `decode` so owner names emitted into the segment's ranking /
+/// reverse-index tables read back identically.
+pub fn decode(mut value: u64) -> String {
+    let mut buf = [b'.'; 13];
+    let mut i = 0usize;
+    while i <= 12 {
+        let mask: u64 = if i == 0 { 0x0f } else { 0x1f };
+        buf[12 - i] = CHARMAP[(value & mask) as usize];
+        value >>= if i == 0 { 4 } else { 5 };
+        i += 1;
+    }
+    let end = buf.iter().rposition(|&b| b != b'.').map_or(0, |p| p + 1);
+    String::from_utf8_lossy(&buf[..end]).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_round_trips() {
+        for s in ["eosio", "genesis.wax", "eosio.token", "a", "waxupbitcold", "eosio.saving"] {
+            assert_eq!(decode(encode(s)), s);
+        }
+        assert_eq!(decode(0), "");
+    }
 
     #[test]
     fn canonical_eosio_vector() {

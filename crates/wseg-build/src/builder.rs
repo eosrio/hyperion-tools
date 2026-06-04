@@ -20,6 +20,9 @@ pub const TABLE_BALANCES: u32 = 0;
 pub const TABLE_ACCINFO: u32 = 5;
 pub const TABLE_TOKEN_HOLDERS: u32 = 6;
 pub const TABLE_PUB_KEYS: u32 = 7;
+pub const TABLE_TOP_RAM: u32 = 8;
+pub const TABLE_TOP_STAKE: u32 = 9;
+pub const TABLE_CODEHASH: u32 = 10;
 
 /// FNV1a-64 of a string (used for the token and pub-key table keys). Matches the Zig `fnv1a64`.
 fn fnv1a64(s: &str) -> u64 {
@@ -417,8 +420,93 @@ impl Builder {
         let keys = pk_index.len();
         let pub_keys_tbl = Table { table_id: TABLE_PUB_KEYS, index: pk_index, arena: pk_arena };
 
-        write_segment(out, vec![balances_tbl, accinfo_tbl, token_holders_tbl, pub_keys_tbl])?;
-        eprintln!("[wseg] tokens={tokens} pub_key_index_entries={keys}");
+        // top_ram / top_stake tables: account rankings for /topram/N and /topstake/N (N ≤ 1000).
+        // One blob per table at sentinel key 0. Capped at TOP_CAP (far above the N ceiling) so the
+        // segment never carries a full 21M-row ranking. (Resources tuple is (net, cpu, ram).)
+        const TOP_CAP: usize = 50_000;
+
+        // top_ram: [u32 count]["owner\tram_bytes\n"...] sorted by ram desc → cc32d9 [owner, ram].
+        let mut ram_rows: Vec<(i64, u64)> = self
+            .resources
+            .iter()
+            .filter_map(|(&k, &(_net, _cpu, ram))| if ram > 0 { Some((ram, k)) } else { None })
+            .collect();
+        ram_rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        ram_rows.truncate(TOP_CAP);
+        let mut ram_arena: Vec<u8> = Vec::new();
+        ram_arena.extend_from_slice(&(ram_rows.len() as u32).to_le_bytes());
+        for (ram, k) in &ram_rows {
+            ram_arena.extend_from_slice(name::decode(*k).as_bytes());
+            ram_arena.push(b'\t');
+            ram_arena.extend_from_slice(ram.to_string().as_bytes());
+            ram_arena.push(b'\n');
+        }
+        let top_ram_tbl = Table {
+            table_id: TABLE_TOP_RAM,
+            index: vec![IndexEntry { key: 0, off: 0, len: ram_arena.len() as u32 }],
+            arena: ram_arena,
+        };
+
+        // top_stake: [u32 count]["owner\tcpu\tnet\n"...] sorted by (cpu+net) desc. cc32d9 emits cpu
+        // and net separately ([owner, cpu, net]); only the ranking uses their sum.
+        let mut stake_rows: Vec<(i64, i64, i64, u64)> = self
+            .resources
+            .iter()
+            .filter_map(|(&k, &(net, cpu, _ram))| {
+                let s = net.saturating_add(cpu);
+                if s > 0 { Some((s, cpu, net, k)) } else { None }
+            })
+            .collect();
+        stake_rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.3.cmp(&b.3)));
+        stake_rows.truncate(TOP_CAP);
+        let mut stake_arena: Vec<u8> = Vec::new();
+        stake_arena.extend_from_slice(&(stake_rows.len() as u32).to_le_bytes());
+        for (_s, cpu, net, k) in &stake_rows {
+            stake_arena.extend_from_slice(name::decode(*k).as_bytes());
+            stake_arena.push(b'\t');
+            stake_arena.extend_from_slice(cpu.to_string().as_bytes());
+            stake_arena.push(b'\t');
+            stake_arena.extend_from_slice(net.to_string().as_bytes());
+            stake_arena.push(b'\n');
+        }
+        let top_stake_tbl = Table {
+            table_id: TABLE_TOP_STAKE,
+            index: vec![IndexEntry { key: 0, off: 0, len: stake_arena.len() as u32 }],
+            arena: stake_arena,
+        };
+
+        // codehash reverse index: code_hash -> accounts, for /codehash/<sha256>. The forward map
+        // (account -> hash) already rides in each accinfo record; this inverts it. Blob per hash:
+        // [u16 hdr_len][hash_hex]["account\n"...] (accounts asc). Keyed by fnv1a64(hash_hex), with the
+        // hash header as a collision guard (mirrors token_holders).
+        let mut by_hash: HashMap<&str, Vec<u64>> = HashMap::new();
+        for (acct, hash) in &self.codehash {
+            by_hash.entry(hash.as_str()).or_default().push(*acct);
+        }
+        let mut ch_index: Vec<IndexEntry> = Vec::with_capacity(by_hash.len());
+        let mut ch_arena: Vec<u8> = Vec::new();
+        for (hash, accts) in by_hash {
+            let mut names: Vec<String> = accts.into_iter().map(name::decode).collect();
+            names.sort();
+            let off = ch_arena.len();
+            anyhow_u16(hash.len())?;
+            ch_arena.extend_from_slice(&(hash.len() as u16).to_le_bytes());
+            ch_arena.extend_from_slice(hash.as_bytes());
+            for n in &names {
+                ch_arena.extend_from_slice(n.as_bytes());
+                ch_arena.push(b'\n');
+            }
+            let len = (ch_arena.len() - off) as u32;
+            ch_index.push(IndexEntry { key: key_hash(hash), off: off as u64, len });
+        }
+        let codehashes = ch_index.len();
+        let codehash_tbl = Table { table_id: TABLE_CODEHASH, index: ch_index, arena: ch_arena };
+
+        write_segment(out, vec![
+            balances_tbl, accinfo_tbl, token_holders_tbl, pub_keys_tbl,
+            top_ram_tbl, top_stake_tbl, codehash_tbl,
+        ])?;
+        eprintln!("[wseg] tokens={tokens} pub_key_index_entries={keys} codehashes={codehashes}");
         Ok((holders, accounts))
     }
 }
