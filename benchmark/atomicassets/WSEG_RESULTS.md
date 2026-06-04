@@ -12,8 +12,8 @@ query surface; history (`/logs`, transfers, sales-history) is out of the state t
 
 | | eosio-contract-api (Postgres) | snapshot-load → Mongo | WormDB `.wseg` (POC) |
 |---|---|---|---|
-| **assets storage on-disk** | **211 GB** (458M rows, incl. burned) | **23.3 GB** (232M live) | **22.7 GB** (232M, measured) |
-| **full atomic state on-disk** | **~692 GB** (DB total 1.27 TB) | **24.3 GB** | 22.7 GB (assets+defs; market TBD)¹ |
+| **assets storage on-disk** | **211 GB** (458M rows, incl. burned) | **23.3 GB** (232M live) | **21.0 GB** (232M, hybrid postings) |
+| **full atomic state on-disk** | **~692 GB** (DB total 1.27 TB) | **24.3 GB** | **21.0 GB** (< Mongo; assets+defs)¹ |
 | **resident memory to serve** | many GB² | **15.3 GB** (mongod RSS) | **tens-of-MiB hot → ~4 GB broad** (evictable page cache)⁵ |
 | **throughput (1 thread)** | — | per-query ~ms | **150k–887k req/s**⁶ |
 | **bootstrap time** | days (SHiP action replay) | **38 min** (snapshot → indexed) | **5.9 min @ 88.8M / 17.7 min @ 232M** (from Mongo) |
@@ -59,25 +59,29 @@ p999 21–591 µs. Scales ~linearly with cores. Mongo is ~0.75–1.2 ms/query (i
 - **vs Postgres — dramatic on every axis.** ~28× less storage (state-only, no burned rows, no history),
   minutes vs days to bootstrap. Most of their 692 GB is *history* Hyperion already holds in ES + indexes
   over burned rows.
-- **vs Mongo — the wins are throughput, latency, storage (with roaring), and operational simplicity —
-  NOT resident memory.** Both are caches over on-disk data of similar size; under load both hold GBs
-  resident. What WormDB changes: **embedded** (no separate DB process, no IPC), **150k–887k req/s on one
-  thread** with **sub-µs p50** (vs Mongo's ~ms/query), an **evictable** page cache that adapts to RAM,
-  and — with roaring postings — a smaller on-disk segment. The faceted query surface is served from a
-  single mmap'd file, in-process.
+- **vs Mongo — the wins are throughput, latency, storage, and operational simplicity — NOT resident
+  memory.** Under load both hold GBs resident (evictable cache). What WormDB changes: **embedded** (no
+  separate DB process, no IPC), **150k–887k req/s on one thread** with **sub-µs p50** (vs Mongo's
+  ~ms/query), an **evictable** page cache that adapts to RAM, and — with the hybrid roaring postings now
+  built — **21 GB on disk vs Mongo's 24.3 GB**. The faceted query surface is served from a single mmap'd
+  file, in-process.
 - **Latency caveat:** WormDB is *embedded* (no IPC); Mongo/PG numbers include the localhost round-trip.
   Part of the latency gap is architectural (embedded vs client-server), not purely the data structure.
 
 ## What the POC covers (and doesn't, yet)
 
 Measured POC = forward store (asset + template, normalized) + inverted indexes
-(owner / collection / schema / template / `data:rarity`) + presorted `sorted_id`. Reader = `aa-probe`
-(mmap + Q1–Q5). It is **read-only / frozen** and indexes one data facet (`rarity`).
+(owner / collection / schema / template / `data:rarity`) + presorted `sorted_id` + materialized
+`template_mint` (`sorted_tmpl`). Inverted postings use the **hybrid** format (raw for light keys,
+roaring + raw head for heavy). Reader = `aa-probe` (mmap + Q1–Q6 + `--workload` + `--mock-es-ms`). It is
+**read-only / frozen** and indexes one data facet (`rarity`).
 
-Not yet (the path to full parity + the on-disk win):
-- **Roaring / delta-encoded postings** — the ~3.4 GB of raw-`u64` posting lists compress heavily
-  (sorted ids delta+varint), which is what takes WormDB *below* Mongo on disk too.
-- **Full `data:*` attribute coverage** (all facets) + numeric range indexes (price, template_mint).
+Done since the first POC: **hybrid roaring postings** (postings ~9 GB → ~1.9 GB → segment **21 GB <
+Mongo's 24.3 GB**, page queries still sub-µs); **template_mint materialization** (history-looking sort
+sub-µs, no ES); **history-hydration model**. Not yet:
+- **Type-pack the forward store** — `asset_fwd` (14 GB) now dominates; type-aware value packing +
+  delta-encoding `sorted_id`/`sorted_tmpl` are the next compression levers.
+- **Full `data:*` attribute coverage** (all facets) + numeric range indexes (price, template_mint range).
 - **Freshness overlay** (frozen segment + SHiP-fed delta) for live updates.
 - **AtomicMarket** tables + the WormDB Zig reader serving the HTTP API.
 
@@ -98,7 +102,8 @@ node benchmark/atomicassets/validate/mongo-bench.js aamain_wax 200
 |---|---|---|---|---|---|---|
 | testnet 5M | 5,000,000 | 674 MiB | 24 s | 5.2 → 5.9 MB | ≤0.3 µs | — |
 | testnet full | 88,844,041 | 8.5 GiB | 5.9 min | 5.0 → 6.0 MB | ≤0.1 µs | 1.85 ms → 20 µs (56× smaller) |
-| mainnet | 232,303,581 | 22.7 GiB | 17.7 min | 5.0 → 26.9 MB | ≤0.1 µs | 1.16 ms → 0.48 ms (18× smaller) |
+| mainnet (raw postings) | 232,303,581 | 22.7 GiB | 17.7 min | 5.0 → 26.9 MB | ≤0.1 µs | 1.16 ms raw |
+| mainnet (hybrid + template_mint) | 232,303,581 | **21.0 GiB** | 17.7 min | sub-µs / 5.6 GB workload | ≤0.1 µs (Q6 4.8 µs) | roaring postings, 4–54× smaller |
 
 Mainnet segment breakdown: asset forward store 13.2 GB (4.4 GB index + 8.8 GB blobs); the four inverted
 posting lists + `sorted_id` ~1.8 GB each (= 232M × 8 B raw `u64`, the part roaring/delta compresses);
