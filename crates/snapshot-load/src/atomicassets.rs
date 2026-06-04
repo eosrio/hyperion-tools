@@ -275,8 +275,19 @@ pub fn map_asset(ctx: &RowCtx, data: Value, reg: &SchemaRegistry) -> Value {
         .and_then(Value::as_str)
         .unwrap_or("");
     let fmt = reg.format_for(collection, schema_name);
-    let immutable = decode_blob(fmt, &extract_bytes(data.get("immutable_serialized_data")));
-    let mutable = decode_blob(fmt, &extract_bytes(data.get("mutable_serialized_data")));
+    let mut immutable = decode_blob(fmt, &extract_bytes(data.get("immutable_serialized_data")));
+    let mut mutable = decode_blob(fmt, &extract_bytes(data.get("mutable_serialized_data")));
+    // Parity quirk (verified live against test.wax.api.atomicassets.io): the running AtomicAssets API
+    // renders an ASSET's `float`/`double` attributes as STRINGS (e.g. `"0.3"`), while TEMPLATE/collection
+    // floats stay NUMBERS. (It's a live-deployment trait of the asset attribute-map path — public
+    // eosio-contract-api master keeps both as numbers — but we match what operators actually run.)
+    // atomicdata emits numbers for both, and widens float32→f64 (so `0.3f32`→`0.30000001192092896`),
+    // so we stringify just the float/double-typed ASSET attributes here; templates/collections stay numbers.
+    let floats = float_field_names(fmt);
+    if !floats.is_empty() {
+        stringify_float_attrs(&mut immutable, &floats);
+        stringify_float_attrs(&mut mutable, &floats);
+    }
     let merged = merge_data(&immutable, &mutable);
 
     let mut doc = Map::new();
@@ -380,6 +391,47 @@ pub(crate) fn decode_blob(
     match format {
         Some(fmt) => atomicdata::deserialize_to_object(bytes, fmt).unwrap_or_default(),
         None => Map::new(),
+    }
+}
+
+/// Names of the `float`/`double`-typed fields in a schema format (base type, so `float[]` counts).
+/// Used to reproduce eosio-contract-api's asset-path float→string rendering.
+fn float_field_names(format: Option<&[atomicdata::Field]>) -> std::collections::HashSet<String> {
+    format
+        .into_iter()
+        .flatten()
+        .filter(|f| {
+            let base = f.r#type.strip_suffix("[]").unwrap_or(&f.r#type);
+            base == "float" || base == "double"
+        })
+        .map(|f| f.name.clone())
+        .collect()
+}
+
+/// In-place: render the named float/double attributes as decimal strings (scalars and array elements),
+/// matching the AtomicAssets API's asset rendering. Uses Rust's shortest-round-trip f64 Display
+/// (`37.0`→`"37"`, `0.3`→`"0.3"`), which agrees with JS `Number.toString()` for non-extreme values.
+fn stringify_float_attrs(map: &mut Map<String, Value>, floats: &std::collections::HashSet<String>) {
+    let to_s = |n: &serde_json::Number| {
+        n.as_f64()
+            .map(|f| format!("{f}"))
+            .unwrap_or_else(|| n.to_string())
+    };
+    for (k, v) in map.iter_mut() {
+        if !floats.contains(k) {
+            continue;
+        }
+        match v {
+            Value::Number(n) => *v = Value::String(to_s(n)),
+            Value::Array(arr) => {
+                for e in arr.iter_mut() {
+                    if let Value::Number(n) = e {
+                        *e = Value::String(to_s(n));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -575,5 +627,56 @@ mod tests {
         assert_eq!(doc["data"]["level"], json!(7));
         assert_eq!(doc["backed_tokens"][0]["amount"], json!("100000000"));
         assert_eq!(doc["backed_tokens"][0]["token_symbol"], json!("WAX"));
+    }
+
+    /// Parity: an ASSET's `float`/`double` attributes render as STRINGS (eosio-contract-api builds
+    /// asset data from the logmint attribute map, which stringifies floats), while a TEMPLATE's stay
+    /// numbers. Verifies both the scalar path and that the value uses shortest-round-trip form.
+    #[test]
+    fn map_asset_stringifies_float_attributes_but_template_keeps_numbers() {
+        let mut reg = SchemaRegistry::default();
+        let fmt = vec![
+            atomicdata::Field::new("name", "string"),
+            atomicdata::Field::new("score", "double"),
+        ];
+        reg.schemas
+            .entry("c".into())
+            .or_default()
+            .insert("s".into(), fmt);
+
+        // blob: id=4 name:string "Hi"; id=5 score:double 0.5 (IEEE-754 LE = 00 00 00 00 00 00 E0 3F)
+        let blob =
+            json!([0x04, 0x02, 0x48, 0x69, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F]);
+        let ctx = RowCtx {
+            code: "atomicassets",
+            scope: "alice",
+            table: "assets",
+            primary_key: "1".into(),
+            payer: "owner",
+            block_num: 1,
+            token_ok: false,
+            lightapi_fields: false,
+        };
+        let asset = json!({
+            "asset_id": "1", "collection_name": "c", "schema_name": "s",
+            "template_id": -1, "ram_payer": "owner", "backed_tokens": [],
+            "immutable_serialized_data": blob.clone(), "mutable_serialized_data": [],
+        });
+        let adoc = map_asset(&ctx, asset, &reg);
+        // ASSET: float → string "0.5"
+        assert_eq!(adoc["immutable_data"]["score"], json!("0.5"));
+        assert_eq!(adoc["data"]["score"], json!("0.5"));
+        assert_eq!(adoc["data"]["name"], json!("Hi"));
+
+        // TEMPLATE (same blob/schema): float stays a number 0.5
+        let tctx = RowCtx {
+            table: "templates",
+            scope: "c",
+            ..ctx
+        };
+        let tmpl =
+            json!({ "template_id": 7, "schema_name": "s", "immutable_serialized_data": blob });
+        let tdoc = map_template(&tctx, tmpl, &reg);
+        assert_eq!(tdoc["immutable_data"]["score"], json!(0.5));
     }
 }
