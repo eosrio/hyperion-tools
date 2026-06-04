@@ -17,9 +17,10 @@ query surface; history (`/logs`, transfers, sales-history) is out of the state t
 | **resident memory to serve** | many GB² (shared_buffers + page cache) | **15.3 GB** (mongod RSS) | **5 MB cold / 22 MB hot** (heaviest query) |
 | **bootstrap time** | days (SHiP action replay) | **38 min** (snapshot → indexed) | **5.9 min @ 88.8M / 17.7 min @ 232M** (from Mongo) |
 | **point lookup (asset + join)** | ~ms | **0.75 ms** | **0.1 µs** |
-| **owner / collection page (100)** | ~ms | **0.8 ms** | **<0.1 µs** |
-| **faceted intersect (`data:rarity`)** | ~ms (GIN) | **0.76 ms** | **0.95 ms** (raw merge; roaring → µs)³ |
+| **owner / collection page (100)** | ~ms | **0.8 ms** | **0.1 µs** |
+| **faceted filter (`collection,data:rarity`)** | ~ms (GIN) | **0.76 ms** | **0.1 µs** (single posting)³ |
 | **browse (sorted page)** | ~ms | **1.2 ms** | **<0.1 µs** |
+| **multi-attr intersect (worst case)** | ~ms (GIN) | ~ms | 1.2 ms raw / **7.5 µs** roaring⁴ |
 | **architecture** | client ↔ server (TCP) | client ↔ server (TCP) | **embedded (in-process mmap)** |
 | **history (logs/transfers/sales)** | in-DB (drives the 692 GB) | → Elasticsearch | → Elasticsearch |
 
@@ -27,11 +28,19 @@ query surface; history (`/logs`, transfers, sales-history) is out of the state t
 not yet in the segment.
 ² PostgreSQL RSS wasn't isolated; its 126 GB of assets indexes must be OS-page-cached for fast queries,
 so the effective resident working set is many GB.
-³ Point/page/browse are O(log N)/O(1) → sub-µs at any scale. The faceted **intersect** is a linear
-sorted-merge of two posting lists, so it scales with posting size: ~11 µs intersecting a 1.7M-asset
-collection @ 88.8M, but **0.95 ms** intersecting a 963k-asset collection ∩ a 128k-asset rarity posting
-@ 232M (a ~1M-element merge) — comparable to Mongo's GIN. This is exactly the case **roaring bitmaps**
-collapse back to µs (compressed bitmap-AND ≈ O(containers), not O(elements)) — the #1 Phase-2 item.
+³ `data_attr_key` is keyed by `(collection, schema, field, value)`, so a `collection,data:rarity=X`
+filter is a **single posting lookup + page slice** — O(log N) + O(100), sub-µs at any scale. A true
+*intersect* is only needed for a multi-attribute AND (two different filter postings).
+
+⁴ Measured roaring experiment (mainnet, `aa-probe`): the genuine 963k ∩ 128k multi-attr AND is **1.16 ms**
+as a raw sorted-u64 merge vs **0.48 ms** roaring (deserialize + AND) vs **7.5 µs** roaring AND on resident
+bitmaps (skips non-overlapping high-32 buckets). Roaring's intersect speed depends on overlap (fast when
+the two sets live in different asset_id buckets, e.g. a specific rarity ∩ a collection — measured
+roaring deser+AND **20 µs** for 1.7M ∩ 8888 @ 88.8M, **0.48 ms** for 963k ∩ 128k @ 232M). **Roaring
+also compresses the posting lists 3.7–56× on this data** (e.g. 13 MB raw → 0.24 MB) — that is the real
+Phase-2 on-disk win: the ~9 GB of raw `u64` posting tables → ~1–2 GB, dropping the segment well under
+Mongo's 23 GB. Open tradeoff: page queries want a zero-copy sorted tail, the intersect wants the bitmap
+— so the posting format is likely a hybrid (raw for page dimensions, roaring/block-delta for facets).
 
 ## The honest read
 
@@ -72,11 +81,11 @@ node benchmark/atomicassets/validate/mongo-bench.js aamain_wax 200
 
 ### Raw POC measurements
 
-| segment | assets | on-disk | build | RSS cold→hot | Q1 | Q3 intersect |
+| segment | assets | on-disk | build | RSS cold→hot | Q1–Q5 (point/page/facet/browse) | multi-attr intersect (raw → roaring) |
 |---|---|---|---|---|---|---|
-| testnet 5M | 5,000,000 | 674 MiB | 24 s | 5.2 → 5.9 MB | 300 ns | 11.2 µs |
-| testnet full | 88,844,041 | 8.5 GiB | 5.9 min | 5.0 → 6.0 MB | 100 ns | 11.5 µs |
-| mainnet | 232,303,581 | 22.7 GiB | 17.7 min | 5.0 → 26.9 MB | 100 ns | 0.95 ms |
+| testnet 5M | 5,000,000 | 674 MiB | 24 s | 5.2 → 5.9 MB | ≤0.3 µs | — |
+| testnet full | 88,844,041 | 8.5 GiB | 5.9 min | 5.0 → 6.0 MB | ≤0.1 µs | 1.85 ms → 20 µs (56× smaller) |
+| mainnet | 232,303,581 | 22.7 GiB | 17.7 min | 5.0 → 26.9 MB | ≤0.1 µs | 1.16 ms → 0.48 ms (18× smaller) |
 
 Mainnet segment breakdown: asset forward store 13.2 GB (4.4 GB index + 8.8 GB blobs); the four inverted
 posting lists + `sorted_id` ~1.8 GB each (= 232M × 8 B raw `u64`, the part roaring/delta compresses);

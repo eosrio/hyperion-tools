@@ -246,16 +246,19 @@ fn main() -> std::io::Result<()> {
         }
         h
     });
-    // ── Q3: collection ∩ data:rarity=X (multi-filter intersect) ──
+    // ── Q3: faceted filter `collection,data:rarity=X` — a SINGLE collection+schema-scoped posting
+    // (data_attr_key already includes the collection), so this is one lookup + page slice, not an
+    // intersect. (q3_coll kept only for the intersect microbench below.)
+    let _ = q3_coll;
     let q3 = bench(args.iters, || {
-        let mut out = Vec::new();
-        if let (Some(a), Some(b)) = (
-            seg.lookup(TABLE_AA_BY_COLL, q3_coll),
-            seg.lookup(TABLE_AA_DATA_ATTR, data_key),
-        ) {
-            PostingList::intersect(&PostingList::new(a), &PostingList::new(b), &mut out);
+        let mut h = 0u64;
+        if let Some(b) = seg.lookup(TABLE_AA_DATA_ATTR, data_key) {
+            let pl = PostingList::new(b);
+            for i in pl.len.saturating_sub(100)..pl.len {
+                h ^= pl.get(i);
+            }
         }
-        out.len() as u64 ^ out.first().copied().unwrap_or(0)
+        h
     });
     // ── Q4: collection page, last 100 ──
     let q4 = bench(args.iters, || {
@@ -319,9 +322,9 @@ fn main() -> std::io::Result<()> {
         format!("owner has {owner_n} assets"),
     );
     row(
-        "Q3 collection ∩ data:rarity (intersect)",
+        "Q3 facet data:rarity page (single posting)",
         q3,
-        format!("rarity posting {data_n}"),
+        format!("collection-scoped rarity posting {data_n}"),
     );
     row(
         "Q4 collection page (100)",
@@ -329,5 +332,54 @@ fn main() -> std::io::Result<()> {
         format!("collection has {coll_n} assets"),
     );
     row("Q5 browse sorted_id slice (100)", q5, String::new());
+
+    // ── Multi-filter intersect microbench: a GENUINE two-large-posting AND (the worst case — most
+    // faceted queries are single collection-scoped postings, see Q3). Raw sorted-merge vs roaring. ──
+    if let (Some(craw), Some(draw)) = (
+        seg.lookup(TABLE_AA_BY_COLL, coll_key),
+        seg.lookup(TABLE_AA_DATA_ATTR, data_key),
+    ) {
+        use roaring::RoaringTreemap;
+        let (plc, pld) = (PostingList::new(craw), PostingList::new(draw));
+        let raw = bench(args.iters, || {
+            let mut out = Vec::new();
+            PostingList::intersect(&plc, &pld, &mut out);
+            out.len() as u64
+        });
+        let rt_c: RoaringTreemap = (0..plc.len).map(|i| plc.get(i)).collect();
+        let rt_d: RoaringTreemap = (0..pld.len).map(|i| pld.get(i)).collect();
+        let (mut bc, mut bd) = (Vec::new(), Vec::new());
+        rt_c.serialize_into(&mut bc).unwrap();
+        rt_d.serialize_into(&mut bd).unwrap();
+        let r_full = bench(args.iters, || {
+            let a = RoaringTreemap::deserialize_from(&bc[..]).unwrap();
+            let b = RoaringTreemap::deserialize_from(&bd[..]).unwrap();
+            (a & b).len()
+        });
+        let r_and = bench(args.iters, || (&rt_c & &rt_d).len());
+
+        println!(
+            "\n=== multi-filter intersect: {} ∩ {} postings (worst case) ===",
+            plc.len, pld.len
+        );
+        println!(
+            "posting storage:  raw {} KB   roaring {} KB  ({:.1}× smaller)",
+            (craw.len() + draw.len()) >> 10,
+            (bc.len() + bd.len()) >> 10,
+            (craw.len() + draw.len()) as f64 / (bc.len() + bd.len()).max(1) as f64,
+        );
+        println!(
+            "intersect raw sorted-merge  : {:>9} ns / {:>9} ns",
+            raw.0, raw.1
+        );
+        println!(
+            "intersect roaring deser+AND : {:>9} ns / {:>9} ns",
+            r_full.0, r_full.1
+        );
+        println!(
+            "intersect roaring AND only  : {:>9} ns / {:>9} ns",
+            r_and.0, r_and.1
+        );
+    }
     Ok(())
 }

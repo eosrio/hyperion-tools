@@ -39,3 +39,5 @@ bs58 = "0.5"
 # tens-of-MiB-resident working-set claim.
 memmap2 = "0.9"
 memory-stats = "1"
+# Phase 2 experiment: roaring bitmaps for the inverted posting lists (compress + fast bitmap-AND).
+roaring = "0.10"
