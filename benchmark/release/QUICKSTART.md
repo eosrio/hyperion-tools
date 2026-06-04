@@ -84,8 +84,9 @@ curl http://localhost:6390/api/networks
 
 All 16 cc32d9 HTTP endpoints are served (`balances tokenbalance accinfo account topholders topram
 topstake holdercount usercount codehash key rexbalance rexraw sync status networks`),
-byte-compatible with the reference implementation. `balances`, `accinfo`, `account`, `topholders`,
-`holdercount`, `usercount`, and `networks` work fully from the segment alone.
+byte-compatible with the reference implementation. **All of them serve from the segment alone** —
+including `topram`, `topstake`, `key`, and `codehash`. The optional SHiP feed (step 7) layers live
+`block_num`/`block_time`/`sync` and per-account balance updates on top.
 
 ## 6. WebSocket API (cc32d9 JSON-RPC)
 
@@ -126,8 +127,7 @@ live overlay, and `/sync` reports the lag. See `feed/README.md`. (Requires a nod
 
 - Linux x86-64 only in this drop. `wormdb` needs `libsodium23` (one apt package).
 - Balance/permission **array order** may differ from the reference (same data, different order).
-- `block_num`/`sync` are static until the live feed runs.
-- `topram`/`topstake` (resource rankings) and HTTP `/key` populate from the live feed; the WebSocket
-  `get_accounts_from_keys` serves keys from the segment directly. `/rexbalance`/`/rexraw` apply to
-  rex-enabled chains.
+- `block_num`/`block_time`/`sync` are the snapshot's point-in-time values until the live feed runs,
+  then they track the chain (in `/networks` and every embedded `chain{}` block).
+- `/rexbalance`/`/rexraw` return REX data only on rex-enabled chains (WAX has none).
 - Feedback welcome — this is an early preview.
