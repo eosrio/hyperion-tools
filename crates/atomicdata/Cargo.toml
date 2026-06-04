@@ -1,0 +1,15 @@
+[package]
+name = "atomicdata"
+description = "Decode AtomicAssets serialized_data (the on-chain eosio::atomicdata format) into named attributes, schema-format-driven."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+# Bitcoin/base58btc alphabet by default — exactly what AtomicAssets ipfs values re-encode to.
+bs58 = "0.5"
