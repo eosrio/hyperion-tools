@@ -27,18 +27,22 @@ const fmtBytes = (n) => {
     .filter((n) => n.startsWith("atomicassets-") || n.startsWith("atomicmarket-"))
     .sort();
 
+  // On-disk footprint uses storageSize (WiredTiger-compressed, ~the actual bytes on disk), NOT size
+  // (the uncompressed logical size). totalIndexSize is the on-disk index size. We report both.
   console.log(`\n=== db ${DB}: ${colls.length} AA/AM collections ===`);
-  let totData = 0, totIdx = 0;
-  console.log("collection".padEnd(30), "count".padStart(12), "data".padStart(11), "indexes".padStart(11));
+  let onDisk = 0, idx = 0, logical = 0;
+  console.log("collection".padEnd(30), "count".padStart(12), "disk".padStart(10), "indexes".padStart(10), "logical".padStart(10));
   for (const name of colls) {
     const st = await db.command({ collStats: name });
-    totData += st.size || 0;
-    totIdx += st.totalIndexSize || 0;
-    console.log(name.padEnd(30), String(st.count).padStart(12), fmtBytes(st.size).padStart(11), fmtBytes(st.totalIndexSize).padStart(11));
+    onDisk += st.storageSize || 0;
+    idx += st.totalIndexSize || 0;
+    logical += st.size || 0;
+    console.log(name.padEnd(30), String(st.count).padStart(12),
+      fmtBytes(st.storageSize).padStart(10), fmtBytes(st.totalIndexSize).padStart(10), fmtBytes(st.size).padStart(10));
   }
   console.log("".padEnd(30, "-"));
-  console.log("TOTAL".padEnd(30), "".padStart(12), fmtBytes(totData).padStart(11), fmtBytes(totIdx).padStart(11));
-  console.log(`STATE FOOTPRINT (data+indexes): ${fmtBytes(totData + totIdx)}`);
+  console.log("TOTAL".padEnd(30), "".padStart(12), fmtBytes(onDisk).padStart(10), fmtBytes(idx).padStart(10), fmtBytes(logical).padStart(10));
+  console.log(`ON-DISK FOOTPRINT (data+indexes, compressed): ${fmtBytes(onDisk + idx)}   [logical data: ${fmtBytes(logical)}]`);
 
   const sample = async (coll, q, n, fields) => {
     if (!colls.includes(coll)) return;

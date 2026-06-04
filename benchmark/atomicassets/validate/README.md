@@ -38,6 +38,8 @@ node crosscheck.js aatest_wax     150 https://wax.api.atomicassets.io  # WAX mai
 ### Validated: WAX testnet, block 409250749 (2026-06-04)
 
 89.6M docs, 0 decode errors. **150/150 immutable_data + 60/60 mutable_data + 150/150 structural**
-exact matches vs `test.wax.api.atomicassets.io`. State footprint (incl. all indexes): **31.3 GB**
-for 88.8M assets (≈352 B/asset). The one parity fix this surfaced: asset `float`/`double` attributes
-render as strings on the live API (templates keep numbers) — handled in `map_asset`.
+exact matches vs `test.wax.api.atomicassets.io`. On-disk footprint (WiredTiger-compressed
+`storageSize`, ~9×): **~2.8 GB of state data for 88.8M assets** (≈33 B/asset; 25.7 GB *logical*);
+fully indexed ≈ **8 GB**, dominated by the `data.$**` wildcard. (Report on-disk `storageSize`, not the
+uncompressed `size`.) The one parity fix this surfaced: asset `float`/`double` attributes render as
+strings on the live API (templates keep numbers) — handled in `map_asset`.
