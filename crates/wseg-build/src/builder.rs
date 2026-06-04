@@ -85,13 +85,17 @@ use crate::binfmt::{self, Perm};
 
 type Resources = (i64, i64, i64); // net, cpu, ram
 type Deleg = (String, i64, i64); // peer, cpu, net
+                                 // (contract, symbol) -> holders; each holder = (account, sort-units i128, amount string).
+type TokenHolders = HashMap<(String, String), Vec<(String, i128, String)>>;
+// modern (PUB_K1) key string -> (legacy EOS form, holders[(account, perm, weight)]).
+type KeyHolders = HashMap<String, (String, Vec<(String, String, i64)>)>;
 
 #[derive(Default)]
 pub struct Builder {
     balances: HashMap<u64, Vec<u8>>,
     /// (contract, symbol) -> holders, for the token_holders table (HTTP topholders/holdercount +
     /// WS get_token_holders). Each entry: (holder account string, sort units i128, amount string).
-    token_holders: HashMap<(String, String), Vec<(String, i128, String)>>,
+    token_holders: TokenHolders,
     resources: HashMap<u64, Resources>,
     deleg_to: HashMap<u64, Vec<Deleg>>,
     deleg_from: HashMap<u64, Vec<Deleg>>,
@@ -99,7 +103,7 @@ pub struct Builder {
     perms: HashMap<u64, Vec<Perm>>,
     /// modern (PUB_K1) key string -> (legacy EOS form, holders[(account, perm, weight)]), for the
     /// pub_keys table (HTTP /key + WS get_accounts_from_keys).
-    key_holders: HashMap<String, (String, Vec<(String, String, i64)>)>,
+    key_holders: KeyHolders,
     pub rows: u64,
 }
 

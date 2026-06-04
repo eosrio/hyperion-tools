@@ -316,28 +316,6 @@ fn asset_units(s: &str) -> Option<i64> {
     format!("{int_part}{frac}").parse::<i64>().ok()
 }
 
-#[cfg(test)]
-mod asset_units_tests {
-    use super::asset_units;
-
-    #[test]
-    fn parses_assets_to_base_units() {
-        assert_eq!(asset_units("11.30000000 WAX"), Some(1_130_000_000));
-        assert_eq!(asset_units("0.00000000 WAX"), Some(0));
-        assert_eq!(asset_units("1.0000 EOS"), Some(10_000));
-        assert_eq!(asset_units("100 WAX"), Some(100)); // integer asset, no fractional part
-        assert_eq!(asset_units("garbage"), None);
-    }
-
-    #[test]
-    fn sum_is_monotonic_for_same_precision_legs() {
-        // net + cpu (same symbol) → exact integer sum used as the /topstake sort key.
-        let net = asset_units("5.00000000 WAX").unwrap();
-        let cpu = asset_units("6.30000000 WAX").unwrap();
-        assert_eq!(net + cpu, 1_130_000_000);
-    }
-}
-
 /// abieos renders float64 as a JSON string already; keep strings as-is, stringify numbers, default "".
 fn value_to_str(v: Option<&Value>) -> String {
     match v {
@@ -364,5 +342,27 @@ fn value_to_num(v: Option<&Value>) -> Value {
             })
             .unwrap_or(Value::Number(0.into())),
         _ => Value::Number(0.into()),
+    }
+}
+
+#[cfg(test)]
+mod asset_units_tests {
+    use super::asset_units;
+
+    #[test]
+    fn parses_assets_to_base_units() {
+        assert_eq!(asset_units("11.30000000 WAX"), Some(1_130_000_000));
+        assert_eq!(asset_units("0.00000000 WAX"), Some(0));
+        assert_eq!(asset_units("1.0000 EOS"), Some(10_000));
+        assert_eq!(asset_units("100 WAX"), Some(100)); // integer asset, no fractional part
+        assert_eq!(asset_units("garbage"), None);
+    }
+
+    #[test]
+    fn sum_is_monotonic_for_same_precision_legs() {
+        // net + cpu (same symbol) → exact integer sum used as the /topstake sort key.
+        let net = asset_units("5.00000000 WAX").unwrap();
+        let cpu = asset_units("6.30000000 WAX").unwrap();
+        assert_eq!(net + cpu, 1_130_000_000);
     }
 }
