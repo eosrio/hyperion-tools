@@ -25,22 +25,28 @@ mkdir -p data
 
 ## 1. Get a chain snapshot
 
-Any portable Antelope snapshot `.bin` (v2–v8). For example WAX from EOS Nation, or your own node's
-`snapshot-*.bin`. `.bin.zst` works too (decompressed automatically).
+Any portable Antelope snapshot (`.bin` or `.bin.zst`, v2–v8) — e.g. WAX from EOS Nation, or your own
+node's `snapshot-*.bin`. **Keep the original filename** when it ends in the block number (the EOS
+Nation convention, `…-<block_num>.bin.zst`): `snapshot-load` reads the block from it. Otherwise pass
+`--block-num` in step 2.
 
 ```bash
-# example — substitute your chain's snapshot
-curl -L -o data/snap.bin.zst <snapshot-url>
+# keeps the server's filename (which ends in the block number)
+curl -L -O <snapshot-url>          # saved into the current dir; move it under data/ if you like
 ```
 
 ## 2. Build the segment (no Mongo, no node)
 
 ```bash
-./bin/snapshot-load --snapshot data/snap.bin --tables lightapi --chain wax --wseg data/chain.wseg
+# .bin.zst is decompressed automatically; substitute your snapshot's filename
+./bin/snapshot-load --snapshot data/<snapshot>.bin.zst --tables lightapi --chain wax --wseg data/chain.wseg
+# if the filename does NOT end in the block number, add:  --block-num <N>
+#   (N = the snapshot's block; from the filename, or your node's get_info head_block_num)
 ```
 
-It prints `head block_num=…` (note it for step 3) and writes `data/chain.wseg`. A WAX snapshot
-(21.7M accounts) builds in a few minutes; small chains in seconds.
+It prints `head block_num=…` — **note it** for step 3 (`block_num`) and the feed's `START`. Writes
+`data/chain.wseg`. A WAX mainnet snapshot (21.7M accounts) builds in a few minutes; small chains in
+seconds.
 
 ## 3. Configure your chain
 
