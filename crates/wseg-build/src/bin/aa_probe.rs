@@ -19,6 +19,33 @@ struct Args {
     seg: String,
     #[arg(long, default_value_t = 2000)]
     iters: usize,
+    /// Run a varied-key mixed workload of this many requests (0 = skip; tests RSS under realistic spread).
+    #[arg(long, default_value_t = 0)]
+    workload: usize,
+}
+
+/// Deterministic xorshift64 PRNG (no dep, reproducible).
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    /// Zipf-ish index into a heaviness-sorted pool: ~80% of picks land in the hot first fifth.
+    fn pick(&mut self, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        if self.next() % 100 < 80 {
+            (self.next() as usize) % (len / 5).max(1)
+        } else {
+            (self.next() as usize) % len
+        }
+    }
 }
 
 struct TableLoc {
@@ -90,6 +117,9 @@ impl Seg {
         let s = t.blob_off + off as usize;
         &self.mmap[s..s + len as usize]
     }
+    fn blob_at(&self, table_id: u32, off: u64, len: u32) -> Option<&[u8]> {
+        self.tables.get(&table_id).map(|t| self.blob(t, off, len))
+    }
     fn lookup(&self, table_id: u32, key: u64) -> Option<&[u8]> {
         let t = self.tables.get(&table_id)?;
         let (mut lo, mut hi) = (0usize, t.key_count);
@@ -121,6 +151,19 @@ impl Seg {
             i += step;
         }
         Some(best)
+    }
+    /// Sample up to `n` keys across a table, returned heaviest-first (so a zipf pick hits hot keys).
+    fn sample_pool(&self, table_id: u32, n: usize) -> Vec<(u64, u64, u32)> {
+        let Some(t) = self.tables.get(&table_id) else {
+            return Vec::new();
+        };
+        let step = (t.key_count / n.max(1)).max(1);
+        let mut v: Vec<(u64, u64, u32)> = (0..t.key_count)
+            .step_by(step)
+            .map(|i| self.entry(t, i))
+            .collect();
+        v.sort_unstable_by(|a, b| b.2.cmp(&a.2)); // by posting/blob size desc
+        v
     }
 }
 
@@ -381,5 +424,118 @@ fn main() -> std::io::Result<()> {
             r_and.0, r_and.1
         );
     }
+
+    if args.workload > 0 {
+        run_workload(&seg, args.workload, base_rss);
+    }
     Ok(())
+}
+
+/// Varied-key mixed workload: random keys (zipf-weighted toward hot/heavy keys) across a realistic
+/// query mix — the test of whether the resident set stays bounded under real spread (vs. the fixed-key
+/// bench where the same blobs are re-touched). Point lookups use UNIFORM-random asset_ids (worst case
+/// for the forward-store working set); page queries use a zipf hot-set.
+fn run_workload(seg: &Seg, n: usize, base_rss: f64) {
+    let owners = seg.sample_pool(TABLE_AA_BY_OWNER, 50_000);
+    let colls = seg.sample_pool(TABLE_AA_BY_COLL, 50_000);
+    let datas = seg.sample_pool(TABLE_AA_DATA_ATTR, 50_000);
+    let (sorted_off, sorted_cnt) = seg
+        .tables
+        .get(&TABLE_AA_SORTED_ID)
+        .map(|t| {
+            let (_, off, _) = seg.entry(t, 0);
+            (off, rdu32(&seg.mmap, t.blob_off + off as usize) as usize)
+        })
+        .unwrap_or((0, 0));
+    let assets: Vec<u64> = if let Some(t) = seg.tables.get(&TABLE_AA_SORTED_ID) {
+        let b = seg.blob(t, sorted_off, (4 + sorted_cnt * 8) as u32);
+        let step = (sorted_cnt / 200_000).max(1);
+        (0..sorted_cnt)
+            .step_by(step)
+            .map(|k| rdu64(b, 4 + k * 8))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    println!(
+        "\n=== varied-key workload: {} reqs over {} owners / {} collections / {} facets / {} assets ===",
+        n,
+        owners.len(),
+        colls.len(),
+        datas.len(),
+        assets.len()
+    );
+    let page = |seg: &Seg, tid: u32, off: u64, len: u32| -> u64 {
+        let mut h = 0u64;
+        if let Some(b) = seg.blob_at(tid, off, len) {
+            let pl = PostingList::new(b);
+            for i in pl.len.saturating_sub(100)..pl.len {
+                h ^= pl.get(i);
+            }
+        }
+        h
+    };
+
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let mut durs: Vec<u128> = Vec::with_capacity(n);
+    let t0 = Instant::now();
+    for _ in 0..n {
+        let r = rng.next() % 100;
+        let t = Instant::now();
+        let mut h = 0u64;
+        if r < 40 && !assets.is_empty() {
+            // zipf toward the front of the pool (= newest asset_ids = the hot, recently-minted ones)
+            let aid = assets[rng.pick(assets.len())];
+            if let Some(b) = seg.lookup(TABLE_AA_FWD, aid) {
+                let a = decode_asset(b);
+                h ^= a.owner;
+                if a.template_id >= 0 {
+                    if let Some(tb) =
+                        seg.lookup(TABLE_AA_TMPL_FWD, template_key(a.template_id as i64))
+                    {
+                        h ^= tb.len() as u64;
+                    }
+                }
+            }
+        } else if r < 65 && !owners.is_empty() {
+            let (_, off, len) = owners[rng.pick(owners.len())];
+            h ^= page(seg, TABLE_AA_BY_OWNER, off, len);
+        } else if r < 85 && !colls.is_empty() {
+            let (_, off, len) = colls[rng.pick(colls.len())];
+            h ^= page(seg, TABLE_AA_BY_COLL, off, len);
+        } else if r < 95 && !datas.is_empty() {
+            let (_, off, len) = datas[rng.pick(datas.len())];
+            h ^= page(seg, TABLE_AA_DATA_ATTR, off, len);
+        } else if sorted_cnt > 100 {
+            let k = (rng.next() as usize % (sorted_cnt - 100)).max(0);
+            if let Some(tt) = seg.tables.get(&TABLE_AA_SORTED_ID) {
+                let b = seg.blob(tt, sorted_off, (4 + sorted_cnt * 8) as u32);
+                for j in k..k + 100 {
+                    h ^= rdu64(b, 4 + j * 8);
+                }
+            }
+        }
+        black_box(h);
+        durs.push(t.elapsed().as_nanos());
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    let rss1 = rss_mb();
+    durs.sort_unstable();
+    let p = |q: f64| durs[((durs.len() as f64 * q) as usize).min(durs.len() - 1)];
+    println!(
+        "throughput: {:.0} req/s ({:.1}s, single thread) | latency p50 {} ns | p99 {} ns | p999 {} ns | max {} µs",
+        n as f64 / secs,
+        secs,
+        p(0.5),
+        p(0.99),
+        p(0.999),
+        durs[durs.len() - 1] / 1000
+    );
+    println!(
+        "RSS: {:.1} MB → {:.1} MB  (working set under varied keys: {:.1} MB)",
+        base_rss,
+        rss1,
+        rss1 - base_rss
+    );
 }
