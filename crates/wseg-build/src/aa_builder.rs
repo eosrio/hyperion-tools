@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use mongodb::bson::{Bson, Document};
 
 use crate::aa_binfmt::{
-    encode_asset, encode_posting_list, encode_schema_format, encode_template, Attr,
+    encode_asset, encode_posting_hybrid, encode_schema_format, encode_template, Attr,
 };
 use crate::aa_tables::*;
 use crate::name;
@@ -303,7 +303,7 @@ fn posting_table(table_id: u32, map: HashMap<u64, Vec<u64>>) -> Table {
     let mut arena = Vec::new();
     let mut index = Vec::with_capacity(map.len());
     for (key, mut ids) in map {
-        let blob = encode_posting_list(&mut ids);
+        let blob = encode_posting_hybrid(&mut ids);
         let off = arena.len() as u64;
         arena.extend_from_slice(&blob);
         index.push(IndexEntry {

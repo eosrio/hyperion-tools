@@ -153,6 +153,120 @@ impl<'a> PostingList<'a> {
     }
 }
 
+// ── hybrid posting list (the on-disk win) ─────────────────────────────────────────────────────────
+// A posting is stored RAW (sorted u64s) when small, or ROARING + a small raw "head" when large:
+//   [u8 format][u32 full_count]
+//     format 0 RAW     : [u64 × full_count]                            (sorted asc; tail = largest)
+//     format 1 ROARING : [u32 head_n][u64 × head_n (top-K desc)][roaring bytes for the full set]
+// Light keys stay zero-copy for page tails; heavy keys compress 3.7–56× and intersect via bitmap-AND,
+// while their `head` keeps page-1 (the common case) a zero-copy slice.
+use roaring::RoaringTreemap;
+
+/// Postings with at most this many ids are stored raw (zero-copy, tiny, cheap to merge).
+pub const RAW_MAX: usize = 512;
+/// Heavy postings keep this many top (largest = newest) ids raw for instant page-1.
+pub const HEAD_K: usize = 256;
+
+/// Encode a posting list in the hybrid format (sorts + dedups `ids` in place).
+pub fn encode_posting_hybrid(ids: &mut Vec<u64>) -> Vec<u8> {
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() <= RAW_MAX {
+        let mut o = Vec::with_capacity(5 + ids.len() * 8);
+        o.push(0u8);
+        pu32(&mut o, ids.len() as u32);
+        for &id in ids.iter() {
+            pu64(&mut o, id);
+        }
+        o
+    } else {
+        let rt: RoaringTreemap = ids.iter().copied().collect();
+        let mut rbytes = Vec::new();
+        rt.serialize_into(&mut rbytes).unwrap();
+        let head_n = HEAD_K.min(ids.len());
+        let mut o = Vec::with_capacity(9 + head_n * 8 + rbytes.len());
+        o.push(1u8);
+        pu32(&mut o, ids.len() as u32);
+        pu32(&mut o, head_n as u32);
+        for &id in ids.iter().rev().take(head_n) {
+            pu64(&mut o, id); // top-K largest, descending
+        }
+        o.extend_from_slice(&rbytes);
+        o
+    }
+}
+
+/// Reader over a hybrid posting blob.
+pub enum Posting<'a> {
+    Raw(PostingList<'a>),
+    Roaring {
+        full: usize,
+        head: &'a [u8],
+        body: &'a [u8],
+    },
+}
+impl<'a> Posting<'a> {
+    pub fn parse(blob: &'a [u8]) -> Posting<'a> {
+        let full = u32::from_le_bytes(blob[1..5].try_into().unwrap()) as usize;
+        match blob[0] {
+            0 => Posting::Raw(PostingList {
+                body: &blob[5..5 + full * 8],
+                len: full,
+            }),
+            _ => {
+                let hn = u32::from_le_bytes(blob[5..9].try_into().unwrap()) as usize;
+                Posting::Roaring {
+                    full,
+                    head: &blob[9..9 + hn * 8],
+                    body: &blob[9 + hn * 8..],
+                }
+            }
+        }
+    }
+    /// Total number of ids in the posting (O(1)).
+    pub fn len(&self) -> usize {
+        match self {
+            Posting::Raw(pl) => pl.len,
+            Posting::Roaring { full, .. } => *full,
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Call `f` for each of the top-`n` (largest = newest) ids — the page-1 read, zero-copy in both
+    /// formats (raw tail / roaring head).
+    pub fn head_for_each(&self, n: usize, mut f: impl FnMut(u64)) {
+        match self {
+            Posting::Raw(pl) => {
+                for i in pl.len.saturating_sub(n)..pl.len {
+                    f(pl.get(i));
+                }
+            }
+            Posting::Roaring { head, .. } => {
+                let cnt = head.len() / 8;
+                for i in 0..n.min(cnt) {
+                    f(u64::from_le_bytes(
+                        head[i * 8..i * 8 + 8].try_into().unwrap(),
+                    ));
+                }
+            }
+        }
+    }
+    /// XOR of the top-`n` ids (the page-1 read as a benchmark sink).
+    pub fn head_xor(&self, n: usize) -> u64 {
+        let mut h = 0u64;
+        self.head_for_each(n, |id| h ^= id);
+        h
+    }
+    /// Materialize a roaring treemap (deserialize for ROARING; build for RAW) — for multi-filter AND.
+    pub fn to_roaring(&self) -> RoaringTreemap {
+        match self {
+            Posting::Raw(pl) => (0..pl.len).map(|i| pl.get(i)).collect(),
+            Posting::Roaring { body, .. } => RoaringTreemap::deserialize_from(*body).unwrap(),
+        }
+    }
+}
+
 // ── asset + template forward blobs ───────────────────────────────────────────────────────────────
 /// A decoded data attribute: schema field index + its canonical string value.
 pub type Attr = (u8, String);
@@ -308,6 +422,34 @@ mod tests {
         let mut out = Vec::new();
         PostingList::intersect(&PostingList::new(&ba), &PostingList::new(&bb), &mut out);
         assert_eq!(out, vec![3, 5, 9]);
+    }
+
+    #[test]
+    fn hybrid_posting_raw_then_roaring() {
+        // small → raw (format 0), deduped + sorted
+        let mut small = vec![5u64, 1, 9, 5, 3];
+        let b = encode_posting_hybrid(&mut small);
+        assert_eq!(b[0], 0);
+        let p = Posting::parse(&b);
+        assert_eq!(p.len(), 4);
+        assert_eq!(p.head_xor(2), 9 ^ 5); // top 2 largest
+        assert_eq!(p.to_roaring().len(), 4);
+
+        // large → roaring (format 1) with a raw head
+        let mut big: Vec<u64> = (0..2000u64).map(|i| 1_099_511_627_776 + i * 7).collect();
+        let b2 = encode_posting_hybrid(&mut big);
+        assert_eq!(b2[0], 1);
+        assert!(b2.len() < 2000 * 8, "roaring should compress vs 16KB raw");
+        let p2 = Posting::parse(&b2);
+        assert_eq!(p2.len(), 2000);
+        let rt = p2.to_roaring();
+        assert_eq!(rt.len(), 2000);
+        assert!(rt.contains(1_099_511_627_776));
+        assert!(rt.contains(1_099_511_627_776 + 1999 * 7));
+        // head = the top-K largest
+        let mut top = 0u64;
+        p2.head_for_each(1, |id| top = id);
+        assert_eq!(top, 1_099_511_627_776 + 1999 * 7);
     }
 
     #[test]

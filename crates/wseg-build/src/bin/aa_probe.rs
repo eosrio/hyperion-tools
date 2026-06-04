@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use memmap2::Mmap;
-use wseg_build::aa_binfmt::{decode_asset, PostingList};
+use wseg_build::aa_binfmt::{decode_asset, Posting};
 use wseg_build::aa_tables::*;
 
 #[derive(Parser)]
@@ -219,6 +219,7 @@ fn main() -> std::io::Result<()> {
             TABLE_AA_BY_TMPL => "by_template",
             TABLE_AA_DATA_ATTR => "by_data_attr",
             TABLE_AA_SORTED_ID => "sorted_id",
+            TABLE_AA_SORTED_TMPL => "sorted_tmpl",
             _ => "?",
         }
     };
@@ -256,19 +257,7 @@ fn main() -> std::io::Result<()> {
     let asset_id = pick_asset(1000);
     let (owner_key, _, _) = seg.heaviest(TABLE_AA_BY_OWNER, 4096).unwrap_or((0, 0, 0));
     let (coll_key, _, _) = seg.heaviest(TABLE_AA_BY_COLL, 4096).unwrap_or((0, 0, 0));
-    let (data_key, d_off, d_len) = seg.heaviest(TABLE_AA_DATA_ATTR, 4096).unwrap_or((0, 0, 0));
-    // For Q3, intersect that rarity posting with its first asset's collection posting (a real overlap).
-    let q3_coll = seg
-        .tables
-        .get(&TABLE_AA_DATA_ATTR)
-        .map(|t| {
-            let pl = PostingList::new(seg.blob(t, d_off, d_len));
-            let first = if pl.len > 0 { pl.get(0) } else { asset_id };
-            seg.lookup(TABLE_AA_FWD, first)
-                .map(|b| decode_asset(b).collection)
-                .unwrap_or(coll_key)
-        })
-        .unwrap_or(coll_key);
+    let (data_key, _, _) = seg.heaviest(TABLE_AA_DATA_ATTR, 4096).unwrap_or((0, 0, 0));
 
     // ── Q1: point lookup by asset_id (+ template join) ──
     let q1 = bench(args.iters, || {
@@ -285,41 +274,25 @@ fn main() -> std::io::Result<()> {
         }
         h
     });
-    // ── Q2: owner's assets, last 100 (sort=asset_id desc) ──
+    // ── Q2: owner's assets, page 1 of 100 (top/newest = the posting head) ──
     let q2 = bench(args.iters, || {
-        let mut h = 0u64;
-        if let Some(b) = seg.lookup(TABLE_AA_BY_OWNER, owner_key) {
-            let pl = PostingList::new(b);
-            for i in pl.len.saturating_sub(100)..pl.len {
-                h ^= pl.get(i);
-            }
-        }
-        h
+        seg.lookup(TABLE_AA_BY_OWNER, owner_key)
+            .map(|b| Posting::parse(b).head_xor(100))
+            .unwrap_or(0)
     });
     // ── Q3: faceted filter `collection,data:rarity=X` — a SINGLE collection+schema-scoped posting
     // (data_attr_key already includes the collection), so this is one lookup + page slice, not an
-    // intersect. (q3_coll kept only for the intersect microbench below.)
-    let _ = q3_coll;
+    // intersect.
     let q3 = bench(args.iters, || {
-        let mut h = 0u64;
-        if let Some(b) = seg.lookup(TABLE_AA_DATA_ATTR, data_key) {
-            let pl = PostingList::new(b);
-            for i in pl.len.saturating_sub(100)..pl.len {
-                h ^= pl.get(i);
-            }
-        }
-        h
+        seg.lookup(TABLE_AA_DATA_ATTR, data_key)
+            .map(|b| Posting::parse(b).head_xor(100))
+            .unwrap_or(0)
     });
-    // ── Q4: collection page, last 100 ──
+    // ── Q4: collection page 1 of 100 ──
     let q4 = bench(args.iters, || {
-        let mut h = 0u64;
-        if let Some(b) = seg.lookup(TABLE_AA_BY_COLL, coll_key) {
-            let pl = PostingList::new(b);
-            for i in pl.len.saturating_sub(100)..pl.len {
-                h ^= pl.get(i);
-            }
-        }
-        h
+        seg.lookup(TABLE_AA_BY_COLL, coll_key)
+            .map(|b| Posting::parse(b).head_xor(100))
+            .unwrap_or(0)
     });
     // ── Q5: browse all sorted by asset_id desc, page slice ──
     let q5 = bench(args.iters, || {
@@ -364,17 +337,16 @@ fn main() -> std::io::Result<()> {
 
     let owner_n = seg
         .lookup(TABLE_AA_BY_OWNER, owner_key)
-        .map(|b| PostingList::new(b).len)
+        .map(|b| Posting::parse(b).len())
         .unwrap_or(0);
     let coll_n = seg
         .lookup(TABLE_AA_BY_COLL, coll_key)
-        .map(|b| PostingList::new(b).len)
+        .map(|b| Posting::parse(b).len())
         .unwrap_or(0);
-    let data_n = PostingList::new(
-        seg.lookup(TABLE_AA_DATA_ATTR, data_key)
-            .unwrap_or(&[0, 0, 0, 0]),
-    )
-    .len;
+    let data_n = seg
+        .lookup(TABLE_AA_DATA_ATTR, data_key)
+        .map(|b| Posting::parse(b).len())
+        .unwrap_or(0);
     println!(
         "\n=== query latency (P50 / P99 over {} iters) ===",
         args.iters
@@ -405,51 +377,35 @@ fn main() -> std::io::Result<()> {
         "history-looking sort, no ES".to_string(),
     );
 
-    // ── Multi-filter intersect microbench: a GENUINE two-large-posting AND (the worst case — most
-    // faceted queries are single collection-scoped postings, see Q3). Raw sorted-merge vs roaring. ──
-    if let (Some(craw), Some(draw)) = (
+    // ── Multi-filter intersect microbench (hybrid postings): a genuine two-large-posting AND. Most
+    // faceted queries are single collection-scoped postings (Q3); this is the rarer multi-attr case. ──
+    if let (Some(cb), Some(db)) = (
         seg.lookup(TABLE_AA_BY_COLL, coll_key),
         seg.lookup(TABLE_AA_DATA_ATTR, data_key),
     ) {
-        use roaring::RoaringTreemap;
-        let (plc, pld) = (PostingList::new(craw), PostingList::new(draw));
-        let raw = bench(args.iters, || {
-            let mut out = Vec::new();
-            PostingList::intersect(&plc, &pld, &mut out);
-            out.len() as u64
-        });
-        let rt_c: RoaringTreemap = (0..plc.len).map(|i| plc.get(i)).collect();
-        let rt_d: RoaringTreemap = (0..pld.len).map(|i| pld.get(i)).collect();
-        let (mut bc, mut bd) = (Vec::new(), Vec::new());
-        rt_c.serialize_into(&mut bc).unwrap();
-        rt_d.serialize_into(&mut bd).unwrap();
-        let r_full = bench(args.iters, || {
-            let a = RoaringTreemap::deserialize_from(&bc[..]).unwrap();
-            let b = RoaringTreemap::deserialize_from(&bd[..]).unwrap();
-            (a & b).len()
-        });
-        let r_and = bench(args.iters, || (&rt_c & &rt_d).len());
+        let (pc, pd) = (Posting::parse(cb), Posting::parse(db));
+        let (nc, nd) = (pc.len(), pd.len());
+        // real per-query path: materialize a roaring from each posting (deserialize / build) + AND.
+        let r_full = bench(args.iters, || (pc.to_roaring() & pd.to_roaring()).len());
+        // AND-only lower bound (bitmaps already resident / cached).
+        let (rc, rd) = (pc.to_roaring(), pd.to_roaring());
+        let r_and = bench(args.iters, || (&rc & &rd).len());
 
+        let stored = cb.len() + db.len();
+        let raw_equiv = (nc + nd) * 8 + 10;
+        println!("\n=== multi-filter intersect (hybrid postings): {nc} ∩ {nd} ===");
         println!(
-            "\n=== multi-filter intersect: {} ∩ {} postings (worst case) ===",
-            plc.len, pld.len
+            "on-disk hybrid: {} KB   vs raw-u64 would be {} KB  ({:.1}× smaller in the segment)",
+            stored >> 10,
+            raw_equiv >> 10,
+            raw_equiv as f64 / stored.max(1) as f64,
         );
         println!(
-            "posting storage:  raw {} KB   roaring {} KB  ({:.1}× smaller)",
-            (craw.len() + draw.len()) >> 10,
-            (bc.len() + bd.len()) >> 10,
-            (craw.len() + draw.len()) as f64 / (bc.len() + bd.len()).max(1) as f64,
-        );
-        println!(
-            "intersect raw sorted-merge  : {:>9} ns / {:>9} ns",
-            raw.0, raw.1
-        );
-        println!(
-            "intersect roaring deser+AND : {:>9} ns / {:>9} ns",
+            "intersect to_roaring + AND : {:>9} ns / {:>9} ns",
             r_full.0, r_full.1
         );
         println!(
-            "intersect roaring AND only  : {:>9} ns / {:>9} ns",
+            "intersect AND only         : {:>9} ns / {:>9} ns",
             r_and.0, r_and.1
         );
     }
@@ -501,16 +457,15 @@ fn run_workload(seg: &Seg, n: usize, base_rss: f64, mock_es_ms: u64, es_display_
         datas.len(),
         assets.len()
     );
-    // a page = posting tail (100 ids) + HYDRATE each result's forward blob (as a real server renders it)
+    // a page = posting head (top 100 ids) + HYDRATE each result's forward blob (as a real server does)
     let page = |seg: &Seg, tid: u32, off: u64, len: u32| -> u64 {
         let mut h = 0u64;
         if let Some(b) = seg.blob_at(tid, off, len) {
-            let pl = PostingList::new(b);
-            for i in pl.len.saturating_sub(100)..pl.len {
-                if let Some(fb) = seg.lookup(TABLE_AA_FWD, pl.get(i)) {
+            Posting::parse(b).head_for_each(100, |aid| {
+                if let Some(fb) = seg.lookup(TABLE_AA_FWD, aid) {
                     h ^= decode_asset(fb).owner;
                 }
-            }
+            });
         }
         h
     };
