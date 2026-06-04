@@ -117,3 +117,30 @@ Mix: 40% point lookups, 25% owner pages, 20% collection pages, 10% facet pages, 
 Takeaway: the working set under sustained varied load is GBs (an evictable page cache, not a fixed
 allocation), but single-thread throughput is **150k–887k req/s** at **sub-µs p50** — that, the embedded
 (no-IPC) model, and the roaring on-disk win are the real advantages over Mongo, not resident size.
+
+## History hydration — keeping sub-µs while serving history fields
+
+The state tier (WormDB/Mongo) holds *state*; history-derived fields (`minted_at_*`, `transferred_at_*`,
+`template_mint`, sales/price history, `/logs`) live in **Elasticsearch**. Two mechanisms keep the state
+path fast (design from the workflow; both implemented + measured):
+
+1. **Materialize the reconstructable sort keys** so "history-looking" sorts never touch ES. `template_mint`
+   = the mint ordinal (rank within a template), which is **reconstructable from the snapshot** (`ROW_NUMBER()`
+   over a template's assets by asset_id). `AtomicBuilder` computes it at `finish()` from the `by_tmpl`
+   postings and writes it into each asset's forward record **and** a presorted `TABLE_AA_SORTED_TMPL`
+   ordering. Result — **Q6 "sort by mint" + hydrate 100 results = 3.2 µs, no Elasticsearch.** (Same trick
+   covers the mint/created orderings; only the exact `*_at_time` *display* values and delphi-priced sorts
+   genuinely need ES.)
+2. **Batch-hydrate displayed history**: the state tier filters+sorts+paginates (µs → a page of 100
+   asset_ids), then history is fetched with **one** ES `mget`/terms query *for the whole page* (not
+   per-asset), only when a history field is shown, and cached (`minted_at` never changes). Modeled with
+   `aa-probe --mock-es-ms 2 --es-display-frac 0.30` (5M segment):
+
+   | | p50 | p99 | p999 |
+   |---|---|---|---|
+   | state-only (no history shown) | 2.1 µs | 76 µs | 104 µs |
+   | + history overlay (30% display, 2 ms ES) | **5.7 µs** | 2.07 ms | 2.09 ms |
+
+   The state median is untouched; only the history-displaying fraction pays one ~2 ms ES round-trip, and
+   p99 ≈ that single round-trip (not ×100). A request that shows no history, or sorts by a materialized
+   key, stays entirely in the µs state path.
