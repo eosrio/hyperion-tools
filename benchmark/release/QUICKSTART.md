@@ -123,6 +123,27 @@ The segment is a point-in-time snapshot. To follow the chain in real time, run t
 live overlay, and `/sync` reports the lag. See `feed/README.md`. (Requires a node with
 `state_history_plugin` enabled.)
 
+## Production: run as systemd services
+
+For a durable deployment — auto-restart on failure, start on boot, and the feed restarting whenever
+the server does — install the bundled services instead of launching the binaries by hand:
+
+```bash
+# 1. point the feed at your node + chain
+nano feed/lightapi.env                 # SHIP, CHAIN_API, CHAIN, START (= step-2 block_num first run)
+
+# 2. install + start (pick one)
+sudo ./install-systemd.sh              # system-wide, survives reboot (recommended)
+     ./install-systemd.sh --user       # per-user, no root (enables linger for you)
+
+# 3. manage
+systemctl status wormdb-lightapi lightapi-feed
+journalctl -u lightapi-feed -f         # follow the feed
+```
+
+Installs `wormdb-lightapi` (server) + `lightapi-feed` (SHiP feed). Re-run the script any time to pick
+up new paths/binaries; `./install-systemd.sh --uninstall` removes them.
+
 ## Notes & limits (preview)
 
 - Linux x86-64 only in this drop. `wormdb` needs `libsodium23` (one apt package).

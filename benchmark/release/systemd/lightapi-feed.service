@@ -1,0 +1,19 @@
+[Unit]
+Description=WormDB Light API SHiP feed (keeps the segment live from a nodeos State-History endpoint)
+Documentation=https://github.com/eosrio/hyperion-tools
+After=network-online.target wormdb-lightapi.service
+Wants=network-online.target
+Requires=wormdb-lightapi.service
+PartOf=wormdb-lightapi.service
+
+[Service]
+Type=simple
+User=@@USER@@
+WorkingDirectory=@@DIR@@/feed
+EnvironmentFile=@@DIR@@/feed/lightapi.env
+ExecStart=@@BUN@@ @@DIR@@/feed/lightapi-ship-feed.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

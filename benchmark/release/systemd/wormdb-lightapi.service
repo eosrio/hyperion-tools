@@ -1,0 +1,20 @@
+[Unit]
+Description=WormDB Light API server (cc32d9 eosio_light_api from an mmap segment)
+Documentation=https://github.com/eosrio/hyperion-tools
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@USER@@
+WorkingDirectory=@@DIR@@
+ExecStart=@@DIR@@/bin/wormdb --config @@DIR@@/wormdb.json
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+# Read-only API — modest hardening (won't break the mmap segment or libsodium).
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
