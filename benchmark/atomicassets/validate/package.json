@@ -1,0 +1,9 @@
+{
+  "name": "aa-validate",
+  "private": true,
+  "description": "Validate snapshot-load's atomicassets/atomicmarket Mongo collections: footprint + decode-correctness vs the live AtomicAssets API.",
+  "type": "commonjs",
+  "dependencies": {
+    "mongodb": "^6"
+  }
+}
