@@ -8,7 +8,7 @@ load + serve scripts, a parity checker, and the results write-up.
 | benchmark | API surface | our engine(s) | reference stack |
 |---|---|---|---|
 | [**lightapi/**](lightapi) | cc32d9 [`eosio_light_api`](https://github.com/cc32d9/eosio_light_api) — 16 HTTP + 4 WebSocket | [`light-api`](../crates/light-api) (MongoDB) and WormDB (mmap `.wseg` segment, via [`wseg-build`](../crates/wseg-build)) | cc32d9: nodeos + Chronicle + MariaDB + Perl |
-| _atomicassets/_ | AtomicAssets API | _planned_ | _planned_ |
+| [**atomicassets/**](atomicassets) | AtomicAssets API ([eosio-contract-api](https://github.com/pinknetworkx/eosio-contract-api)) — assets/templates/collections + atomicmarket | _researching — see [REQUIREMENTS.md](atomicassets/REQUIREMENTS.md)_ | nodeos + filler + PostgreSQL (~1.1 TB) + Redis |
 
 Start with **[`lightapi/`](lightapi)** for the parity methodology, the operator comparison, and the
 WormDB throughput/memory matrices.
