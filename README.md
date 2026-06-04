@@ -30,9 +30,9 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 
 | crate | status | what it does |
 |---|---|---|
-| [**snapshot-load**](crates/snapshot-load) | prototype | Decodes active contract-table state straight from an Antelope portable snapshot into Hyperion-shaped NDJSON or MongoDB — no nodeos, no SHiP replay. The deterministic alternative to `hyp-control sync`. |
-| [**light-api**](crates/light-api) | — | tokio + axum server reproducing the cc32d9 `eosio_light_api` HTTP API over the per-chain MongoDB `snapshot-load` writes / Hyperion maintains live. |
-| [**wseg-build**](crates/wseg-build) | — | Builds a frozen, memory-mappable columnar segment (`.wseg`) of the Light-API tables from the per-chain Mongo, for WormDB to serve at tens-of-MiB resident. |
+| [**snapshot-load**](crates/snapshot-load) | prototype | Decodes active contract-table state straight from an Antelope portable snapshot into Hyperion-shaped NDJSON or MongoDB — no nodeos, no SHiP replay. The deterministic alternative to `hyp-control sync`. A `--tables lightapi` preset + `--wseg` sink build the whole Light-API dataset (incl. a memory-mapped segment) in one pass. |
+| [**light-api**](crates/light-api) | preview | tokio + axum server reproducing the cc32d9 `eosio_light_api` HTTP API over the per-chain MongoDB `snapshot-load` writes / Hyperion maintains live. |
+| [**wseg-build**](crates/wseg-build) | preview | Builds a frozen, memory-mappable columnar segment (`.wseg`) of the Light-API tables — from the per-chain Mongo, or directly from a snapshot via `snapshot-load --wseg` — for WormDB to serve the full HTTP + WebSocket Light API at tens-of-MiB resident. |
 
 ### Benchmarking & test fixtures
 

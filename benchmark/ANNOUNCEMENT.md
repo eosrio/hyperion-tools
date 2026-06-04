@@ -60,8 +60,8 @@ to full state in seconds instead of hours.
 
 - cc32d9's stack is **battle-tested across many chains for years** and ships a WebSocket bulk API we
   haven't matched. This is a complement, not a replacement.
-- `/codehash` is a known follow-up on our side (one snapshot section left to wire). The other 15
-  endpoints are at parity.
+- `/codehash` is now wired up — `snapshot-load` emits `account_codehash` from the snapshot's
+  `account_metadata_object` section (under `--tables lightapi`), so **all 16 endpoints are at parity.**
 - This is young software — **please try it and tell us where it diverges.**
 
 ## Try it / help us

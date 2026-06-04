@@ -78,15 +78,16 @@ writer into SQL — inherently far slower than a direct binary load. (cc32d9's o
 - **Multi-chain.** cc32d9 puts many networks in one MariaDB (per-network tables) behind one API. Our
   server is multi-chain via `[[networks]]` over per-chain Mongo DBs. Both do multi-chain.
 - **Maturity.** cc32d9 is production-proven across EOS/WAX/Telos/Libre/Proton for years, with a
-  websocket bulk API and holder-count cron. Ours is new; `/codehash` is still a loader follow-up.
+  websocket bulk API and holder-count cron. Ours is new, though all 16 endpoints are now at parity.
 - **Portability.** Our binaries are self-contained (pure-Rust deps, no C toolchain). The cc32d9 stack
   pulls platform-specific debs (nodeos, Chronicle) tied to Ubuntu versions.
 
 ## 6. Endpoint coverage
 
-Both serve the 16 cc32d9 endpoints. Known gap on our side: **`/codehash`** (needs the loader to emit
-`account_codehash` from the snapshot's `account_metadata_object` — documented follow-up). The cc32d9
-stack also ships a **WebSocket bulk API** (`wsapi`) which this harness does not build.
+Both serve the 16 cc32d9 endpoints — including `/codehash`, now that `snapshot-load` emits
+`account_codehash` from the snapshot's `account_metadata_object` section (`--tables lightapi`). The
+cc32d9 stack also ships a **WebSocket bulk API** (`wsapi`); this MongoDB harness doesn't build it, but
+the segment-based WormDB engine does — see [`WORMDB_MATRIX.md`](WORMDB_MATRIX.md).
 
 ## 7. Results
 

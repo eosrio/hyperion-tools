@@ -135,6 +135,33 @@ of the block_id; EOS Nation `snapshot-...-<decimal>.bin[.zst]` → trailing digi
 "latest" pointer like `latest.tar.gz` (whose URL basename carries no block id) still resolves. Pass
 `--block-num` to override.
 
+## Light API: the `lightapi` preset + `.wseg` segment
+
+`--tables lightapi` is a one-flag preset that loads everything the cc32d9
+[`eosio_light_api`](https://github.com/cc32d9/eosio_light_api) needs for a chain:
+`voters, accounts, eosio:{global,userres,delband,rexbal,rexfund,rexpool}` **plus** the native
+`permissions` pass. On top of the base shapes it emits the Light-API extras — token `decimals` +
+exact `amount_str`/`amount_num` on `accounts`, a `pub_keys` reverse index (key → accounts, under both
+the `EOS…` and `PUB_K1_…` forms), and an `account_codehash` map decoded from the snapshot's
+`account_metadata_object` section.
+
+Point it at MongoDB (for the [`light-api`](../light-api) server) **or** at a `.wseg` file (for WormDB):
+
+```bash
+# into MongoDB — the light-api axum server reads this
+snapshot-load --snapshot snapshot-<id>.bin --chain wax \
+  --tables lightapi --mongo mongodb://localhost:27017 --mongo-drop
+
+# directly into a memory-mapped segment — NO MongoDB; WormDB mmaps this
+snapshot-load --snapshot snapshot-<id>.bin --chain wax --tables lightapi --wseg wax.wseg
+```
+
+`--wseg <file>` drives the shared [`wseg-build`](../wseg-build) `Builder` to write a frozen columnar
+segment carrying the balances, accinfo, token_holders, pub_keys, top_ram, top_stake and codehash
+tables — the whole cc32d9 HTTP + WebSocket surface served from one mmap'd file at tens-of-MiB
+resident, no database. (`lightapi` is a seek-path preset, so it needs `--snapshot <file>`, not
+`--snapshot-url`.)
+
 ## Streaming directly from a download (`--snapshot-url`)
 
 Instead of `--snapshot <file>`, point at a URL with `--snapshot-url` to **decode + index straight off the

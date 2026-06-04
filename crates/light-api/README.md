@@ -72,9 +72,9 @@ one-time backfill.
 
 - **`/sync` & `/status`** are meaningful against a *live-updated* Hyperion Mongo (the indexer fills
   `@block_time`). A static snapshot-only DB has no head-block time, so it reports `OUT_OF_SYNC`.
-- **`/codehash`** requires the `account_codehash` collection. Emitting it from the snapshot's
-  `account_metadata_object` section is the remaining loader task (needs validation against a real
-  snapshot); until then `/codehash` returns `{}`.
+- **`/codehash`** reads the `account_codehash` collection, which `snapshot-load` now emits from the
+  snapshot's `account_metadata_object` section (under `--tables lightapi`). A DB without that
+  collection returns `{}`.
 - **REX `savings`** detection uses the eosio.system far-future maturity sentinel; verify against a
   live cc32d9 instance for chains that fork the rex contract.
 - Read-only: the server never writes to Mongo. Place it behind your existing Hyperion reverse proxy.

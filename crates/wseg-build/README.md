@@ -13,9 +13,16 @@ data, served from one mmap'd file instead of a database.
 |---|---|---|
 | 0 | `balances` | holder → packed `"<contract>\t<symbol>\t<decimals>\t<amount>\n…"` (one line per token) |
 | 5 | `accinfo`  | account → cc32d9 accinfo fragment (`resources…linkauth[,code]`) |
+| 6 | `token_holders` | `fnv1a64("contract:symbol")` → `[u16 hdr]["contract:symbol"][u32 count]` + amount-desc `"acct\tamount\n…"` — HTTP `/topholders`,`/holdercount` + WS `get_token_holders` |
+| 7 | `pub_keys` | `fnv1a64(pubkey)`, indexed under **both** the `EOS…` and `PUB_K1_…` forms → `"account\tperm\tweight\n…"` — HTTP `/key` + WS `get_accounts_from_keys` |
+| 8 | `top_ram` | sentinel key `0` → `[u32 count]` + ram-desc `"owner\tram_bytes\n…"` (capped) — HTTP `/topram` |
+| 9 | `top_stake` | sentinel key `0` → `[u32 count]` + (cpu+net)-desc `"owner\tcpu\tnet\n…"` (capped) — HTTP `/topstake` |
+| 10 | `codehash` | `fnv1a64(code_hash hex)` → `[u16 hdr][hash]` + `"account\n…"` (reverse index) — HTTP `/codehash` |
 
 The `balances` table is built by streaming the Mongo `accounts` collection in `scope`-sorted (index)
-order, so a holder's rows arrive contiguously and pack into a single blob per holder.
+order, so a holder's rows arrive contiguously and pack into a single blob per holder. The same shared
+push-based `Builder` is what [`snapshot-load --wseg`](../snapshot-load) drives to build the full table
+set **directly from a snapshot — no MongoDB** (the path the WormDB preview ships).
 
 ## Usage
 
