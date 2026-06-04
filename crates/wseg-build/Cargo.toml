@@ -16,6 +16,15 @@ path = "src/lib.rs"
 name = "wseg-build"
 path = "src/main.rs"
 
+# AtomicAssets faceted-store POC: build the segment from Mongo, and probe it (mmap + query bench).
+[[bin]]
+name = "aa-build"
+path = "src/bin/aa_build.rs"
+
+[[bin]]
+name = "aa-probe"
+path = "src/bin/aa_probe.rs"
+
 [dependencies]
 tokio = { workspace = true }            # async runtime for the Mongo stream
 mongodb = { workspace = true }          # async driver — same version as light-api / snapshot-load
@@ -26,3 +35,7 @@ futures = { workspace = true }          # TryStreamExt cursor streaming
 # point + the two 4-byte checksums, so the segment stores 41 bytes/key instead of ~110 bytes of
 # strings (the procedure base58-re-encodes both forms at request time).
 bs58 = "0.5"
+# AA POC probe: mmap the segment (so only touched blobs fault in) + read process RSS to prove the
+# tens-of-MiB-resident working-set claim.
+memmap2 = "0.9"
+memory-stats = "1"
