@@ -101,7 +101,7 @@ the hardest instance — solving it gives the state tier the faceted-query capab
 ## 9. Build sequence
 
 **Track A (4.5):**
-1. `atomicdata` decoder + schema-format registry; validate by diffing decoded `data` vs a live AtomicAssets API.
+1. ✅ **`atomicdata` decoder** (`crates/atomicdata`) — schema-format-driven, byte-exact (spec cross-validated across the contract C++, atomicassets-js, and XPRNetwork). Validated against the golden on-chain vector + **77/77 distinct-schema live WAX templates** (output matches eosio-contract-api's stored `immutable_data` exactly). *Done.*
 2. `snapshot-load --tables atomicassets,atomicmarket` → decode → Mongo collections + AA-specific indexes (fast state bootstrap; **measure the state footprint** — the 4.5 efficiency number).
 3. AtomicAssets API server over the state-store interface: state→Mongo, history→ES, cold→archive — **full endpoint parity**.
 4. Live freshness via Hyperion's existing delta→Mongo pipeline + the decoder (confirm how much it already indexes — §10).
@@ -109,6 +109,26 @@ the hardest instance — solving it gives the state tier the faceted-query capab
 6. Benchmark vs eosio-contract-api: parity + throughput + **hardware/storage footprint**, as `benchmark/atomicassets/`.
 
 **Track B (parallel):** WormDB faceted-query engine (§6), shared decoder; swap behind the API; re-benchmark the state footprint (tens-of-MiB-resident target).
+
+## Live deployment findings (WAX, eosio-contract-api v1.3.24)
+
+Studied a live deployment (Postgres `api-wax-mainnet-atomic-1` + the public API) to ground Track A:
+
+- **It stores decoded data, as JSONB.** `atomicassets_assets.{immutable_data,mutable_data}` and
+  `atomicassets_templates.immutable_data` are `jsonb` (the resolved attributes); `schemas.format` is a
+  `text[]` of `{name,type}`. So eosio-contract-api decodes (via atomicassets-js) at fill time and stores
+  the resolved data — Track A mirrors this: decode with `atomicdata` → Mongo docs carrying resolved data.
+- **It materializes purpose-built filter/aggregate tables, not just raw indexes:**
+  `atomicmarket_sales_filters_{listed,sold,waiting,updates,invalid}`, `atomicassets_asset_counts`,
+  `atomicmarket_template_prices`, `atomicmarket_stats_markets`. These are exactly the indexes /
+  materialized views Track A must build on Mongo (and Track B in WormDB) for the hot endpoints (sales,
+  account/collection counts, floor prices).
+- **Sizing confirms the thesis.** Rows: assets **468 M** (incl. burned), offers **180 M**, sales
+  **172 M** — vs definitions templates **904 K**, schemas **80 K**, collections **110 K**. Total DB
+  **1.27 TB**; the atomicassets+atomicmarket tables **692 GB** — *dominated by lifecycle history* (burned
+  assets, completed/cancelled offers + sales), which Hyperion already holds as actions in ES. The compact
+  *live* state (definitions + non-burned assets + active listings) is a fraction → storing only that,
+  with history served from the existing ES, is the storage win.
 
 ## 10. Open questions
 
