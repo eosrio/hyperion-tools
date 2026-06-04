@@ -169,6 +169,7 @@ impl AtomicBuilder {
             schema_u,
             tid,
             doc_u32(d, "block_num"),
+            0, // template_mint — patched in finish() (needs all of a template's assets to rank)
             &immutable,
             &mutable,
         );
@@ -221,6 +222,44 @@ impl AtomicBuilder {
     }
 
     pub fn finish(mut self, out: &str) -> std::io::Result<AaStats> {
+        // Materialize template_mint = 1-based rank within each template (asset_id asc), reconstructed
+        // from the by_tmpl postings — so "sort by mint" (a history-looking sort) stays sub-µs without ES.
+        let mut tmpl_mint: HashMap<u64, u32> = HashMap::with_capacity(self.stats.assets as usize);
+        for ids in self.by_tmpl.values() {
+            let mut s = ids.clone();
+            s.sort_unstable();
+            for (rank, &aid) in s.iter().enumerate() {
+                tmpl_mint.insert(aid, (rank + 1) as u32);
+            }
+        }
+        // patch each asset's forward blob (template_mint is the 4 bytes at blob offset 33)
+        let idx = std::mem::take(&mut self.asset_fwd.index);
+        for e in &idx {
+            if let Some(&m) = tmpl_mint.get(&e.key) {
+                let o = e.off as usize + 33;
+                self.asset_fwd.arena[o..o + 4].copy_from_slice(&m.to_le_bytes());
+            }
+        }
+        self.asset_fwd.index = idx;
+        // presorted (template_mint, asset_id) ordering for the sort-by-mint browse
+        let mut pairs: Vec<(u32, u64)> = tmpl_mint.iter().map(|(&a, &m)| (m, a)).collect();
+        pairs.sort_unstable();
+        let mut ta = Vec::with_capacity(4 + pairs.len() * 12);
+        ta.extend_from_slice(&(pairs.len() as u32).to_le_bytes());
+        for (m, a) in &pairs {
+            ta.extend_from_slice(&m.to_le_bytes());
+            ta.extend_from_slice(&a.to_le_bytes());
+        }
+        let tmpl_sorted = Table {
+            table_id: TABLE_AA_SORTED_TMPL,
+            index: vec![IndexEntry {
+                key: SENTINEL_KEY,
+                off: 0,
+                len: ta.len() as u32,
+            }],
+            arena: ta,
+        };
+
         let mut tables: Vec<Table> = vec![
             std::mem::take(&mut self.asset_fwd).into_table(TABLE_AA_FWD),
             std::mem::take(&mut self.tmpl_fwd).into_table(TABLE_AA_TMPL_FWD),
@@ -251,6 +290,7 @@ impl AtomicBuilder {
             }],
             arena,
         });
+        tables.push(tmpl_sorted);
 
         self.stats.bytes = tables.iter().map(|t| t.arena.len() as u64).sum();
         write_segment(out, tables)?;

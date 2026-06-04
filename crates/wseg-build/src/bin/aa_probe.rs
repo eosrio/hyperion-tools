@@ -22,6 +22,13 @@ struct Args {
     /// Run a varied-key mixed workload of this many requests (0 = skip; tests RSS under realistic spread).
     #[arg(long, default_value_t = 0)]
     workload: usize,
+    /// Model history hydration: add this many ms (one ES batch round-trip) to the fraction of workload
+    /// requests that display history (uncached). 0 = state-only.
+    #[arg(long, default_value_t = 0)]
+    mock_es_ms: u64,
+    /// Fraction of requests that display a history field (and so pay one ES round-trip, once, then cached).
+    #[arg(long, default_value_t = 0.30)]
+    es_display_frac: f64,
 }
 
 /// Deterministic xorshift64 PRNG (no dep, reproducible).
@@ -327,6 +334,23 @@ fn main() -> std::io::Result<()> {
         }
         h
     });
+    // ── Q6: SORT BY MINT — the materialized template_mint ordering + forward-blob hydration. This is
+    // a "history-looking" sort served entirely from the segment (no Elasticsearch). (mint u32, aid u64)
+    let q6 = bench(args.iters, || {
+        let mut h = 0u64;
+        if let Some(t) = seg.tables.get(&TABLE_AA_SORTED_TMPL) {
+            let (_, off, len) = seg.entry(t, 0);
+            let b = seg.blob(t, off, len);
+            let n = rdu32(b, 0) as usize;
+            for k in 1000..1100.min(n) {
+                let aid = rdu64(b, 4 + k * 12 + 4); // skip the u32 mint
+                if let Some(fb) = seg.lookup(TABLE_AA_FWD, aid) {
+                    h ^= decode_asset(fb).template_mint as u64;
+                }
+            }
+        }
+        h
+    });
 
     let hot_rss = rss_mb();
     println!(
@@ -375,6 +399,11 @@ fn main() -> std::io::Result<()> {
         format!("collection has {coll_n} assets"),
     );
     row("Q5 browse sorted_id slice (100)", q5, String::new());
+    row(
+        "Q6 SORT BY MINT + hydrate (materialized)",
+        q6,
+        "history-looking sort, no ES".to_string(),
+    );
 
     // ── Multi-filter intersect microbench: a GENUINE two-large-posting AND (the worst case — most
     // faceted queries are single collection-scoped postings, see Q3). Raw sorted-merge vs roaring. ──
@@ -426,16 +455,22 @@ fn main() -> std::io::Result<()> {
     }
 
     if args.workload > 0 {
-        run_workload(&seg, args.workload, base_rss);
+        run_workload(
+            &seg,
+            args.workload,
+            base_rss,
+            args.mock_es_ms,
+            args.es_display_frac,
+        );
     }
     Ok(())
 }
 
-/// Varied-key mixed workload: random keys (zipf-weighted toward hot/heavy keys) across a realistic
-/// query mix — the test of whether the resident set stays bounded under real spread (vs. the fixed-key
-/// bench where the same blobs are re-touched). Point lookups use UNIFORM-random asset_ids (worst case
-/// for the forward-store working set); page queries use a zipf hot-set.
-fn run_workload(seg: &Seg, n: usize, base_rss: f64) {
+/// Varied-key mixed workload: zipf-weighted keys across a realistic query mix. Every page result is
+/// HYDRATED (its 100 forward blobs are read, as a real server would), so the RSS reflects real serving.
+/// Optionally overlays a mock Elasticsearch history hydration (one ~`mock_es_ms` round-trip on the
+/// `es_display_frac` of requests that show a history field, once per item then cached).
+fn run_workload(seg: &Seg, n: usize, base_rss: f64, mock_es_ms: u64, es_display_frac: f64) {
     let owners = seg.sample_pool(TABLE_AA_BY_OWNER, 50_000);
     let colls = seg.sample_pool(TABLE_AA_BY_COLL, 50_000);
     let datas = seg.sample_pool(TABLE_AA_DATA_ATTR, 50_000);
@@ -466,12 +501,15 @@ fn run_workload(seg: &Seg, n: usize, base_rss: f64) {
         datas.len(),
         assets.len()
     );
+    // a page = posting tail (100 ids) + HYDRATE each result's forward blob (as a real server renders it)
     let page = |seg: &Seg, tid: u32, off: u64, len: u32| -> u64 {
         let mut h = 0u64;
         if let Some(b) = seg.blob_at(tid, off, len) {
             let pl = PostingList::new(b);
             for i in pl.len.saturating_sub(100)..pl.len {
-                h ^= pl.get(i);
+                if let Some(fb) = seg.lookup(TABLE_AA_FWD, pl.get(i)) {
+                    h ^= decode_asset(fb).owner;
+                }
             }
         }
         h
@@ -538,4 +576,32 @@ fn run_workload(seg: &Seg, n: usize, base_rss: f64) {
         rss1,
         rss1 - base_rss
     );
+
+    // History-hydration overlay: the `es_display_frac` of requests that show a history field pay ONE
+    // ES batch round-trip (~mock_es_ms) the first time, then it's cached. The state path is untouched.
+    if mock_es_ms > 0 {
+        let add = (mock_es_ms as u128) * 1_000_000; // ms → ns
+        let pay_every = (1.0 / es_display_frac.max(0.001)).round().max(1.0) as usize;
+        let mut blended = durs.clone();
+        for (i, d) in blended.iter_mut().enumerate() {
+            if i % pay_every == 0 {
+                *d += add; // this request displayed history and missed the cache
+            }
+        }
+        blended.sort_unstable();
+        let pb = |q: f64| blended[((blended.len() as f64 * q) as usize).min(blended.len() - 1)];
+        let us = |ns: u128| ns as f64 / 1000.0;
+        println!(
+            "history overlay (display {:.0}%, ES {} ms, cached after 1st hit): p50 {:.1} µs | p99 {:.0} µs | p999 {:.0} µs",
+            es_display_frac * 100.0,
+            mock_es_ms,
+            us(pb(0.5)),
+            us(pb(0.99)),
+            us(pb(0.999)),
+        );
+        println!(
+            "  → state-only stays p50 {} ns; only the displayed-history fraction pays the one ES round-trip.",
+            durs[durs.len() / 2]
+        );
+    }
 }

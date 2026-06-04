@@ -161,22 +161,25 @@ const ASSET_VERSION: u8 = 1;
 
 /// Encode an asset forward record. `immutable` is non-empty only for assets without a template
 /// (templated assets get their immutable data from the template blob, joined at read time).
+#[allow(clippy::too_many_arguments)]
 pub fn encode_asset(
     owner: u64,
     collection: u64,
     schema: u64,
     template_id: i32,
     block_num: u32,
+    template_mint: u32,
     immutable: &[Attr],
     mutable: &[Attr],
 ) -> Vec<u8> {
-    let mut o = Vec::with_capacity(30 + (immutable.len() + mutable.len()) * 12);
+    let mut o = Vec::with_capacity(34 + (immutable.len() + mutable.len()) * 12);
     o.push(ASSET_VERSION);
     pu64(&mut o, owner);
     pu64(&mut o, collection);
     pu64(&mut o, schema);
     pi32(&mut o, template_id);
     pu32(&mut o, block_num);
+    pu32(&mut o, template_mint); // materialized mint ordinal (rank within the template), reconstructable
     put_attrs(&mut o, immutable);
     put_attrs(&mut o, mutable);
     o
@@ -224,6 +227,7 @@ pub struct AssetRec {
     pub schema: u64,
     pub template_id: i32,
     pub block_num: u32,
+    pub template_mint: u32,
     pub immutable: Vec<Attr>,
     pub mutable: Vec<Attr>,
 }
@@ -235,6 +239,7 @@ pub fn decode_asset(b: &[u8]) -> AssetRec {
     let schema = gu64(b, &mut p);
     let template_id = gi32(b, &mut p);
     let block_num = gu32(b, &mut p);
+    let template_mint = gu32(b, &mut p);
     let immutable = get_attrs(b, &mut p);
     let mutable = get_attrs(b, &mut p);
     AssetRec {
@@ -243,6 +248,7 @@ pub fn decode_asset(b: &[u8]) -> AssetRec {
         schema,
         template_id,
         block_num,
+        template_mint,
         immutable,
         mutable,
     }
@@ -312,6 +318,7 @@ mod tests {
             schema: crate::name::encode("mysch"),
             template_id: 26,
             block_num: 409250749,
+            template_mint: 1422,
             immutable: vec![],
             mutable: vec![(0u8, "female".to_string()), (1u8, "83".to_string())],
         };
@@ -321,6 +328,7 @@ mod tests {
             rec.schema,
             rec.template_id,
             rec.block_num,
+            rec.template_mint,
             &rec.immutable,
             &rec.mutable,
         );

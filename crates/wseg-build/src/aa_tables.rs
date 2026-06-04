@@ -32,6 +32,10 @@ pub const TABLE_AA_SORTED_ID: u32 = 18;
 pub const TABLE_AA_TMPL_FWD: u32 = 19;
 /// Collection forward store: key = `name::encode(collection_name)`, blob = compact collection record.
 pub const TABLE_AA_COLL_FWD: u32 = 20;
+/// Presorted: sentinel key [`SENTINEL_KEY`], blob = `(u32 template_mint, u64 asset_id)` pairs sorted
+/// by `(template_mint, asset_id)` — the materialized "sort by mint" ordering, reconstructed from the
+/// snapshot (rank within each template) so a history-looking sort stays sub-µs (no Elasticsearch).
+pub const TABLE_AA_SORTED_TMPL: u32 = 21;
 
 /// The single-entry key used by presorted-ordering tables (one blob, looked up by a fixed key).
 pub const SENTINEL_KEY: u64 = 0;
