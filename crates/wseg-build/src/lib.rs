@@ -4,6 +4,7 @@
 //! It is fed by either a Mongo source (the `wseg-build` binary) or a snapshot source (snapshot-load's
 //! `--wseg` sink), so a servable segment can be built with or without MongoDB.
 
+pub mod aa_tables;
 pub mod binfmt;
 pub mod builder;
 pub mod name;
