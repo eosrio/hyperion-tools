@@ -74,9 +74,19 @@ realistic stream (35% mint / 45% transfer / 12% burn / 8% setdata over real keys
 The spine: the forward record is the sole arbiter of current state, so stale base postings are harmless
 and transfer/burn need no posting surgery; per-key `add`/`rem` roaring sets keep counts exact + the base
 head dense. The two-phase apply (lock-free `prepare` + brief `commit`) keeps the write-lock hold — the
-freshness lag — at hundreds of µs, so a writer at SHiP speed never stalls readers. **Not yet:** compaction
-measured end-to-end (designed; reuses `AtomicBuilder` + atomic mmap remap) and cursor pagination for deep
-pages. This closes the "can't serve it live" gap: the same single mmap'd file, updated from chain head.
+freshness lag — at hundreds of µs, so a writer at SHiP speed never stalls readers.
+
+**Compaction (folds the overlay back, so the store runs indefinitely) — BUILT + MEASURED.**
+`LiveSeg::compact()` folds the immutable base + the live overlay into a fresh segment (applying current
+owner/data, dropping tombstones, adding mints) through the existing `AtomicBuilder`, then resets the
+overlay. Measured at full scale (mainnet 232M base + 4M-mutation overlay): **fold 382 s** (6.4 min, ~3×
+faster than the 18-min Mongo build) → 21,157 MiB, the new base ALONE answers identically to old
+base+overlay (**0 mismatches / 60,000 checks**: point owners + owner counts + facet counts), and overlay
+heap **reclaimed 396 MB → 0**. The equivalence check caught + fixed two real bugs (facet
+immutable-vs-mutable ordering; a setdata phantom on a burned asset). **Not yet:** the
+in-process ArcSwap hot-swap into a running server loop (fold + reclaim proven; swap is mechanical) and
+cursor pagination for deep pages. This closes the "can't serve it live" gap: one mmap'd file, updated from
+chain head, compacted in place.
 
 ## The honest read
 

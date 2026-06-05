@@ -39,6 +39,12 @@ struct Args {
     /// Reader threads in the concurrent phase.
     #[arg(long, default_value_t = 4)]
     readers: usize,
+    /// Compact (fold overlay → fresh segment) at the end and verify equivalence (0 = skip).
+    #[arg(long, default_value_t = true)]
+    compact: bool,
+    /// Output path for the compacted segment.
+    #[arg(long, default_value = "C:/snaptmp/aa-compacted.wseg")]
+    compact_out: String,
 }
 
 struct Rng(u64);
@@ -127,6 +133,11 @@ fn generate(
             })
         } else if r < 92 {
             Delta::Burn(BurnD { asset_id: pick })
+        } else if std::env::var("AA_NO_SETDATA").is_ok() {
+            Delta::Transfer(TransferD {
+                asset_id: pick,
+                new_owner: owner,
+            })
         } else {
             // SETDATA: move the asset's facet (rarity) to a new value within its own collection/schema
             if let Some(bp) = &bps[idx] {
@@ -537,6 +548,75 @@ fn main() {
         println!(
             "    → freshness lag is bounded by one block's write-lock hold ({} µs max above): a read after that sees the block.",
             w_maxlock / 1000
+        );
+    }
+
+    // ── Phase E — compaction: fold base + overlay → fresh segment, verify equivalence + heap reclaim ──
+    if args.compact {
+        println!("\n[E] compaction: fold base + overlay → a fresh segment…");
+        let (h_before, _) = live.overlay_heap_bytes();
+        let t = Instant::now();
+        let stats = live.compact(&args.compact_out).expect("compact");
+        let secs = t.elapsed().as_secs_f64();
+        let sz = std::fs::metadata(&args.compact_out)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        println!(
+            "    folded {} live assets in {:.1}s → {} ({} MiB on disk)",
+            stats.assets,
+            secs,
+            args.compact_out,
+            sz >> 20
+        );
+        // equivalence: the new base ALONE (empty overlay) must answer identically to old (base+overlay).
+        let fresh = LiveSeg::open(&args.compact_out, vec!["rarity".to_string()]).unwrap();
+        let ov_old = live.overlay();
+        let ov_new = fresh.overlay();
+        let mut rng = Rng(0x00C0_FFEE_1234_5678);
+        let (mut checks, mut point_m, mut owner_m, mut facet_m) = (0u64, 0u64, 0u64, 0u64);
+        let mut examples = 0;
+        for _ in 0..50_000 {
+            let aid = assets[rng.zipf(assets.len())];
+            if live.point_owner(&ov_old, aid) != fresh.point_owner(&ov_new, aid) {
+                point_m += 1;
+            }
+            checks += 1;
+        }
+        for &o in owners.iter().take(5000) {
+            if live.count(&ov_old, DIM_OWNER, o) != fresh.count(&ov_new, DIM_OWNER, o) {
+                owner_m += 1;
+            }
+            checks += 1;
+        }
+        for &f in facets.iter().take(5000) {
+            let (a, b) = (
+                live.count(&ov_old, DIM_FACET, f),
+                fresh.count(&ov_new, DIM_FACET, f),
+            );
+            if a != b {
+                facet_m += 1;
+                if examples < 5 {
+                    println!("      facet mismatch: key {f} live={a} fresh={b}");
+                    examples += 1;
+                }
+            }
+            checks += 1;
+        }
+        let mism = point_m + owner_m + facet_m;
+        let (h_after, _) = fresh.overlay_heap_bytes();
+        println!(
+            "    equivalence: {} checks, {} mismatches (point {} / owner-count {} / facet-count {})  [{}]",
+            checks,
+            mism,
+            point_m,
+            owner_m,
+            facet_m,
+            if mism == 0 { "PASS" } else { "FAIL" }
+        );
+        println!(
+            "    overlay heap reclaimed: {} MB (live overlay) → {} MB (fresh base, overlay empty)",
+            h_before / 1_048_576,
+            h_after / 1_048_576
         );
     }
 

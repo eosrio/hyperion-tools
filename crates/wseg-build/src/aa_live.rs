@@ -18,7 +18,8 @@ use std::sync::RwLock;
 use memmap2::Mmap;
 use roaring::RoaringTreemap;
 
-use crate::aa_binfmt::{decode_asset, decode_schema_format, Attr, Posting};
+use crate::aa_binfmt::{decode_asset, decode_schema_format, decode_template, Attr, Posting};
+use crate::aa_builder::{AaStats, AtomicBuilder};
 use crate::aa_tables::*;
 use crate::name;
 
@@ -147,6 +148,26 @@ impl BaseSeg {
             .step_by(step)
             .map(|k| rdu64(b, 4 + k * 8))
             .collect()
+    }
+
+    /// Number of keys in a table (0 if absent).
+    pub fn key_count(&self, table_id: u32) -> usize {
+        self.tables.get(&table_id).map(|t| t.key_count).unwrap_or(0)
+    }
+
+    /// Iterate every `(key, blob)` of a table in key order — used by compaction to walk all base
+    /// assets / schemas / templates.
+    pub fn for_each_entry(&self, table_id: u32, mut f: impl FnMut(u64, &[u8])) {
+        let Some(t) = self.tables.get(&table_id) else {
+            return;
+        };
+        for i in 0..t.key_count {
+            let o = t.index_off + i * 20;
+            let key = rdu64(&self.mmap, o);
+            let off = rdu64(&self.mmap, o + 8) as usize;
+            let len = rdu32(&self.mmap, o + 16) as usize;
+            f(key, &self.mmap[t.blob_off + off..t.blob_off + off + len]);
+        }
     }
 }
 
@@ -428,10 +449,12 @@ impl LiveSeg {
                 continue;
             };
             let idx = idx as u8;
-            let val = mutable
+            // immutable-first, matching the base builder's by_data (aa_builder.rs push_asset) exactly —
+            // so the overlay's facet key for an asset equals the one the frozen base indexed it under.
+            let val = immutable
                 .iter()
                 .find(|(i, _)| *i == idx)
-                .or_else(|| immutable.iter().find(|(i, _)| *i == idx));
+                .or_else(|| mutable.iter().find(|(i, _)| *i == idx));
             if let Some((_, v)) = val {
                 if !v.is_empty() && v.len() <= 64 {
                     return Some(data_attr_key(coll_s, sch_s, fld, v));
@@ -620,8 +643,16 @@ impl LiveSeg {
         base_facet: Option<u64>,
     ) {
         self.promote(ov, s.asset_id, base_live);
-        if s.facet_old != s.facet_new {
-            if let Some(old) = s.facet_old {
+        // Derive the OLD facet from our own current forward record, not the delta's `facet_old` (which a
+        // real SHiP stream — or a second setdata on the same asset — can render stale). This keeps the
+        // overlay's facet membership exactly consistent with what compaction folds (a.facet_key).
+        // A setdata for a tombstoned/unknown asset is a no-op (else it would add a phantom to a facet).
+        let cur_facet = match ov.fwd.get(&s.asset_id) {
+            Some(FwdState::Live(a)) => a.facet_key,
+            _ => return,
+        };
+        if cur_facet != s.facet_new {
+            if let Some(old) = cur_facet {
                 self.leave(ov, DIM_FACET, old, s.asset_id, base_facet == Some(old));
             }
             if let Some(new) = s.facet_new {
@@ -826,6 +857,69 @@ impl LiveSeg {
         out
     }
 
+    // ── COMPACTION: fold the immutable base + the live overlay into a fresh segment, so the overlay's
+    //    RAM is reclaimed and the new base reflects every applied mutation. Reuses AtomicBuilder.finish()
+    //    (posting hybrid selection, template_mint re-rank, sorted_id/sorted_tmpl) over the merged current
+    //    state. Reads keep serving from the OLD (base + overlay) until the caller atomically swaps in a
+    //    fresh LiveSeg on the new segment (ArcSwap in a server). ───────────────────────────────────────
+    pub fn compact(&self, out: &str) -> std::io::Result<AaStats> {
+        let ov = self.ov.read().unwrap();
+        let facet_field = self.facet_fields.first().cloned().unwrap_or_default();
+
+        // rarity field index per schema (so the asset loop doesn't re-decode the schema 232M times).
+        let mut facet_idx: HashMap<u64, u8> = HashMap::new();
+        self.base.for_each_entry(TABLE_AA_SCHEMAS, |key, blob| {
+            let fields = decode_schema_format(blob);
+            if let Some(p) = fields.iter().position(|(n, _)| *n == facet_field) {
+                facet_idx.insert(key, p as u8);
+            }
+        });
+
+        let mut b = AtomicBuilder::new(self.facet_fields.clone());
+        // schemas + templates carry straight over from the base (overlay add/extend would also fold here)
+        self.base.for_each_entry(TABLE_AA_SCHEMAS, |key, blob| {
+            b.push_schema_raw(key, &decode_schema_format(blob));
+        });
+        self.base.for_each_entry(TABLE_AA_TMPL_FWD, |_k, blob| {
+            let (tid, schema_u, immut) = decode_template(blob);
+            b.push_template_raw(tid, schema_u, &immut);
+        });
+
+        // every CURRENT asset, exactly once: base assets (overlay-current, tombstones dropped) …
+        self.base
+            .for_each_entry(TABLE_AA_FWD, |aid, blob| match ov.fwd.get(&aid) {
+                Some(FwdState::Tomb) => {} // burned → drop from the new base
+                // overlay-current asset → use its cached facet key (what the overlay indexed it under)
+                Some(FwdState::Live(a)) => {
+                    fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key)
+                }
+                None => {
+                    let a = decode_asset(blob);
+                    let live = AssetLive {
+                        owner: a.owner,
+                        collection: a.collection,
+                        schema: a.schema,
+                        template_id: a.template_id,
+                        block_num: a.block_num,
+                        template_mint: a.template_mint,
+                        facet_key: None,
+                        immutable: a.immutable,
+                        mutable: a.mutable,
+                    };
+                    fold_emit(&mut b, &facet_idx, &facet_field, aid, &live, None);
+                }
+            });
+        // … then the overlay mints (Live records with no base row).
+        for (&aid, st) in ov.fwd.iter() {
+            if let FwdState::Live(a) = st {
+                if self.base.lookup(TABLE_AA_FWD, aid).is_none() {
+                    fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key);
+                }
+            }
+        }
+        b.finish(out)
+    }
+
     // ── fork rollback / recovery: replay the WAL up to `block` (clears derived state, re-applies) ──
     pub fn rollback_to(&self, block: u32) {
         let mut ov = self.ov.write().unwrap();
@@ -897,10 +991,52 @@ impl LiveSeg {
     }
 }
 
+/// Emit one current asset into the compaction builder. The facet key is the overlay's cached one when
+/// available (overlay-touched assets), else recomputed from the asset's attrs via the schema's rarity
+/// field index (base-unchanged assets).
+fn fold_emit(
+    b: &mut AtomicBuilder,
+    facet_idx: &HashMap<u64, u8>,
+    facet_field: &str,
+    aid: u64,
+    a: &AssetLive,
+    cached_facet: Option<u64>,
+) {
+    let coll_s = name::decode(a.collection);
+    let sch_s = name::decode(a.schema);
+    let schema_key = coll_schema_key(&coll_s, &sch_s);
+    let facet = cached_facet.or_else(|| {
+        facet_idx.get(&schema_key).and_then(|&idx| {
+            // immutable-first, matching the base builder's by_data (aa_builder.rs push_asset).
+            a.immutable
+                .iter()
+                .find(|(i, _)| *i == idx)
+                .or_else(|| a.mutable.iter().find(|(i, _)| *i == idx))
+                .and_then(|(_, v)| {
+                    (!v.is_empty() && v.len() <= 64)
+                        .then(|| data_attr_key(&coll_s, &sch_s, facet_field, v))
+                })
+        })
+    });
+    let fk = facet.map(|k| [k]);
+    let fks: &[u64] = fk.as_ref().map(|s| s.as_slice()).unwrap_or(&[]);
+    b.push_asset_raw(
+        aid,
+        a.owner,
+        a.collection,
+        a.schema,
+        schema_key,
+        a.template_id,
+        a.block_num,
+        &a.immutable,
+        &a.mutable,
+        fks,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aa_builder::AtomicBuilder;
     use mongodb::bson::doc;
 
     /// Build a tiny base segment to a temp path and open it as a LiveSeg.
@@ -1098,6 +1234,75 @@ mod tests {
             .page(&ov, DIM_FACET, fkey("rarity", "Mythic"), 100)
             .contains(&1002));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compaction_folds_overlay_into_new_base() {
+        let path = std::env::temp_dir()
+            .join("aa_live_compact_src.wseg")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let out = std::env::temp_dir()
+            .join("aa_live_compact_dst.wseg")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let live = tiny_base(&path);
+        let (alice, bob, carol) = (
+            name::encode("alice"),
+            name::encode("bob"),
+            name::encode("carol"),
+        );
+        let new_id = live.base_max_id + 1;
+        // transfer 1000 alice→bob, burn 1001, setdata 1002 Common→Mythic, mint a new carol Mythic asset
+        live.apply_block(
+            101,
+            &[
+                Delta::Transfer(TransferD {
+                    asset_id: 1000,
+                    new_owner: bob,
+                }),
+                Delta::Burn(BurnD { asset_id: 1001 }),
+                Delta::SetData(SetDataD {
+                    asset_id: 1002,
+                    mutable: vec![(1u8, "Mythic".to_string())],
+                    facet_old: Some(fkey("rarity", "Common")),
+                    facet_new: Some(fkey("rarity", "Mythic")),
+                }),
+                Delta::Mint(MintD {
+                    asset_id: new_id,
+                    owner: carol,
+                    collection: name::encode("col"),
+                    schema: name::encode("sch"),
+                    schema_key: coll_schema_key("col", "sch"),
+                    template_id: 7,
+                    facet_key: Some(fkey("rarity", "Mythic")),
+                    immutable: vec![],
+                    mutable: vec![(1u8, "Mythic".to_string())],
+                }),
+            ],
+        );
+        let stats = live.compact(&out).unwrap();
+        assert_eq!(stats.assets, 3, "3 base − 1 burn + 1 mint");
+
+        // the new base alone (empty overlay) must answer identically to the old base+overlay.
+        let fresh = LiveSeg::open(&out, vec!["rarity".to_string()]).unwrap();
+        let fo = fresh.overlay();
+        assert_eq!(fresh.count(&fo, DIM_OWNER, bob), 1);
+        assert_eq!(fresh.count(&fo, DIM_OWNER, alice), 1); // only 1002 remains
+        assert_eq!(fresh.count(&fo, DIM_OWNER, carol), 1);
+        assert!(fresh.page(&fo, DIM_OWNER, bob, 100).contains(&1000));
+        assert!(!fresh.exists(&fo, 1001), "burned asset not in the new base");
+        assert!(fresh.exists(&fo, new_id), "mint folded into the new base");
+        // Mythic facet: base {1000,1001}; 1001 burned, 1002 joined, new minted → {1000,1002,new_id}
+        assert_eq!(fresh.count(&fo, DIM_FACET, fkey("rarity", "Mythic")), 3);
+        assert_eq!(fresh.count(&fo, DIM_FACET, fkey("rarity", "Common")), 0);
+        // overlay reclaimed: the fresh store carries no overlay heap.
+        let (heap, _) = fresh.overlay_heap_bytes();
+        assert!(heap < 64, "fresh overlay heap ~0, got {heap}");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]

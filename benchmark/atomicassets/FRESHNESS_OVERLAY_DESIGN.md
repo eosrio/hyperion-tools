@@ -111,5 +111,36 @@ definition, still a member of its key) keeps page reads sub-µs: no base decode 
 blocks bound it. Deep (page-N) pagination on a hot key materializes the base posting once per scroll
 (the frozen store's pre-existing cost, not amplified) — cursor pagination is the production fix. The
 displayed on-chain `template_mint` number is a history field (→ ES); the overlay's ordinal is the
-order-faithful sort key. Compaction (fold overlay → fresh segment behind LIB, atomic mmap remap) is
-designed + reuses `AtomicBuilder`, not yet measured end-to-end.
+order-faithful sort key.
+
+## Compaction — BUILT + MEASURED (fold overlay → fresh segment, reclaim the RAM)
+
+Between compactions the overlay grows (~114 B/mutation); compaction folds the immutable base + the live
+overlay into a **fresh frozen segment** and resets the overlay to empty, so the store runs indefinitely.
+`LiveSeg::compact()` walks every base asset (applying the overlay's current owner/data, dropping
+tombstones) + the overlay's mints, and re-emits through the existing `AtomicBuilder` — so the fold
+inherits the hybrid-posting selection, `template_mint` re-rank, and sorted-table regeneration rather than
+reimplementing them. Reads keep serving from the old (base + overlay) during the fold; a server then
+atomically swaps in a fresh `LiveSeg` on the new segment (ArcSwap), and the old drops when its last reader
+finishes. Seal behind LIB so the folded base is fork-proof; deltas that arrive during the fold replay from
+the block-indexed WAL onto the new overlay (no "subtract the folded portion" guesswork).
+
+**Measured:**
+
+| | testnet 88.8M + 1M-mut overlay | mainnet 232M + 4M-mut overlay |
+|---|---|---|
+| fold time | **~65 s** | **382 s (6.4 min)** for 233.5M live assets — ~3× faster than the 18-min Mongo build (mmap, not a DB stream) |
+| new segment | 7464 MiB | 21,157 MiB (base − burns + mints) |
+| **equivalence** | **0 mismatches / 57,005 checks** | **0 mismatches / 60,000 checks** (point owners + owner counts + facet counts) |
+| **RAM reclaimed** | overlay heap **104 MB → 0** | overlay heap **396 MB → 0** |
+
+The new base ALONE answers identically to the old base+overlay — the fold is exact at full 232M scale.
+
+The equivalence check is the proof the fold is exact. It surfaced two real bugs, both fixed: the facet
+index was built mutable-first while the base builder is immutable-first (large facet drift), and a setdata
+arriving for an already-burned asset added a phantom to a facet (off-by-one). With both fixed, owner /
+transfer / burn / mint / facet are all exact at scale. A 5-way unit test (`compaction_folds_overlay_into_new_base`)
+plus the 232M scale run cover it.
+
+**Still not yet:** the in-process ArcSwap hot-swap + WAL-residual replay wired into a running server loop
+(the fold + equivalence + reclaim are proven; the swap is mechanical), and cursor pagination for deep pages.

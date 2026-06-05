@@ -205,6 +205,69 @@ impl AtomicBuilder {
         self.stats.assets += 1;
     }
 
+    // ── raw (already-decoded) push API — used by COMPACTION to fold the live overlay + immutable base
+    //    back into a fresh segment, reusing all of the posting / sorted / template_mint logic in
+    //    finish() instead of reimplementing it. Inputs are the on-segment forms (name-u64 keys,
+    //    (field_idx, value) attrs, precomputed facet keys), so no bson round-trip. ────────────────────
+    /// Register a schema format (its blob), keyed by `coll_schema_key`.
+    pub fn push_schema_raw(&mut self, schema_key: u64, fields: &[(String, String)]) {
+        self.schema_fwd
+            .push(schema_key, &encode_schema_format(fields));
+        self.stats.schemas += 1;
+    }
+
+    /// Register a template forward record (its immutable attrs, stored once).
+    pub fn push_template_raw(&mut self, template_id: i32, schema_u: u64, immutable: &[Attr]) {
+        self.tmpl_fwd.push(
+            template_key(template_id as i64),
+            &encode_template(template_id, schema_u, immutable),
+        );
+        self.stats.templates += 1;
+    }
+
+    /// Add one already-decoded current asset to the forward store + every inverted index. `facet_keys`
+    /// are the precomputed `data_attr_key`s the asset participates in (0 or 1 per configured facet).
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_asset_raw(
+        &mut self,
+        asset_id: u64,
+        owner_u: u64,
+        coll_u: u64,
+        schema_u: u64,
+        schema_key: u64,
+        template_id: i32,
+        block_num: u32,
+        immutable: &[Attr],
+        mutable: &[Attr],
+        facet_keys: &[u64],
+    ) {
+        let blob = encode_asset(
+            owner_u,
+            coll_u,
+            schema_u,
+            template_id,
+            block_num,
+            0,
+            immutable,
+            mutable,
+        );
+        self.asset_fwd.push(asset_id, &blob);
+        self.by_owner.entry(owner_u).or_default().push(asset_id);
+        self.by_coll.entry(coll_u).or_default().push(asset_id);
+        self.by_schema.entry(schema_key).or_default().push(asset_id);
+        if template_id >= 0 {
+            self.by_tmpl
+                .entry(template_key(template_id as i64))
+                .or_default()
+                .push(asset_id);
+        }
+        for &fk in facet_keys {
+            self.by_data.entry(fk).or_default().push(asset_id);
+        }
+        self.all_ids.push(asset_id);
+        self.stats.assets += 1;
+    }
+
     /// Decode a data subdocument into `(field_idx, canonical_value)` attrs, dropping fields not in the
     /// schema. Empty/absent → no attrs.
     fn attrs(&self, schema_key: u64, doc: Option<&Document>) -> Vec<Attr> {
