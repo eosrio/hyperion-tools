@@ -4,7 +4,9 @@
 //! token_holders=6, pub_keys=7, top_ram=8, top_stake=9, codehash=10) with the AtomicAssets state
 //! store: a columnar forward store keyed by `asset_id` plus per-dimension inverted indexes (sorted
 //! u64 posting lists), schema/template forward stores (so each template's immutable data is stored
-//! once), and presorted orderings. The full design is in `benchmark/atomicassets/WORMDB_STORE_DESIGN.md`.
+//! once), and presorted orderings. On-segment blob layouts live in `aa_binfmt.rs`; the live overlay +
+//! compaction design is in `benchmark/atomicassets/FRESHNESS_OVERLAY_DESIGN.md`, measured results in
+//! `benchmark/atomicassets/WSEG_RESULTS.md`.
 //!
 //! Keys are read back in WormDB's Zig reader, so the hash + name encoding MUST match byte-for-byte
 //! (`name::encode` ↔ `core/name.zig`, [`fnv1a64`] ↔ `name.zig` fnv1a64 / `builder::fnv1a64`).

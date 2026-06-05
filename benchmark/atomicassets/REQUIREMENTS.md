@@ -113,7 +113,7 @@ the hardest instance — solving it gives the state tier the faceted-query capab
 | full atomic state | **~692 GB** / DB total 1.27 TB | **24.3 GB** — ~28× |
 | build | days (action replay) | **38 min** (from snapshot) |
 
-Their 126 GB of assets indexes is mostly what we *don't* carry: ~half the rows are burned (we store live only) and ~36 GB are history-derived sort btrees (`minted/transferred/updated_at_time`, `template_mint`, `burned_by`) we serve from ES. Their attribute GIN (`gin((mutable||immutable)) WHERE <> '{}'`) is only **1.6 GB**. Our own indexes (15.9 GB) now exceed our data (8.4 GB) and dominate build time → motivates Track B (and near-term: defer/trim the wildcard). **Track B design + efficiency-proof plan: `WORMDB_STORE_DESIGN.md`.**
+Their 126 GB of assets indexes is mostly what we *don't* carry: ~half the rows are burned (we store live only) and ~36 GB are history-derived sort btrees (`minted/transferred/updated_at_time`, `template_mint`, `burned_by`) we serve from ES. Their attribute GIN (`gin((mutable||immutable)) WHERE <> '{}'`) is only **1.6 GB**. Our own indexes (15.9 GB) now exceed our data (8.4 GB) and dominate build time → motivates Track B (and near-term: defer/trim the wildcard). **Track B is built: measured results in `WSEG_RESULTS.md`; live overlay + compaction + cursor design in `FRESHNESS_OVERLAY_DESIGN.md`.**
 3. AtomicAssets API server over the state-store interface: state→Mongo, history→ES, cold→archive — **full endpoint parity**.
 4. Live freshness via Hyperion's existing delta→Mongo pipeline + the decoder (confirm how much it already indexes — §10).
 5. Market aggregation (Mongo pipeline + ES) + delphioracle; the tier-spanning endpoints.
