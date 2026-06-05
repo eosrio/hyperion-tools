@@ -11,9 +11,9 @@
 //! tombstoned. So stale entries in the immutable base postings are harmless, and transfer/burn need no
 //! base-posting surgery. Per-key `add`/`rem` roaring sets keep the base head dense and make counts exact.
 
+use parking_lot::RwLock;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
-use std::sync::RwLock;
 
 use memmap2::Mmap;
 use roaring::RoaringTreemap;
@@ -199,6 +199,7 @@ pub struct AssetLive {
     pub mutable: Vec<Attr>,
 }
 
+#[derive(Clone)]
 pub enum FwdState {
     Live(Box<AssetLive>),
     Tomb,
@@ -277,7 +278,7 @@ pub struct Prepared {
 }
 
 // ── the in-RAM overlay ─────────────────────────────────────────────────────────────────────────────
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Overlay {
     pub fwd: HashMap<u64, FwdState>,
     add: HashMap<(u8, u64), RoaringTreemap>,
@@ -307,6 +308,44 @@ impl Overlay {
     }
     fn rem_len(&self, dim: u8, key: u64) -> u64 {
         self.rem.get(&(dim, key)).map(|s| s.len()).unwrap_or(0)
+    }
+    pub fn hwm_block(&self) -> u32 {
+        self.hwm_block
+    }
+    /// Clone the serving state WITHOUT the WAL (the fold needs the state, not the log) — so a compaction
+    /// snapshot is cheap and doesn't copy hundreds of MB of deltas.
+    fn clone_state(&self) -> Overlay {
+        Overlay {
+            fwd: self.fwd.clone(),
+            add: self.add.clone(),
+            rem: self.rem.clone(),
+            tomb: self.tomb.clone(),
+            mint_seq: self.mint_seq.clone(),
+            sorted_id_adds: self.sorted_id_adds.clone(),
+            sorted_tmpl_adds: self.sorted_tmpl_adds.clone(),
+            hwm_block: self.hwm_block,
+            applied: self.applied,
+            wal: Vec::new(),
+        }
+    }
+    /// The compaction residual: WAL deltas with `block > after`, returning at most ~`max` entries but
+    /// always stopping on a BLOCK boundary (so a block is never split across two drains — which would
+    /// drop the tail of that block). Capping keeps the clone-under-read-lock short so a waiting writer
+    /// (and the readers queued behind it) aren't stalled by a multi-million-entry copy.
+    pub fn wal_after(&self, after: u32, max: usize) -> Vec<(u32, Delta)> {
+        let mut out: Vec<(u32, Delta)> = Vec::new();
+        let mut last: Option<u32> = None;
+        for (b, d) in self.wal.iter() {
+            if *b <= after {
+                continue;
+            }
+            if out.len() >= max && last != Some(*b) {
+                break; // past the cap and at a fresh block → stop on the boundary
+            }
+            out.push((*b, d.clone()));
+            last = Some(*b);
+        }
+        out
     }
 }
 
@@ -339,8 +378,8 @@ impl LiveSeg {
     pub fn base(&self) -> &BaseSeg {
         &self.base
     }
-    pub fn overlay(&self) -> std::sync::RwLockReadGuard<'_, Overlay> {
-        self.ov.read().unwrap()
+    pub fn overlay(&self) -> parking_lot::RwLockReadGuard<'_, Overlay> {
+        self.ov.read()
     }
     pub fn facet_fields(&self) -> &[String] {
         &self.facet_fields
@@ -501,19 +540,57 @@ impl LiveSeg {
     /// (In production the WAL is a disk append — no giant in-RAM realloc — and the forward map is sized
     /// to the expected post-LIB working set; this mirrors that.)
     pub fn reserve(&self, mutations: usize) {
-        let mut ov = self.ov.write().unwrap();
+        let mut ov = self.ov.write();
         ov.fwd.reserve(mutations);
         ov.wal.reserve(mutations);
     }
 
     /// Apply a prepared block under a brief write lock (pure in-RAM — no mmap).
     pub fn commit_block(&self, prepared: Prepared) {
-        let mut ov = self.ov.write().unwrap();
+        let mut ov = self.ov.write();
+        self.commit_into(&mut ov, prepared);
+    }
+
+    /// Apply a prepared block into an already-held overlay guard (lets the server swap-coordinate the
+    /// commit: take the write lock, verify the store still points here, then commit — all atomically).
+    pub fn commit_into(&self, ov: &mut Overlay, prepared: Prepared) {
         let block = prepared.block;
         for (d, facts) in prepared.items {
-            self.apply_resolved(&mut ov, block, d, facts);
+            self.apply_resolved(ov, block, d, facts);
         }
-        ov.hwm_block = block;
+        if block > ov.hwm_block {
+            ov.hwm_block = block;
+        }
+    }
+
+    /// Acquire the overlay write lock directly (the server holds it across a ptr-eq swap check).
+    pub fn write_overlay(&self) -> parking_lot::RwLockWriteGuard<'_, Overlay> {
+        self.ov.write()
+    }
+
+    /// Construct a fresh LiveSeg on an already-open base (the compacted segment) with an empty overlay.
+    pub fn from_base(base: BaseSeg, facet_fields: Vec<String>) -> LiveSeg {
+        let base_max_id = base
+            .sentinel_blob(TABLE_AA_SORTED_ID)
+            .map(|b| if rdu32(b, 0) > 0 { rdu64(b, 4) } else { 0 })
+            .unwrap_or(0);
+        LiveSeg {
+            base,
+            ov: RwLock::new(Overlay::default()),
+            facet_fields,
+            base_max_id,
+        }
+    }
+
+    /// Snapshot the overlay's serving state (WAL excluded) + its high-water block, for a lock-free fold.
+    pub fn snapshot_overlay(&self) -> (u32, Overlay) {
+        let ov = self.ov.read();
+        (ov.hwm_block, ov.clone_state())
+    }
+
+    /// The compaction residual: up to ~`max` WAL deltas with `block > after` (clone under the read lock).
+    pub fn wal_after(&self, after: u32, max: usize) -> Vec<(u32, Delta)> {
+        self.ov.read().wal_after(after, max)
     }
 
     /// Convenience: prepare (lock-free) + commit (locked) in one call. Used by the single-thread
@@ -863,7 +940,14 @@ impl LiveSeg {
     //    state. Reads keep serving from the OLD (base + overlay) until the caller atomically swaps in a
     //    fresh LiveSeg on the new segment (ArcSwap in a server). ───────────────────────────────────────
     pub fn compact(&self, out: &str) -> std::io::Result<AaStats> {
-        let ov = self.ov.read().unwrap();
+        let ov = self.ov.read();
+        self.compact_with(&ov, out)
+    }
+
+    /// Fold `self.base` + a GIVEN overlay snapshot into `out`. The server folds from a lock-free clone
+    /// (`snapshot_overlay`) so the SHiP applier keeps writing to the live overlay during the minutes-long
+    /// fold; reads keep serving from the current LiveSeg until the atomic ArcSwap.
+    pub fn compact_with(&self, ov: &Overlay, out: &str) -> std::io::Result<AaStats> {
         let facet_field = self.facet_fields.first().cloned().unwrap_or_default();
 
         // rarity field index per schema (so the asset loop doesn't re-decode the schema 232M times).
@@ -922,7 +1006,7 @@ impl LiveSeg {
 
     // ── fork rollback / recovery: replay the WAL up to `block` (clears derived state, re-applies) ──
     pub fn rollback_to(&self, block: u32) {
-        let mut ov = self.ov.write().unwrap();
+        let mut ov = self.ov.write();
         let wal = std::mem::take(&mut ov.wal);
         *ov = Overlay::default();
         for (b, d) in wal {
@@ -937,7 +1021,7 @@ impl LiveSeg {
 
     /// Overlay size accounting (for the RAM-vs-mutations measurement).
     pub fn overlay_stats(&self) -> (usize, usize, usize, u64, u64) {
-        let ov = self.ov.read().unwrap();
+        let ov = self.ov.read();
         let add_keys = ov.add.len();
         let rem_keys = ov.rem.len();
         let fwd = ov.fwd.len();
@@ -949,7 +1033,7 @@ impl LiveSeg {
     /// disk-resident in production). This is the real RAM cost — independent of the base mmap page
     /// cache that process RSS also counts.
     pub fn overlay_heap_bytes(&self) -> (u64, u64) {
-        let ov = self.ov.read().unwrap();
+        let ov = self.ov.read();
         let mut serving: u64 = 0;
         for st in ov.fwd.values() {
             serving += 24; // HashMap<u64, FwdState> entry (key + enum tag + ptr), approx

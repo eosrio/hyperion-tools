@@ -30,6 +30,11 @@ path = "src/bin/aa_probe.rs"
 name = "aa-live"
 path = "src/bin/aa_live.rs"
 
+# Live-serving daemon: ArcSwap-hosted store + SHiP applier + background compaction with hot-swap.
+[[bin]]
+name = "aa-server"
+path = "src/bin/aa_server.rs"
+
 [dependencies]
 tokio = { workspace = true }            # async runtime for the Mongo stream
 mongodb = { workspace = true }          # async driver — same version as light-api / snapshot-load
@@ -46,3 +51,8 @@ memmap2 = "0.9"
 memory-stats = "1"
 # Phase 2 experiment: roaring bitmaps for the inverted posting lists (compress + fast bitmap-AND).
 roaring = "0.10"
+# Live-serving daemon: lock-free RCU-style hot-swap of the whole LiveSeg on compaction.
+arc-swap = "1"
+# Overlay lock: reader-friendly RwLock (readers keep acquiring while a writer waits — so a compaction's
+# snapshot clone doesn't make readers queue behind the writer, as std's writer-priority SRWLock does).
+parking_lot = "0.12"

@@ -83,10 +83,17 @@ overlay. Measured at full scale (mainnet 232M base + 4M-mutation overlay): **fol
 faster than the 18-min Mongo build) → 21,157 MiB, the new base ALONE answers identically to old
 base+overlay (**0 mismatches / 60,000 checks**: point owners + owner counts + facet counts), and overlay
 heap **reclaimed 396 MB → 0**. The equivalence check caught + fixed two real bugs (facet
-immutable-vs-mutable ordering; a setdata phantom on a burned asset). **Not yet:** the
-in-process ArcSwap hot-swap into a running server loop (fold + reclaim proven; swap is mechanical) and
-cursor pagination for deep pages. This closes the "can't serve it live" gap: one mmap'd file, updated from
-chain head, compacted in place.
+immutable-vs-mutable ordering; a setdata phantom on a burned asset).
+
+**Live-serving daemon — BUILT + MEASURED.** `aa-server` runs it continuously: one `ArcSwap<LiveSeg>` with
+a swap-safe SHiP applier, lock-free readers, and a background compactor (snapshot → fold → WAL-residual
+replay → atomic swap). Measured (testnet 88.8M, 30k deltas/s writer, 4 readers, 150 s): **2–3 hot-swaps**
+in one run with the writer **never paused**, **readers 1.6M req/s continuous** through every swap (p50
+700 ns, p99 4.6 µs), swap stall **~11 ms**, **0 stale** after multiple swaps + live ingest, overlay
+reclaimed each cycle. One rough edge: the per-compaction snapshot clone is O(overlay size) (~1 ms/MB → one
+reader blip per compaction); an O(1) structural-sharing snapshot removes it. **Not yet:** that O(1)
+snapshot + cursor pagination for deep pages. This closes the "can't serve it live" gap: one mmap'd file,
+updated from chain head, compacted in place, hot-swapped without stopping reads.
 
 ## The honest read
 

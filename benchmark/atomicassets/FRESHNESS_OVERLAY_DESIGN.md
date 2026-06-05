@@ -142,5 +142,33 @@ arriving for an already-burned asset added a phantom to a facet (off-by-one). Wi
 transfer / burn / mint / facet are all exact at scale. A 5-way unit test (`compaction_folds_overlay_into_new_base`)
 plus the 232M scale run cover it.
 
-**Still not yet:** the in-process ArcSwap hot-swap + WAL-residual replay wired into a running server loop
-(the fold + equivalence + reclaim are proven; the swap is mechanical), and cursor pagination for deep pages.
+## Server loop — BUILT + MEASURED (the live-serving daemon)
+
+`aa-server` wires it into a continuously-running daemon: one `ArcSwap<LiveSeg>` with three concurrent
+roles. **WRITER** (the SHiP applier) applies blocks to the current overlay, *swap-safe* — it re-targets
+the new segment if a compaction landed between resolving base facts and taking the write lock (a ptr-eq
+check), so no delta lands on an orphaned overlay and none is double-applied. **READERS** serve via
+`ArcSwap::load` — lock-free, never blocked by the writer or a swap. **COMPACTOR**, when the overlay
+passes a heap threshold: snapshots it, folds base+snapshot → a fresh segment in the background (minutes,
+no locks), replays the WAL residual that accrued during the fold in bounded whole-block drains, then takes
+the old overlay's write lock just long enough to replay a small final tail and `ArcSwap::store` the new
+segment. The overlay lock is `parking_lot::RwLock` (readers keep acquiring while a writer waits).
+
+**Measured (testnet 88.8M base, writer 30k deltas/s, 4 readers, 150 s, compact at 30 MB overlay):**
+
+| | result |
+|---|---|
+| hot-swaps | **2–3 completed** in one continuous run, writer **never paused** (~29k/s sustained through every 60 s background fold) |
+| readers | **1.6M req/s** across 4 threads, **continuous** through every swap — p50 700 ns / p99 4.6 µs / p999 8.6 µs |
+| swap stall | **~11 ms** (final tail-replay under the write lock) — the only writer-visible blocking |
+| **correctness** | **0 stale** across ~500k page entries on the live store *after* multiple hot-swaps + ongoing ingest |
+| RAM | overlay reclaimed to ~0 each cycle (sawtooth); no leak across swaps |
+
+**One honest rough edge:** the per-compaction *snapshot clone* is O(overlay size) ≈ **1 ms/MB** (30 MB →
+31 ms, 204 MB → 221 ms) and shows up as a single reader-latency blip per compaction (p50/p99/p999 are
+untouched). Keeping the overlay small (lower threshold / faster per-domain fold) keeps it ~30 ms; an
+**O(1) structural-sharing snapshot** (persistent map) removes it entirely — the documented next optimization.
+In this stress demo compaction fires every ~60 s; at realistic SHiP rates it's hours apart, so the blip is
+rare in production.
+
+**Still not yet:** the O(1) snapshot (above), and cursor pagination for deep pages.

@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hyperion 4.5 — Unified Multi-API Serving</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --bg2:#0e1424; --card:#131a2c; --card2:#172037; --line:#243049;
+    --ink:#e7ecf5; --dim:#9fb0cc; --faint:#6b7a99;
+    --node:#f5a623; --ship:#22d3ee; --state:#34d399; --hist:#a78bfa; --cold:#94a3b8; --api:#fb7185;
+    --proven:#34d399; --planned:#f5a623;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 800px at 70% -10%,#16203a 0%,var(--bg) 55%);
+       color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--ship);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+  header.hero{padding:64px 0 30px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--ship)}
+  h1{font-size:clamp(30px,5vw,52px);line-height:1.06;margin:14px 0 10px;font-weight:800;letter-spacing:-.02em}
+  h1 .grad{background:linear-gradient(90deg,#34d399,#22d3ee 45%,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:18.5px;color:var(--dim);max-width:820px}
+  .lede b{color:var(--ink);font-weight:600}
+  .tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px}
+  .tag{font-family:var(--mono);font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;color:var(--dim);background:var(--bg2)}
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin:0 0 6px}
+  h2 + .h2sub{font-size:24px;font-weight:700;margin:0 0 26px;letter-spacing:-.01em}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-top:14px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px;text-transform:uppercase;vertical-align:middle}
+  .b-proven{color:#062b1c;background:var(--proven)}
+  .b-planned{color:#2b1d05;background:var(--planned)}
+
+  /* layered architecture */
+  .stack{display:flex;flex-direction:column;gap:0;position:relative}
+  .flowlabel{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:center;padding:7px 0}
+  .row{display:grid;gap:14px}
+  .r-api{grid-template-columns:repeat(4,1fr)}
+  .r-tier{grid-template-columns:1.05fr 1.5fr 1.15fr 0.95fr}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 16px 15px;position:relative;overflow:hidden}
+  .box::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,#3a4a6b)}
+  .box h3{margin:0 0 4px;font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .box .role{font-family:var(--mono);font-size:11px;color:var(--accent,#7d8db0);letter-spacing:.04em;text-transform:uppercase}
+  .box p{margin:7px 0 0;font-size:13px;color:var(--dim)}
+  .box ul{margin:8px 0 0;padding-left:16px;font-size:12.5px;color:var(--dim)}
+  .box ul li{margin:2px 0}
+  .api .box{background:linear-gradient(180deg,#1a1426,#141022);border-color:#3a2740}
+  .gateway{margin:14px 0;background:linear-gradient(90deg,#181f33,#1c2540);border:1px dashed #34507a;border-radius:12px;
+           text-align:center;padding:14px;font-weight:600;font-size:15px}
+  .gateway span{font-family:var(--mono);font-size:12px;color:var(--ship);display:block;margin-top:3px;font-weight:400;letter-spacing:.03em}
+  .spine{margin-top:14px;background:linear-gradient(90deg,rgba(34,211,238,.12),rgba(34,211,238,.05));
+         border:1px solid #1d566b;border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .spine .s-ic{font-size:22px}
+  .spine b{color:var(--ship)}
+  .arrow{color:var(--faint);text-align:center;font-size:15px;padding:2px 0}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .stat .n{font-size:25px;font-weight:800;letter-spacing:-.01em}
+  .stat .n.s{color:var(--state)}
+  .stat .l{font-size:12.5px;color:var(--dim);margin-top:3px}
+  .stat .k{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)}
+  td .pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .t-state{color:#06291c;background:var(--state)}
+  .t-hist{color:#1a1430;background:var(--hist)}
+  .t-node{color:#2b1d05;background:var(--node)}
+  .t-cold{color:#0c1320;background:var(--cold)}
+  tr:hover td{background:rgba(255,255,255,.015)}
+
+  /* state-tier zoom */
+  .zoom{background:linear-gradient(180deg,#0f1729,#0c1322);border:1px solid #1d3a30;border-radius:16px;padding:22px}
+  .seg{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:stretch}
+  .panel{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:15px}
+  .panel h4{margin:0 0 9px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .ns{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+  .nsrow{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;background:#0e1626;border:1px solid var(--line);
+         border-radius:8px;padding:8px 11px}
+  .nsrow .ids{font-family:var(--mono);color:var(--faint);font-size:11px}
+  .nsrow .nm{font-weight:600}
+  .loop{display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--dim)}
+  .loop .step{display:flex;gap:9px;align-items:flex-start}
+  .loop .step b{color:var(--ink)}
+  .loop .num{font-family:var(--mono);font-size:11px;color:var(--state);border:1px solid #1d3a30;border-radius:6px;
+             padding:1px 6px;flex:none;margin-top:1px}
+
+  .note{font-size:12.5px;color:var(--faint);margin-top:14px}
+  footer{padding:34px 0 60px;color:var(--faint);font-size:12.5px}
+  .kbd{font-family:var(--mono);background:var(--bg2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px;color:var(--dim)}
+  @media(max-width:880px){
+    .r-api{grid-template-columns:1fr 1fr}.r-tier{grid-template-columns:1fr}.g2,.g3,.g4{grid-template-columns:1fr 1fr}
+    .seg{grid-template-columns:1fr}
+  }
+  @media(max-width:560px){.g2,.g3,.g4,.r-api{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Hyperion 4.5 · Architecture Vision</div>
+    <h1>One stack serves <span class="grad">every Antelope API shape</span><br/>— each datum stored once.</h1>
+    <p class="lede">
+      A Hyperion operator already runs <b>nodeos</b>, <b>Elasticsearch</b>, and (since 4.0) <b>MongoDB</b>.
+      Hyperion 4.5's goal: make that same infrastructure answer <b>Hyperion v2 history</b>, the
+      <b>Light API</b>, <b>AtomicAssets</b>, and native <b>chain&nbsp;v1</b> reads — without standing up a
+      second database per app, and without storing any datum twice. State lives in the state tier; history
+      lives in search; one SHiP feed keeps them current.
+    </p>
+    <div class="tags">
+      <span class="tag">nodeos</span><span class="tag">SHiP reader</span><span class="tag">WormDB state tier</span>
+      <span class="tag">Elasticsearch history</span><span class="tag">archive-server</span>
+      <span class="tag">snapshot-load bootstrap</span>
+    </div>
+    <div class="legend">
+      <span><span class="badge b-proven">proven</span> built &amp; measured in this repo</span>
+      <span><span class="badge b-planned">planned</span> the 4.5 target — designed, not yet wired</span>
+    </div>
+  </header>
+
+  <!-- ARCHITECTURE -->
+  <section>
+    <h2>The shape of it</h2>
+    <div class="h2sub">Consumers → one gateway → the right tier for each access pattern</div>
+
+    <div class="stack">
+      <!-- API shapes -->
+      <div class="row r-api api">
+        <div class="box" style="--accent:var(--api)">
+          <div class="role">API shape</div><h3>Hyperion v2</h3>
+          <p>get_actions, get_deltas, get_transaction, history search &amp; aggregations.</p>
+        </div>
+        <div class="box" style="--accent:var(--api)">
+          <div class="role">API shape</div><h3>Light API</h3>
+          <p>balances, account, topholders, rex, /key, /codehash, sync.</p>
+        </div>
+        <div class="box" style="--accent:var(--api)">
+          <div class="role">API shape</div><h3>AtomicAssets</h3>
+          <p>assets, templates, collections, schemas, market — filtered &amp; sorted.</p>
+        </div>
+        <div class="box" style="--accent:var(--api)">
+          <div class="role">API shape</div><h3>Chain v1</h3>
+          <p>get_table_rows, get_account, get_currency_balance.</p>
+        </div>
+      </div>
+
+      <div class="arrow">▼</div>
+      <div class="gateway">
+        Unified API gateway — routes each request to the tier built for its access pattern
+        <span>state → WormDB/Mongo · history → Elasticsearch · cold → archive-server · head → nodeos</span>
+      </div>
+      <div class="arrow">▼</div>
+
+      <!-- Tiers -->
+      <div class="flowlabel">— SERVING TIERS —</div>
+      <div class="row r-tier">
+        <div class="box" style="--accent:var(--node)">
+          <div class="role">Chain head</div>
+          <h3>nodeos <span class="badge b-proven">proven</span></h3>
+          <p>Live head, push transactions, the authority the SHiP feed streams from.</p>
+        </div>
+
+        <div class="box" style="--accent:var(--state)">
+          <div class="role">State tier</div>
+          <h3>WormDB <span style="color:var(--faint);font-weight:400">/ Mongo</span> <span class="badge b-proven">proven</span></h3>
+          <p>Current contract-table <b>state</b>, one mmap'd file with namespaced tables — serves Light API,
+             AtomicAssets state &amp; chain v1 from one store. Live overlay + compaction.</p>
+          <ul>
+            <li>Track A — Mongo (in-stack today)</li>
+            <li>Track B — WormDB <span style="color:var(--state)">.wseg</span> (the speed/size upgrade)</li>
+          </ul>
+        </div>
+
+        <div class="box" style="--accent:var(--hist)">
+          <div class="role">History / search</div>
+          <h3>Elasticsearch <span class="badge b-proven">proven</span></h3>
+          <p>Hyperion v2 actions + deltas, AtomicAssets logs / transfers / sales-history, token transfer
+             history, time-series aggregations.</p>
+        </div>
+
+        <div class="box" style="--accent:var(--cold)">
+          <div class="role">Cold payloads</div>
+          <h3>archive-server <span class="badge b-planned">planned</span></h3>
+          <p>Frozen SHiP-log payloads on demand, behind ES — no DB, fetched only when a cold body is asked for.</p>
+        </div>
+      </div>
+
+      <!-- spine -->
+      <div class="spine">
+        <span class="s-ic">🜂</span>
+        <div style="flex:1;min-width:240px">
+          <b>One shared SHiP reader</b> <span class="badge b-proven">proven</span>
+          &nbsp;— <span style="color:var(--dim)">decodes every block's contract-table deltas once and fans them to each tier:
+          token/system rows → Light-API state · atomicassets rows → AA state · everything historical → ES.
+          <b style="color:var(--ink)">This is what "same state history" means</b> — literally one feed.</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:11.5px;color:var(--faint);min-width:200px">
+          snapshot-load <span class="badge b-proven">proven</span><br/>
+          bootstraps every tier from a chain snapshot (no action-trace replay)
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      The one rule that wins on <b>both</b> storage and speed: history is never re-stored in the state tier,
+      and state is never stored in history. Each query routes to the tier built for its access pattern.
+    </p>
+  </section>
+
+  <!-- ROUTING MATRIX -->
+  <section>
+    <h2>Routing</h2>
+    <div class="h2sub">Every endpoint family maps to exactly one tier</div>
+    <table>
+      <thead><tr><th style="width:34%">Request family</th><th style="width:20%">Tier</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>AA <code>/assets</code> <code>/templates</code> <code>/collections</code> (filter+sort)</td>
+            <td><span class="pill t-state">WormDB state</span></td>
+            <td>Faceted point/range/sort over current state — sub-µs, in-process.</td></tr>
+        <tr><td>Light API <code>/balances</code> <code>/account</code> <code>/topholders</code></td>
+            <td><span class="pill t-state">WormDB state</span></td>
+            <td>Token balances + resources are current contract-table state.</td></tr>
+        <tr><td>Chain v1 <code>get_table_rows</code> / <code>get_account</code></td>
+            <td><span class="pill t-state">WormDB state</span> <span class="pill t-node">nodeos</span></td>
+            <td>Generic contract-table reads from the same state store; head from nodeos.</td></tr>
+        <tr><td>Hyperion v2 <code>get_actions</code> / <code>get_deltas</code></td>
+            <td><span class="pill t-hist">Elasticsearch</span></td>
+            <td>History &amp; search — time-ordered, aggregations.</td></tr>
+        <tr><td>AA <code>/logs</code> <code>/transfers</code> <code>/sales-history</code></td>
+            <td><span class="pill t-hist">Elasticsearch</span></td>
+            <td>Event history — already what Hyperion indexes.</td></tr>
+        <tr><td>AA fields like <code>minted_at</code>, sales price history</td>
+            <td><span class="pill t-hist">Elasticsearch</span> <span class="pill t-state">+ state</span></td>
+            <td>State filters/sorts/paginates → one batched ES hydrate per page (cached).</td></tr>
+        <tr><td>Cold raw payloads (old action/delta bodies)</td>
+            <td><span class="pill t-cold">archive-server</span></td>
+            <td>Frozen SHiP logs, fetched on demand — no DB cost.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- STATE TIER ZOOM -->
+  <section>
+    <h2>The state tier, up close</h2>
+    <div class="h2sub">One WormDB segment, many API namespaces — live from chain head, compacted in place</div>
+
+    <div class="zoom">
+      <div class="seg">
+        <div class="panel">
+          <h4>🗂 One <span style="color:var(--state)">.wseg</span> file — namespaced tables</h4>
+          <p style="font-size:12.5px;color:var(--dim);margin:0 0 6px">
+            A single memory-mapped, columnar file. The table-ID space is partitioned so multiple API
+            domains share one reader — add a namespace, not a database.
+          </p>
+          <div class="ns">
+            <div class="nsrow"><span class="nm" style="color:#7fd1ff">Light API state</span><span class="ids">tables 0–10 · <span class="badge b-proven">proven</span></span></div>
+            <div class="nsrow"><span class="nm" style="color:var(--state)">AtomicAssets state</span><span class="ids">tables 11–21 · <span class="badge b-proven">proven</span></span></div>
+            <div class="nsrow"><span class="nm" style="color:#c9b6ff">Chain-v1 / generic tables</span><span class="ids">reserved · <span class="badge b-planned">planned</span></span></div>
+            <div class="nsrow"><span class="nm" style="color:#ffd9a0">AtomicMarket</span><span class="ids">reserved · <span class="badge b-planned">planned</span></span></div>
+          </div>
+          <p class="note" style="margin-top:12px">
+            Forward store keyed by id + per-dimension inverted posting lists (owner / collection / schema /
+            template / data-facet) + presorted orderings — hybrid roaring postings. Served embedded
+            (no IPC), each datum once.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h4>♻️ Live + self-compacting</h4>
+          <div class="loop">
+            <div class="step"><span class="num">1</span><div><b>Frozen base</b> — immutable, mmap'd, read by binary search.</div></div>
+            <div class="step"><span class="num">2</span><div><b>Freshness overlay</b> — the SHiP feed applies mint/transfer/burn/setdata; reads merge base + overlay. The forward record is the sole arbiter, so stale postings are harmless.</div></div>
+            <div class="step"><span class="num">3</span><div><b>Two-phase apply</b> — base reads lock-free, a brief in-RAM commit → freshness lag in <i>hundreds of µs</i>, readers never stalled.</div></div>
+            <div class="step"><span class="num">4</span><div><b>Compaction</b> — fold base + overlay → a fresh segment in the background, then an atomic <span class="kbd">ArcSwap</span> hot-swap. Overlay RAM reclaimed; readers keep serving.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROVEN NUMBERS -->
+  <section>
+    <h2>What we proved possible</h2>
+    <div class="h2sub">Measured on WAX mainnet — the AtomicAssets state tier (richest query surface), end to end</div>
+
+    <div class="grid g4">
+      <div class="stat"><div class="k">on-disk state</div><div class="n s">21 GB</div><div class="l">232M live assets — below Mongo's 24.3 GB, vs ~692 GB on the incumbent Postgres stack</div></div>
+      <div class="stat"><div class="k">read latency</div><div class="n s">sub-µs</div><div class="l">point / facet / collection page-1, embedded mmap; 150k–887k req/s single thread</div></div>
+      <div class="stat"><div class="k">bootstrap</div><div class="n s">38 min</div><div class="l">snapshot → fully indexed; 0 decode errors; 200/200 parity vs the live API</div></div>
+      <div class="stat"><div class="k">stored once</div><div class="n s">~28×</div><div class="l">less storage than eosio-contract-api — no burned rows, no history in the state tier</div></div>
+    </div>
+
+    <div style="height:16px"></div>
+    <h2 style="color:var(--state)">Live serving — the chain head, not a frozen snapshot</h2>
+    <div class="grid g4">
+      <div class="stat"><div class="k">apply rate</div><div class="n s">370k/s</div><div class="l">mutations applied single-thread — ~37× a SHiP burst</div></div>
+      <div class="stat"><div class="k">freshness lag</div><div class="n s">~276 µs</div><div class="l">commit hold (p50); reads stay sub-µs with the overlay active</div></div>
+      <div class="stat"><div class="k">concurrent</div><div class="n s">557k req/s</div><div class="l">readers served while a writer ingested — p50 ~1 µs</div></div>
+      <div class="stat"><div class="k">correctness</div><div class="n s">0 stale</div><div class="l">page-merge invariant across 38,974 page entries at scale</div></div>
+    </div>
+
+    <div style="height:16px"></div>
+    <h2 style="color:var(--state)">Compaction &amp; hot-swap — runs forever</h2>
+    <div class="grid g4">
+      <div class="stat"><div class="k">fold (232M)</div><div class="n s">6.4 min</div><div class="l">base+overlay → fresh segment — ~3× faster than the original build (mmap, not a DB stream)</div></div>
+      <div class="stat"><div class="k">fold equivalence</div><div class="n s">0 / 60k</div><div class="l">the new base alone answers identically — mismatches across 60,000 checks</div></div>
+      <div class="stat"><div class="k">RAM reclaimed</div><div class="n s">396 → 0 MB</div><div class="l">overlay heap freed on swap; the rest is evictable page cache</div></div>
+      <div class="stat"><div class="k">daemon readers</div><div class="n s">3.68M req/s</div><div class="l">lock-free across hot-swaps; reader stall = a brief per-swap tail-replay, not the fold</div></div>
+    </div>
+
+    <p class="note">
+      All of the above is the AtomicAssets instance of a <b>domain-generic</b> mechanism: immutable base +
+      freshness overlay + ArcSwap compaction. The same machinery hosts the Light-API overlay and chain-v1
+      tables in the same segment — that generalization is the remaining 4.5 integration work.
+    </p>
+  </section>
+
+  <!-- ROADMAP -->
+  <section>
+    <h2>From here to the unified server</h2>
+    <div class="h2sub">What's proven, and what closes the loop</div>
+    <div class="grid g2">
+      <div class="panel">
+        <h4 style="color:var(--proven)">✓ Proven</h4>
+        <ul style="font-size:13px;color:var(--dim);line-height:1.7">
+          <li>atomicdata decoder — byte-exact, 77/77 live schemas, 200/200 parity</li>
+          <li>snapshot-load presets (AtomicAssets + AtomicMarket + Light-API shapes)</li>
+          <li>AtomicAssets WormDB store: 21 GB, sub-µs faceted reads</li>
+          <li>live freshness overlay — apply chain head, reads stay sub-µs</li>
+          <li>compaction + ArcSwap hot-swap daemon — runs continuously</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4 style="color:var(--planned)">→ Planned (the 4.5 target)</h4>
+        <ul style="font-size:13px;color:var(--dim);line-height:1.7">
+          <li>one segment carrying both Light-API <i>and</i> AtomicAssets namespaces</li>
+          <li>one applier routing both contract domains off the shared SHiP feed</li>
+          <li>the live overlay generalized to the Light-API domain (token/permission deltas)</li>
+          <li>cursor pagination for deep pages; AtomicMarket + range indexes</li>
+          <li>one HTTP gateway exposing all four API shapes over the same store</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    Hyperion 4.5 unified serving — vision page. Proven numbers from
+    <span class="kbd">benchmark/atomicassets/WSEG_RESULTS.md</span> and
+    <span class="kbd">FRESHNESS_OVERLAY_DESIGN.md</span>. State in WormDB/Mongo · history in Elasticsearch ·
+    cold in archive-server · head in nodeos — one SHiP feed, each datum stored once.
+  </footer>
+
+</div>
+</body>
+</html>
