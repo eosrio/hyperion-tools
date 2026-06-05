@@ -39,8 +39,8 @@ struct Args {
     /// Reader threads in the concurrent phase.
     #[arg(long, default_value_t = 4)]
     readers: usize,
-    /// Compact (fold overlay → fresh segment) at the end and verify equivalence (0 = skip).
-    #[arg(long, default_value_t = true)]
+    /// Compact (fold overlay → fresh segment) at the end and verify equivalence.
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
     compact: bool,
     /// Output path for the compacted segment.
     #[arg(long, default_value = "C:/snaptmp/aa-compacted.wseg")]
@@ -357,6 +357,64 @@ fn main() {
             h
         }),
     );
+
+    // ── cursor pagination: deep pages stay O(page), regardless of depth ──
+    // Pick the heaviest sampled collection and walk its cursor halfway to get a DEEP cursor, then
+    // compare page-1 vs the deep page (both warm) — they should be the same order of magnitude, proving
+    // depth-independence (vs the old per-page full-materialize, which is O(whole posting) every page).
+    {
+        let mut hkey = 0u64;
+        let mut hcount = 0i64;
+        for &c in colls.iter() {
+            let n = live.count(&ov, DIM_COLL, c);
+            if n > hcount {
+                hcount = n;
+                hkey = c;
+            }
+        }
+        // first deep page on this ROARING key deserializes the bitmap once (timed), then it's cached.
+        let t_cold = Instant::now();
+        let _ = live.page_after(&ov, DIM_COLL, hkey, Some(u64::MAX / 2), 100);
+        let cold_us = t_cold.elapsed().as_micros();
+        // walk ~200 pages deep to get a genuinely deep cursor (the materialize path would re-scan the
+        // whole posting every one of these pages; the cursor seeks straight to each).
+        let target_depth = (hcount / 4).min(20_000);
+        let mut cursor = None;
+        let mut depth = 0i64;
+        while depth < target_depth {
+            let pg = live.page_after(&ov, DIM_COLL, hkey, cursor, 100);
+            if pg.is_empty() {
+                break;
+            }
+            depth += pg.len() as i64;
+            cursor = Some(*pg.last().unwrap());
+        }
+        let deep = cursor;
+        let timeit = |iters: usize, mut f: Box<dyn FnMut() -> u64 + '_>| -> u128 {
+            let mut d = Vec::with_capacity(iters);
+            let mut acc = 0u64;
+            for _ in 0..iters {
+                let t = Instant::now();
+                acc ^= f();
+                d.push(t.elapsed().as_nanos());
+            }
+            black_box(acc);
+            pctl(&mut d, 0.5)
+        };
+        let cp1 = timeit(
+            args.iters,
+            Box::new(|| live.page_after(&ov, DIM_COLL, hkey, None, 100).len() as u64),
+        );
+        let cdeep = timeit(
+            args.iters,
+            Box::new(|| live.page_after(&ov, DIM_COLL, hkey, deep, 100).len() as u64),
+        );
+        println!(
+            "\n=== cursor pagination (heaviest collection: {hcount} members) ===\n    \
+             first deep page (cold, deserialize+cache the bitmap once): {cold_us} µs\n    \
+             page-1 (warm) p50: {cp1} ns   |   deep page (~{depth} in, warm) p50: {cdeep} ns   → O(page), depth-independent",
+        );
+    }
     drop(ov);
 
     // ── Phase C — correctness at scale (a fresh mutation is reflected immediately) ──

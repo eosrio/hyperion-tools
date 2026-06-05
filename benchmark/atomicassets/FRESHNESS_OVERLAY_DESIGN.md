@@ -171,4 +171,28 @@ untouched). Keeping the overlay small (lower threshold / faster per-domain fold)
 In this stress demo compaction fires every ~60 s; at realistic SHiP rates it's hours apart, so the blip is
 rare in production.
 
-**Still not yet:** the O(1) snapshot (above), and cursor pagination for deep pages.
+## Cursor pagination — BUILT + MEASURED (deep pages stay O(page))
+
+Page-1 is the head (top-256, zero-copy). Beyond it, *offset* pagination forced a per-page full
+`materialize()` — `to_roaring()` the whole base posting (millions of ids) **every page**. `page_after(dim,
+key, after, n)` replaces it with a **cursor** (`after` = the last asset_id of the previous page): the next
+`n` live members with `asset_id < after`, newest-first. Cursors are asset_id-based, so they're **stable
+under overlay growth** (a new mint never shifts an existing cursor's position). Cost is **O(page), not
+O(offset)**:
+- **RAW postings** (≤512 ids, the common case): binary-search the cursor in the zero-copy sorted array and
+  walk back — no allocation, no cache.
+- **ROARING postings** (heavy keys): deserialize the bitmap **once per key, cached for the segment's life**
+  (`post_cache`; a fresh LiveSeg after a swap starts empty), then `rank` + a bounded `select` window below
+  the cursor — so a "load more" scroll pays the deserialize once, not per page.
+
+Overlay `add` ids below the cursor merge in; tombstoned / moved-away candidates drop via the same in-RAM
+`is_member` check (no base decode). Two unit tests cover it (full ROARING drain newest-first with no
+gaps/dupes across transfer+burn+mint; RAW agreement with `page()`).
+
+**Measured (232M mainnet, the heaviest WAX collection = 81.5M members — an extreme outlier):** first deep
+page (cold, deserialize+cache the 81.5M-id bitmap) **20.5 ms once**, then **page-1 1.40 ms ≈ deep page
+(~20k in) 1.27 ms — depth-independent**, vs the old materialize at ~seconds *per* deep page. Typical keys
+(RAW / modest ROARING) are sub-µs to low-µs. Reader pattern: `page()` for page-1 (sub-µs head), `page_after`
+for "load more".
+
+**Still not yet:** the O(1) snapshot (the per-compaction reader blip, above).

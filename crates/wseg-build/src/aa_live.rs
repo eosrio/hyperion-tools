@@ -11,9 +11,10 @@
 //! tombstoned. So stale entries in the immutable base postings are harmless, and transfer/burn need no
 //! base-posting surgery. Per-key `add`/`rem` roaring sets keep the base head dense and make counts exact.
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
+use std::sync::Arc;
 
 use memmap2::Mmap;
 use roaring::RoaringTreemap;
@@ -357,6 +358,10 @@ pub struct LiveSeg {
     facet_fields: Vec<String>,
     /// the largest asset_id observed (base max); new synthetic mints continue from here.
     pub base_max_id: u64,
+    /// Deserialized base ROARING postings, cached per (table, key) for this segment's life (the base is
+    /// immutable) — so deep cursor pages on a heavy key deserialize the bitmap once, not per page. A fresh
+    /// LiveSeg (post-compaction swap) starts with an empty cache. (POC: unbounded; production = LRU-capped.)
+    post_cache: Mutex<HashMap<(u32, u64), Arc<RoaringTreemap>>>,
 }
 
 impl LiveSeg {
@@ -372,6 +377,7 @@ impl LiveSeg {
             ov: RwLock::new(Overlay::default()),
             facet_fields,
             base_max_id,
+            post_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -579,6 +585,7 @@ impl LiveSeg {
             ov: RwLock::new(Overlay::default()),
             facet_fields,
             base_max_id,
+            post_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -892,6 +899,141 @@ impl LiveSeg {
         ids
     }
 
+    /// In-RAM membership test for a candidate id under `key` (no base decode): a candidate absent from
+    /// the overlay is still a member of its base key; an overlay-touched one needs a field compare.
+    fn is_member(&self, ov: &Overlay, dim: u8, key: u64, id: u64) -> bool {
+        match ov.fwd.get(&id) {
+            None => true,
+            Some(FwdState::Tomb) => false,
+            Some(FwdState::Live(a)) => self.live_key(a, dim) == Some(key),
+        }
+    }
+
+    /// The deserialized base ROARING posting for (table, key), cached for this segment's life (the base
+    /// is immutable). Deserializes outside the lock; a racing thread's copy is discarded.
+    fn base_roaring(&self, table: u32, key: u64) -> Arc<RoaringTreemap> {
+        if let Some(rt) = self.post_cache.lock().get(&(table, key)) {
+            return rt.clone();
+        }
+        let rt = Arc::new(
+            self.base
+                .lookup(table, key)
+                .map(|b| Posting::parse(b).to_roaring())
+                .unwrap_or_default(),
+        );
+        self.post_cache
+            .lock()
+            .entry((table, key))
+            .or_insert(rt)
+            .clone()
+    }
+
+    /// The largest `want` BASE ids strictly less than `cursor`, descending. RAW = zero-copy binary-search
+    /// + walk-back; ROARING = rank/select on the cached bitmap — bounded, not a per-page full scan.
+    fn base_below(&self, table: u32, key: u64, cursor: u64, want: usize) -> Vec<u64> {
+        let Some(blob) = self.base.lookup(table, key) else {
+            return Vec::new();
+        };
+        match Posting::parse(blob) {
+            Posting::Raw(pl) => {
+                // lower_bound: first index whose value >= cursor; everything before it is < cursor.
+                let (mut lo, mut hi) = (0usize, pl.len);
+                while lo < hi {
+                    let m = (lo + hi) / 2;
+                    if pl.get(m) < cursor {
+                        lo = m + 1;
+                    } else {
+                        hi = m;
+                    }
+                }
+                let mut out = Vec::with_capacity(want.min(lo));
+                let mut i = lo;
+                while i > 0 && out.len() < want {
+                    i -= 1;
+                    out.push(pl.get(i)); // strictly < cursor, descending
+                }
+                out
+            }
+            Posting::Roaring { .. } => {
+                let rt = self.base_roaring(table, key);
+                // r = #values < cursor; select(r-1) is the largest < cursor, walking down = descending.
+                let r = rt.rank(cursor.saturating_sub(1));
+                let mut out = Vec::with_capacity(want);
+                let mut k = r;
+                while k > 0 && out.len() < want {
+                    k -= 1;
+                    if let Some(v) = rt.select(k) {
+                        out.push(v);
+                    }
+                }
+                out
+            }
+        }
+    }
+
+    /// Candidate ids (base ∪ overlay-add) strictly below `cursor`, descending + deduped, up to `want`.
+    fn candidates_below(
+        &self,
+        ov: &Overlay,
+        dim: u8,
+        table: u32,
+        key: u64,
+        cursor: u64,
+        want: usize,
+    ) -> Vec<u64> {
+        let mut cand = self.base_below(table, key, cursor, want);
+        if let Some(s) = ov.add.get(&(dim, key)) {
+            for v in s.iter() {
+                if v < cursor {
+                    cand.push(v);
+                }
+            }
+        }
+        cand.sort_unstable_by(|a, b| b.cmp(a));
+        cand.dedup();
+        cand.truncate(want);
+        cand
+    }
+
+    /// CURSOR PAGINATION — the next `n` live members of `key`, newest-first, with asset_id < `after`
+    /// (`after = None` → the newest page). Stable under overlay growth (asset_ids never move), and
+    /// O(page) on a hot key — RAW walk-back / ROARING rank+select on the cached bitmap — instead of the
+    /// per-page full materialize. The returned slice's last id is the cursor for the next page.
+    pub fn page_after(
+        &self,
+        ov: &Overlay,
+        dim: u8,
+        key: u64,
+        after: Option<u64>,
+        n: usize,
+    ) -> Vec<u64> {
+        let table = table_for_dim(dim);
+        let mut out = Vec::with_capacity(n);
+        let mut cursor = after.unwrap_or(u64::MAX);
+        // pull desc candidates below the cursor in bounded chunks, validating, until n live or exhausted.
+        loop {
+            let want = (n - out.len()) * 2 + 64;
+            let chunk = self.candidates_below(ov, dim, table, key, cursor, want);
+            if chunk.is_empty() {
+                break;
+            }
+            let exhausted = chunk.len() < want;
+            for &id in &chunk {
+                if out.len() >= n {
+                    break;
+                }
+                if self.is_member(ov, dim, key, id) {
+                    out.push(id);
+                }
+            }
+            if out.len() >= n || exhausted {
+                break;
+            }
+            cursor = *chunk.last().unwrap(); // continue strictly below the smallest candidate seen
+        }
+        out
+    }
+
     /// Live count of a dimension key: immutable base count + overlay add − overlay rem.
     pub fn count(&self, ov: &Overlay, dim: u8, key: u64) -> i64 {
         self.base.base_len(table_for_dim(dim), key) as i64 + ov.add_len(dim, key) as i64
@@ -1151,6 +1293,149 @@ mod tests {
 
     fn fkey(field: &str, val: &str) -> u64 {
         data_attr_key("col", "sch", field, val)
+    }
+
+    /// Base with `n` assets owned by `alice` in collection "col" (n>512 → a ROARING by_owner posting).
+    fn big_base(path: &str, first: u64, n: u64) -> LiveSeg {
+        let mut b = AtomicBuilder::new(vec!["rarity".to_string()]);
+        b.push(
+            "atomicassets-schemas",
+            &doc! { "collection_name": "col", "schema_name": "sch",
+            "format": [ {"name":"name","type":"string"}, {"name":"rarity","type":"string"} ] },
+        );
+        b.push(
+            "atomicassets-templates",
+            &doc! { "collection_name": "col", "schema_name": "sch", "template_id": 7i32,
+            "immutable_data": { "name": "Hero" } },
+        );
+        for i in 0..n {
+            b.push(
+                "atomicassets-assets",
+                &doc! { "collection_name": "col", "schema_name": "sch", "owner": "alice",
+                "asset_id": (first + i).to_string(), "template_id": 7i32, "block_num": 100i64,
+                "immutable_data": {}, "mutable_data": { "rarity": "Mythic" } },
+            );
+        }
+        b.finish(path).unwrap();
+        LiveSeg::open(path, vec!["rarity".to_string()]).unwrap()
+    }
+
+    /// Page through every page of a key via the cursor, asserting strict global descending order (which
+    /// also proves no duplicates and no gaps), and return the full id list.
+    fn drain_cursor(live: &LiveSeg, ov: &Overlay, dim: u8, key: u64, page: usize) -> Vec<u64> {
+        let mut all = Vec::new();
+        let mut cursor = None;
+        loop {
+            let pg = live.page_after(ov, dim, key, cursor, page);
+            if pg.is_empty() {
+                break;
+            }
+            assert!(pg.windows(2).all(|w| w[0] > w[1]), "page is strictly desc");
+            all.extend_from_slice(&pg);
+            cursor = Some(*pg.last().unwrap());
+            if pg.len() < page {
+                break;
+            }
+        }
+        assert!(
+            all.windows(2).all(|w| w[0] > w[1]),
+            "globally desc → no dupes, no gaps"
+        );
+        all
+    }
+
+    #[test]
+    fn cursor_pages_roaring_full_set_then_survives_mutations() {
+        let path = std::env::temp_dir()
+            .join("aa_live_cursor.wseg")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let first = 1_000_000u64;
+        let n = 1000u64; // > RAW_MAX (512) → the by_owner posting is ROARING, exercising rank/select
+        let live = big_base(&path, first, n);
+        let alice = name::encode("alice");
+        let bob = name::encode("bob");
+
+        // 1) cursor walks the entire ROARING posting, newest-first, no gaps/dupes.
+        {
+            let ov = live.overlay();
+            let all = drain_cursor(&live, &ov, DIM_OWNER, alice, 100);
+            assert_eq!(all.len(), 1000);
+            assert_eq!(all[0], first + 999, "newest first");
+            assert_eq!(*all.last().unwrap(), first, "oldest last");
+        }
+
+        // 2) mutate: transfer one out, burn one, mint one in — then re-page.
+        let minted = live.base_max_id + 1;
+        live.apply_block(
+            101,
+            &[
+                Delta::Transfer(TransferD {
+                    asset_id: first + 500,
+                    new_owner: bob,
+                }),
+                Delta::Burn(BurnD {
+                    asset_id: first + 501,
+                }),
+                Delta::Mint(MintD {
+                    asset_id: minted,
+                    owner: alice,
+                    collection: name::encode("col"),
+                    schema: name::encode("sch"),
+                    schema_key: coll_schema_key("col", "sch"),
+                    template_id: 7,
+                    facet_key: Some(fkey("rarity", "Mythic")),
+                    immutable: vec![],
+                    mutable: vec![(1u8, "Mythic".to_string())],
+                }),
+            ],
+        );
+        let ov = live.overlay();
+        let all = drain_cursor(&live, &ov, DIM_OWNER, alice, 100);
+        assert_eq!(all.len(), 1000 - 2 + 1, "−transfer −burn +mint");
+        assert_eq!(
+            all[0], minted,
+            "the mint is newest → first page, first slot"
+        );
+        assert!(
+            !all.contains(&(first + 500)),
+            "transferred-out gone from alice"
+        );
+        assert!(!all.contains(&(first + 501)), "burned gone");
+        assert_eq!(
+            live.count(&ov, DIM_OWNER, alice) as usize,
+            all.len(),
+            "count == drained"
+        );
+        // the transferred asset shows up under bob via the cursor
+        assert_eq!(
+            live.page_after(&ov, DIM_OWNER, bob, None, 100),
+            vec![first + 500]
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn cursor_matches_offset_on_raw() {
+        // small (RAW) posting: cursor pagination must agree with the head-based page() on page 1.
+        let path = std::env::temp_dir()
+            .join("aa_live_cursor_raw.wseg")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let live = big_base(&path, 2_000_000, 50); // 50 ≤ RAW_MAX → RAW posting
+        let alice = name::encode("alice");
+        let ov = live.overlay();
+        let all = drain_cursor(&live, &ov, DIM_OWNER, alice, 10);
+        assert_eq!(all.len(), 50);
+        // page 1 of the cursor == the newest 10, matching page()'s head.
+        let p1 = live.page_after(&ov, DIM_OWNER, alice, None, 10);
+        let head = live.page(&ov, DIM_OWNER, alice, 10);
+        let mut head_sorted = head.clone();
+        head_sorted.sort_unstable_by(|a, b| b.cmp(a));
+        assert_eq!(p1, head_sorted, "cursor page-1 == page() head (desc)");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

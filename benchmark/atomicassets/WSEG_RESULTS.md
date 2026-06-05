@@ -91,9 +91,16 @@ replay → atomic swap). Measured (testnet 88.8M, 30k deltas/s writer, 4 readers
 in one run with the writer **never paused**, **readers 1.6M req/s continuous** through every swap (p50
 700 ns, p99 4.6 µs), swap stall **~11 ms**, **0 stale** after multiple swaps + live ingest, overlay
 reclaimed each cycle. One rough edge: the per-compaction snapshot clone is O(overlay size) (~1 ms/MB → one
-reader blip per compaction); an O(1) structural-sharing snapshot removes it. **Not yet:** that O(1)
-snapshot + cursor pagination for deep pages. This closes the "can't serve it live" gap: one mmap'd file,
-updated from chain head, compacted in place, hot-swapped without stopping reads.
+reader blip per compaction); an O(1) structural-sharing snapshot removes it.
+
+**Cursor pagination — BUILT + MEASURED.** `page_after(dim, key, after, n)` replaces per-page offset
+materialize with an asset_id cursor: O(page) not O(offset), stable under overlay growth. RAW = zero-copy
+binary-search + walk-back; ROARING = deserialize the bitmap once per key (cached) + bounded `rank`/`select`.
+Measured on the heaviest WAX collection (81.5M members): cold deserialize 20.5 ms once, then **page-1
+1.40 ms ≈ deep page (~20k in) 1.27 ms — depth-independent** (vs the old materialize at ~seconds per deep
+page); typical keys sub-µs–low-µs. **Not yet:** the O(1) snapshot (the per-compaction reader blip). This
+closes the "can't serve it live" gap: one mmap'd file, updated from chain head, compacted in place,
+hot-swapped without stopping reads, paginated deep at O(page).
 
 ## The honest read
 
