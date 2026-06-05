@@ -54,6 +54,30 @@ RAM (run it in less and trade fault rate), unlike a fixed allocation — so it's
 point lookups + zipf pages) → **887k req/s** (zipf point lookups). Latency p50 0.4–0.5 µs, p99 10–156 µs,
 p999 21–591 µs. Scales ~linearly with cores. Mongo is ~0.75–1.2 ms/query (incl. client↔server round-trip).
 
+## Live serving — the freshness overlay (serve the chain head, not just a frozen snapshot)
+
+A frozen segment is a benchmark, not a product. The store now serves the **chain head**: an immutable
+base segment + an in-RAM overlay that applies the SHiP delta stream (mint/transfer/burn/setdata), merged
+at read time. Design + the adversarial pass that chose it: `FRESHNESS_OVERLAY_DESIGN.md`. Built in
+`crates/wseg-build/src/aa_live.rs` + bin `aa-live`. **Measured on the 232.3M mainnet segment** with a
+realistic stream (35% mint / 45% transfer / 12% burn / 8% setdata over real keys):
+
+| axis | result |
+|---|---|
+| apply throughput (1 writer) | **370k mutations/s** (37× a 10⁴/s SHiP burst) |
+| freshness lag (commit lock hold) | **p50 276 µs / p99 498 µs** — pure in-RAM; base reads are lock-free in `prepare` |
+| reads with overlay active | point **0.3 µs** · facet **0.3 µs** · collection **0.6 µs** · owner-page **4.2 µs** · browse **3.2 µs** · sort-by-mint **8 µs** (unchanged from frozen) |
+| overlay heap | **114 B/mutation** (218 MB @ 2M; base mmap page cache RSS is separate + evictable) |
+| concurrent (1 writer + 6 readers) | writer **278k mut/s** while readers serve **557k req/s**, reader p50 **1.1 µs** |
+| correctness at scale | transfer/burn reflected immediately; **page-merge invariant 0 stale / 38,974 entries**; fork rollback unit-tested |
+
+The spine: the forward record is the sole arbiter of current state, so stale base postings are harmless
+and transfer/burn need no posting surgery; per-key `add`/`rem` roaring sets keep counts exact + the base
+head dense. The two-phase apply (lock-free `prepare` + brief `commit`) keeps the write-lock hold — the
+freshness lag — at hundreds of µs, so a writer at SHiP speed never stalls readers. **Not yet:** compaction
+measured end-to-end (designed; reuses `AtomicBuilder` + atomic mmap remap) and cursor pagination for deep
+pages. This closes the "can't serve it live" gap: the same single mmap'd file, updated from chain head.
+
 ## The honest read
 
 - **vs Postgres — dramatic on every axis.** ~28× less storage (state-only, no burned rows, no history),

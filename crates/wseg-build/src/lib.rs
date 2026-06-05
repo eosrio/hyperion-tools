@@ -6,6 +6,7 @@
 
 pub mod aa_binfmt;
 pub mod aa_builder;
+pub mod aa_live;
 pub mod aa_tables;
 pub mod binfmt;
 pub mod builder;

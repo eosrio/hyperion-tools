@@ -25,6 +25,11 @@ path = "src/bin/aa_build.rs"
 name = "aa-probe"
 path = "src/bin/aa_probe.rs"
 
+# Live freshness overlay: drive a SHiP-shaped mutation stream through the overlay + benchmark it.
+[[bin]]
+name = "aa-live"
+path = "src/bin/aa_live.rs"
+
 [dependencies]
 tokio = { workspace = true }            # async runtime for the Mongo stream
 mongodb = { workspace = true }          # async driver — same version as light-api / snapshot-load
