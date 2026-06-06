@@ -22,8 +22,10 @@ services:
     command: ["--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-2}"]
     volumes:
       - mongo-data:/data/db
+    # Loopback-only: the loader/server reach Mongo over the aa-stack bridge (mongodb:27017); the host
+    # mapping is just for local mongosh/inspection and must not be exposed off-host (Mongo has no auth).
     ports:
-      - "${MONGO_PORT:-27018}:27017"
+      - "127.0.0.1:${MONGO_PORT:-27018}:27017"
     networks: [aa-stack]
     profiles: ["state", "all"]
     healthcheck:
@@ -71,9 +73,12 @@ services:
     volumes:
       - aa-data:/data
       - ./wormdb.json:/etc/wormdb.json:ro
+    # Loopback-only. 6390 = HTTP read API (curl from the host); 6389 = WormWire (privileged exec/peer
+    # wire) — the Phase-2 SHiP feed reaches it over the bridge, so neither needs off-host exposure.
+    # wormdb.json sets require_auth:false (trusted-LOCAL proving deploy); loopback binding is the guard.
     ports:
-      - "${WORMDB_GATEWAY_PORT:-6390}:6390"
-      - "${WORMDB_WIRE_PORT:-6389}:6389"
+      - "127.0.0.1:${WORMDB_GATEWAY_PORT:-6390}:6390"
+      - "127.0.0.1:${WORMDB_WIRE_PORT:-6389}:6389"
     extra_hosts: *host_gw
     depends_on:
       aa-loader:
