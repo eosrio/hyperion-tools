@@ -481,6 +481,13 @@ mod tests {
     #[test]
     fn builds_a_tiny_segment() {
         let mut b = AtomicBuilder::new(vec!["rarity".to_string()]);
+        // config singleton flows through the builder (push_config → finish() emit) without panicking.
+        b.push(
+            "atomicassets-config",
+            &doc! { "contract": "atomicassets",
+            "collection_format": [ {"name":"name","type":"string"} ],
+            "supported_tokens": [ {"token_contract":"eosio.token","token_symbol":"WAX","token_precision":8i32} ] },
+        );
         b.push(
             "atomicassets-schemas",
             &doc! { "collection_name": "col", "schema_name": "sch",

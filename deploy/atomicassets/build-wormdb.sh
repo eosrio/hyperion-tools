@@ -28,9 +28,13 @@ set -e
 ZIG_VER=0.16.0
 echo "=== tools ==="
 apt-get update -qq
-apt-get install -y -qq curl xz-utils git build-essential cmake libsodium-dev ca-certificates pkg-config >/dev/null 2>&1
-echo "=== zig ${ZIG_VER} ==="
-cd /opt && curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-x86_64-linux-${ZIG_VER}.tar.xz" -o zig.tar.xz && tar xf zig.tar.xz
+apt-get install -y -qq curl xz-utils git build-essential cmake libsodium-dev ca-certificates pkg-config
+echo "=== zig ${ZIG_VER} (sha256-pinned) ==="
+# Pinned SHA-256 of zig-x86_64-linux-0.16.0.tar.xz (ziglang.org/download/index.json). Bump in lockstep with ZIG_VER.
+ZIG_SHA=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+cd /opt && curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-x86_64-linux-${ZIG_VER}.tar.xz" -o zig.tar.xz
+echo "${ZIG_SHA}  zig.tar.xz" | sha256sum -c -
+tar xf zig.tar.xz
 export PATH="/opt/zig-x86_64-linux-${ZIG_VER}:${PATH}"
 zig version
 echo "=== copy 4 repos (sibling layout, excl caches/.git/node_modules) ==="
@@ -39,9 +43,12 @@ for r in wormdb wormdb-server wormdb-domain-lightapi wormdb-domain-atomicassets;
   mkdir -p "/work/$r"
   tar -C "/host/$r" --exclude=.zig-cache --exclude=zig-out --exclude=.git --exclude=node_modules -cf - . | tar -C "/work/$r" -xf -
 done
-echo "=== meshguard from github (replaces the windows symlink) ==="
+echo "=== meshguard from github (replaces the windows symlink; commit-pinned) ==="
+# Pinned meshguard commit — keeps the produced wormdb binary reproducible (bump deliberately).
+MESHGUARD_SHA=56d9d8d44fbf6256632263e5021caa0f1575f54b
 rm -rf /work/wormdb/deps/meshguard
 git clone -q https://github.com/igorls/meshguard /work/wormdb/deps/meshguard
+git -C /work/wormdb/deps/meshguard checkout -q "$MESHGUARD_SHA"
 echo "=== zig build (quic=false) ==="
 cd /work/wormdb-server
 zig build --cache-dir /tmp/zc --global-cache-dir /tmp/zgc

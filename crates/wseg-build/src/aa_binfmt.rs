@@ -395,10 +395,13 @@ pub fn encode_config(
     pu16(&mut o, vlen as u16);
     o.extend_from_slice(&vb[..vlen]);
     let fmt = encode_schema_format(collection_format);
-    pu16(&mut o, fmt.len().min(u16::MAX as usize) as u16);
-    o.extend_from_slice(&fmt);
-    pu16(&mut o, supported_tokens.len() as u16);
-    for (tc, sym, prec) in supported_tokens {
+    // Cap the length prefix AND the appended bytes together so the header can never desync the body.
+    let flen = fmt.len().min(u16::MAX as usize);
+    pu16(&mut o, flen as u16);
+    o.extend_from_slice(&fmt[..flen]);
+    let ntok = supported_tokens.len().min(u16::MAX as usize);
+    pu16(&mut o, ntok as u16);
+    for (tc, sym, prec) in supported_tokens.iter().take(ntok) {
         pu64(&mut o, *tc);
         let sb = sym.as_bytes();
         let sl = sb.len().min(255);
@@ -410,28 +413,50 @@ pub fn encode_config(
 }
 
 /// Decode the config singleton: `(contract, version, collection_format, supported_tokens)`.
-pub fn decode_config(b: &[u8]) -> (u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>) {
+/// Fully bounds-checked — a truncated/corrupt blob returns `None` instead of panicking.
+pub fn decode_config(b: &[u8]) -> Option<(u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>)> {
+    if b.is_empty() {
+        return None;
+    }
     let mut p = 1usize;
+    if b.len() < p + 8 {
+        return None;
+    }
     let contract = gu64(b, &mut p);
+    if b.len() < p + 2 {
+        return None;
+    }
     let vlen = gu16(b, &mut p) as usize;
+    if b.len() < p + vlen + 2 {
+        return None;
+    }
     let version = String::from_utf8_lossy(&b[p..p + vlen]).into_owned();
     p += vlen;
     let fmt_len = gu16(b, &mut p) as usize;
+    if b.len() < p + fmt_len + 2 {
+        return None;
+    }
     let collection_format = decode_schema_format(&b[p..p + fmt_len]);
     p += fmt_len;
     let n = gu16(b, &mut p) as usize;
     let mut tokens = Vec::with_capacity(n);
     for _ in 0..n {
+        if b.len() < p + 9 {
+            return None;
+        }
         let tc = gu64(b, &mut p);
         let sl = b[p] as usize;
         p += 1;
+        if b.len() < p + sl + 1 {
+            return None;
+        }
         let sym = String::from_utf8_lossy(&b[p..p + sl]).into_owned();
         p += sl;
         let prec = b[p];
         p += 1;
         tokens.push((tc, sym, prec));
     }
-    (contract, version, collection_format, tokens)
+    Some((contract, version, collection_format, tokens))
 }
 
 #[cfg(test)]
@@ -572,10 +597,15 @@ mod tests {
         ];
         let tokens = vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4i64)];
         let blob = encode_config(crate::name::encode("atomicassets"), "1.2.0", &fmt, &tokens);
-        let (c, v, f, t) = decode_config(&blob);
+        let (c, v, f, t) = decode_config(&blob).expect("decode config");
         assert_eq!(c, crate::name::encode("atomicassets"));
         assert_eq!(v, "1.2.0");
         assert_eq!(f, fmt);
         assert_eq!(t, vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4u8)]);
+
+        // truncated/empty blobs return None instead of panicking (bounds-checked decoder).
+        assert!(decode_config(&[]).is_none());
+        assert!(decode_config(&blob[..blob.len() - 1]).is_none());
+        assert!(decode_config(&blob[..3]).is_none());
     }
 }

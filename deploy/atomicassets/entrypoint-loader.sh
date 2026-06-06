@@ -12,10 +12,16 @@ AA_DATA_FIELDS="${AA_DATA_FIELDS:-rarity}"
 ASSET_LIMIT="${ASSET_LIMIT:-0}"
 
 # Prefer the EOS-Nation-named portable snapshot (its trailing digits are the block_num that
-# snapshot-load auto-derives); fall back to any non-archive .bin.
-BIN="$(find /snap -maxdepth 1 -name 'snapshot-*.bin' | head -1 || true)"
-[[ -n "$BIN" ]] || BIN="$(find /snap -maxdepth 1 -name '*.bin' ! -name '*archive*' | head -1 || true)"
-[[ -n "$BIN" ]] || { echo "[loader] ERROR: no snapshot .bin in /snap (mount SNAPSHOT_DIR)"; ls -la /snap; exit 1; }
+# snapshot-load auto-derives); fall back to any non-archive .bin. Selection is DETERMINISTIC: sort the
+# matches and take the lexically-newest (the date/height is in the name), warning if there's more than one.
+mapfile -t BINS < <(find /snap -maxdepth 1 -name 'snapshot-*.bin' | LC_ALL=C sort)
+[[ ${#BINS[@]} -gt 0 ]] || mapfile -t BINS < <(find /snap -maxdepth 1 -name '*.bin' ! -name '*archive*' | LC_ALL=C sort)
+[[ ${#BINS[@]} -gt 0 ]] || { echo "[loader] ERROR: no snapshot .bin in /snap (mount SNAPSHOT_DIR)"; ls -la /snap; exit 1; }
+if [[ ${#BINS[@]} -gt 1 ]]; then
+  echo "[loader] WARN: ${#BINS[@]} snapshots in /snap — picking the lexically-newest:"
+  printf '[loader]   %s\n' "${BINS[@]}"
+fi
+BIN="${BINS[-1]}"
 
 echo "[loader] snapshot=$BIN chain=$CHAIN -> $MONGO_URI db=$MONGO_DB"
 
