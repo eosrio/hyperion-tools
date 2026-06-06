@@ -616,3 +616,41 @@ mod tests {
         assert!(decode_config(&blob[..3]).is_none());
     }
 }
+
+#[cfg(test)]
+mod roaring_fixtures {
+    use super::*;
+    /// Regenerates the hybrid-posting fixtures the Zig reader's roaring walk is golden-tested against
+    /// (`wormdb-domain-atomicassets/src/testdata/roaring_*.bin`). Dev tool, gated behind
+    /// `RUN_ROARING_FIXTURES` so it's a no-op in CI; only the bytes ship (the Zig side recomputes the
+    /// expected id set). The output dir is taken from `ROARING_FIXTURE_DIR` (required when running — no
+    /// host-specific default) so it's portable. Run after any change to the roaring serialization
+    /// (e.g. a `roaring` crate bump):
+    ///   RUN_ROARING_FIXTURES=1 ROARING_FIXTURE_DIR=<domain>/src/testdata cargo test -p wseg-build write_roaring_fixtures
+    #[test]
+    fn write_roaring_fixtures() {
+        if std::env::var("RUN_ROARING_FIXTURES").is_err() {
+            return;
+        }
+        let dir = std::env::var("ROARING_FIXTURE_DIR").expect(
+            "set ROARING_FIXTURE_DIR=<domain>/src/testdata to regenerate the roaring fixtures",
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = 1_099_511_627_776u64; // 2^40
+                                         // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
+        let mut a: Vec<u64> = (0..600u64).map(|i| base + i * 9_000_000).collect();
+        std::fs::write(
+            format!("{dir}/roaring_sparse.bin"),
+            encode_posting_hybrid(&mut a),
+        )
+        .unwrap();
+        // (B) dense → a bitmap container (>4096 ids in one 16-bit block): base + i, i in 0..6000.
+        let mut b: Vec<u64> = (0..6000u64).map(|i| base + i).collect();
+        std::fs::write(
+            format!("{dir}/roaring_dense.bin"),
+            encode_posting_hybrid(&mut b),
+        )
+        .unwrap();
+        eprintln!("wrote roaring fixtures to {dir}");
+    }
+}
