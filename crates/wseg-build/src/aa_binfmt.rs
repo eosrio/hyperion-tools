@@ -412,11 +412,13 @@ pub fn encode_config(
     o
 }
 
-/// Decode the config singleton: `(contract, version, collection_format, supported_tokens)`.
-/// Fully bounds-checked — a truncated/corrupt blob returns `None` instead of panicking.
-pub fn decode_config(
-    b: &[u8],
-) -> Option<(u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>)> {
+/// Decoded config singleton: `(contract, version, collection_format, supported_tokens)`,
+/// where each supported token is `(token_contract, symbol, precision)`.
+pub type DecodedConfig = (u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>);
+
+/// Decode the config singleton. Fully bounds-checked — a truncated/corrupt blob returns `None`
+/// instead of panicking.
+pub fn decode_config(b: &[u8]) -> Option<DecodedConfig> {
     if b.is_empty() {
         return None;
     }
