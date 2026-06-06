@@ -75,6 +75,9 @@ pub fn all_collections() -> Vec<&'static str> {
 pub struct SchemaRegistry {
     schemas: HashMap<String, HashMap<String, Vec<atomicdata::Field>>>,
     collection_format: Vec<atomicdata::Field>,
+    /// The contract `version` from the `tokenconfigs` table (v2). Empty on pre-v2 chains that lack it
+    /// — `map_config` then omits the field rather than emitting an invalid `""`.
+    version: String,
 }
 
 impl SchemaRegistry {
@@ -114,6 +117,7 @@ pub fn build_schema_registry(
     let aa = nm("atomicassets")?;
     let schemas_t = nm("schemas")?;
     let config_t = nm("config")?;
+    let tokenconfigs_t = nm("tokenconfigs")?;
 
     let mut reg = SchemaRegistry::default();
 
@@ -131,6 +135,7 @@ pub fn build_schema_registry(
         filters: vec![
             Filter::CodeTable(aa, schemas_t),
             Filter::CodeTable(aa, config_t),
+            Filter::CodeTable(aa, tokenconfigs_t),
         ],
     };
 
@@ -164,6 +169,11 @@ pub fn build_schema_registry(
                 data.get("collection_format").unwrap_or(&Value::Null),
             ) {
                 reg.collection_format = fields;
+            }
+        } else if row.table == tokenconfigs_t {
+            // tokenconfigs (v2) → the contract `version` the API's /config reports.
+            if let Some(v) = data.get("version").and_then(Value::as_str) {
+                reg.version = v.to_string();
             }
         }
         Ok(())
@@ -339,9 +349,14 @@ pub fn map_offer(ctx: &RowCtx, data: Value) -> Value {
 
 /// `config` singleton → config doc. Counters are live on-chain (S); `supported_tokens` is flattened to
 /// `{token_contract, token_symbol, token_precision}`.
-pub fn map_config(ctx: &RowCtx, data: Value) -> Value {
+pub fn map_config(ctx: &RowCtx, data: Value, reg: &SchemaRegistry) -> Value {
     let mut doc = Map::new();
     doc.insert("contract".into(), json!(ctx.code));
+    // `version` comes from the `tokenconfigs` table (read in the pre-pass), NOT the `config` row.
+    // Omit it entirely when the chain has no tokenconfigs (pre-v2) rather than emit an invalid "".
+    if !reg.version.is_empty() {
+        doc.insert("version".into(), json!(reg.version));
+    }
     for f in [
         "asset_counter",
         "template_counter",
