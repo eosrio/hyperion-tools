@@ -90,7 +90,9 @@ async fn main() -> Result<()> {
 
     let t0 = Instant::now();
     let mut b = AtomicBuilder::new(fields);
-    // schemas first (full doc — need `format`), then templates, then assets (projected).
+    // config first (singleton — contract/collection_format/supported_tokens), then schemas (need
+    // `format`), then templates, then assets (projected).
+    stream(&db, "atomicassets-config", doc! {}, 0, &mut b, t0).await?;
     stream(&db, "atomicassets-schemas", doc! {}, 0, &mut b, t0).await?;
     stream(
         &db,

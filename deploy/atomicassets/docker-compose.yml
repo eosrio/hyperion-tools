@@ -1,0 +1,96 @@
+# WormDB AtomicAssets — Track B end-to-end (Phase 0: state bootstrap from a Jungle 4 snapshot).
+#
+#   1. ./build-wormdb.sh                 # build the wormdb-server binary (4-repo Zig build) -> bin/wormdb
+#   2. cp .env.example .env && edit      # point SNAPSHOT_DIR at the dir holding the Jungle 4 snapshot
+#   3. docker compose --profile state up --build
+#
+# Pipeline: aa-loader (snapshot -> Mongo via snapshot-load, then Mongo -> .wseg via aa-build)
+#           -> wormdb-aa serves the AtomicAssets HTTP API from the segment on :6390.
+#
+# Chain source = the existing Jungle 4 node (WSL ~/chains/jungle): reached at host.docker.internal:28888
+# (chain API) / :28080 (SHiP). No nodeos container. ES / Hyperion / archive-server arrive in Phase 3.
+
+name: aa-stack
+
+x-host-gw: &host_gw
+  - "host.docker.internal:host-gateway"
+
+services:
+  mongodb:
+    image: mongo:8
+    container_name: aa-mongodb
+    command: ["--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-2}"]
+    volumes:
+      - mongo-data:/data/db
+    # Loopback-only: the loader/server reach Mongo over the aa-stack bridge (mongodb:27017); the host
+    # mapping is just for local mongosh/inspection and must not be exposed off-host (Mongo has no auth).
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27018}:27017"
+    networks: [aa-stack]
+    profiles: ["state", "all"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # One-shot: decode the snapshot's AtomicAssets state into Mongo, then build the faceted .wseg.
+  aa-loader:
+    build:
+      context: ../..
+      dockerfile: deploy/atomicassets/Dockerfile.tools
+    image: aa-stack/tools:latest
+    container_name: aa-loader
+    command: ["/entrypoint-loader.sh"]
+    environment:
+      CHAIN: ${CHAIN:-jungle4}
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_PREFIX: ${MONGO_PREFIX:-hyperion}
+      WSEG_OUT: /data/aa.wseg
+      AA_DATA_FIELDS: ${AA_DATA_FIELDS:-rarity}
+      ASSET_LIMIT: ${ASSET_LIMIT:-0}
+    volumes:
+      - ${SNAPSHOT_DIR:-./snapshot}:/snap:ro
+      - aa-data:/data
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks: [aa-stack]
+    profiles: ["state", "all"]
+    restart: "no"
+
+  # Serves the AtomicAssets HTTP API from the mmap'd segment (+ the in-DB overlay later).
+  wormdb-aa:
+    build:
+      context: ../..
+      dockerfile: deploy/atomicassets/Dockerfile.wormdb
+    image: aa-stack/wormdb:latest
+    container_name: aa-wormdb
+    command: ["/entrypoint-server.sh"]
+    environment:
+      AA_SEGMENT: /data/aa.wseg
+    volumes:
+      - aa-data:/data
+      - ./wormdb.json:/etc/wormdb.json:ro
+    # Loopback-only. 6390 = HTTP read API (curl from the host); 6389 = WormWire (privileged exec/peer
+    # wire) — the Phase-2 SHiP feed reaches it over the bridge, so neither needs off-host exposure.
+    # wormdb.json sets require_auth:false (trusted-LOCAL proving deploy); loopback binding is the guard.
+    ports:
+      - "127.0.0.1:${WORMDB_GATEWAY_PORT:-6390}:6390"
+      - "127.0.0.1:${WORMDB_WIRE_PORT:-6389}:6389"
+    extra_hosts: *host_gw
+    depends_on:
+      aa-loader:
+        condition: service_completed_successfully
+    networks: [aa-stack]
+    profiles: ["state", "all"]
+
+volumes:
+  mongo-data:
+  aa-data:
+
+networks:
+  aa-stack:
+    name: aa-stack
+    driver: bridge

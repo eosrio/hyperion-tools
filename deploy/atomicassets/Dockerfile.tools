@@ -1,0 +1,17 @@
+# Rust tools image: snapshot-load (snapshot -> Mongo) + aa-build (Mongo -> .wseg).
+# Build context = hyperion-tools repo root (the cargo workspace).
+FROM rust:1-bookworm AS builder
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+# Pure-Rust deps (rs_abieos rust-backend, rustls, ruzstd, mongodb driver) -> no C toolchain needed.
+RUN cargo build --release -p snapshot-load \
+ && cargo build --release -p wseg-build --bin aa-build
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates bash coreutils findutils && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/snapshot-load /usr/local/bin/snapshot-load
+COPY --from=builder /build/target/release/aa-build /usr/local/bin/aa-build
+COPY deploy/atomicassets/entrypoint-loader.sh /entrypoint-loader.sh
+RUN chmod +x /entrypoint-loader.sh

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use mongodb::bson::{Bson, Document};
 
 use crate::aa_binfmt::{
-    encode_asset, encode_posting_hybrid, encode_schema_format, encode_template, Attr,
+    encode_asset, encode_config, encode_posting_hybrid, encode_schema_format, encode_template, Attr,
 };
 use crate::aa_tables::*;
 use crate::name;
@@ -67,6 +67,8 @@ pub struct AtomicBuilder {
     all_ids: Vec<u64>,
     /// Data-attribute fields to inverted-index (low-cardinality facets; default `["rarity"]`).
     data_fields: Vec<String>,
+    /// The config singleton blob (`/v1/config`), set by the `atomicassets-config` doc.
+    config: Option<Vec<u8>>,
     stats: AaStats,
 }
 
@@ -90,6 +92,7 @@ impl AtomicBuilder {
             by_data: HashMap::new(),
             all_ids: Vec::new(),
             data_fields,
+            config: None,
             stats: AaStats::default(),
         }
     }
@@ -97,11 +100,40 @@ impl AtomicBuilder {
     /// Dispatch one Mongo doc by collection. Unknown collections are ignored.
     pub fn push(&mut self, coll: &str, d: &Document) {
         match coll {
+            "atomicassets-config" => self.push_config(d),
             "atomicassets-schemas" => self.push_schema(d),
             "atomicassets-templates" => self.push_template(d),
             "atomicassets-assets" => self.push_asset(d),
             _ => {}
         }
+    }
+
+    /// `atomicassets-config` (singleton) → the config blob served at `/v1/config`.
+    fn push_config(&mut self, d: &Document) {
+        let contract = doc_str(d, "contract").map(name::encode).unwrap_or(0);
+        let version = doc_str(d, "version").unwrap_or("").to_string();
+        let mut fmt: Vec<(String, String)> = Vec::new();
+        if let Ok(arr) = d.get_array("collection_format") {
+            for f in arr {
+                if let Bson::Document(fd) = f {
+                    if let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type")) {
+                        fmt.push((n.to_string(), t.to_string()));
+                    }
+                }
+            }
+        }
+        let mut tokens: Vec<(u64, String, i64)> = Vec::new();
+        if let Ok(arr) = d.get_array("supported_tokens") {
+            for t in arr {
+                if let Bson::Document(td) = t {
+                    let tc = doc_str(td, "token_contract").map(name::encode).unwrap_or(0);
+                    let sym = doc_str(td, "token_symbol").unwrap_or("").to_string();
+                    let prec = doc_i64(td, "token_precision").unwrap_or(0);
+                    tokens.push((tc, sym, prec));
+                }
+            }
+        }
+        self.config = Some(encode_config(contract, &version, &fmt, &tokens));
     }
 
     fn push_schema(&mut self, d: &Document) {
@@ -355,6 +387,19 @@ impl AtomicBuilder {
         });
         tables.push(tmpl_sorted);
 
+        // config singleton (one sentinel-keyed entry), if the `atomicassets-config` doc was seen.
+        if let Some(cfg) = self.config.take() {
+            tables.push(Table {
+                table_id: TABLE_AA_CONFIG,
+                index: vec![IndexEntry {
+                    key: SENTINEL_KEY,
+                    off: 0,
+                    len: cfg.len() as u32,
+                }],
+                arena: cfg,
+            });
+        }
+
         self.stats.bytes = tables.iter().map(|t| t.arena.len() as u64).sum();
         write_segment(out, tables)?;
         Ok(self.stats)
@@ -402,6 +447,14 @@ fn doc_u32(d: &Document, k: &str) -> u32 {
         _ => 0,
     }
 }
+fn doc_i64(d: &Document, k: &str) -> Option<i64> {
+    match d.get(k) {
+        Some(Bson::Int32(i)) => Some(*i as i64),
+        Some(Bson::Int64(i)) => Some(*i),
+        Some(Bson::Double(f)) => Some(*f as i64),
+        _ => None,
+    }
+}
 
 /// Canonical string form of a bson value, matching what the API filters on.
 fn bson_canon(b: &Bson) -> String {
@@ -428,6 +481,13 @@ mod tests {
     #[test]
     fn builds_a_tiny_segment() {
         let mut b = AtomicBuilder::new(vec!["rarity".to_string()]);
+        // config singleton flows through the builder (push_config → finish() emit) without panicking.
+        b.push(
+            "atomicassets-config",
+            &doc! { "contract": "atomicassets",
+            "collection_format": [ {"name":"name","type":"string"} ],
+            "supported_tokens": [ {"token_contract":"eosio.token","token_symbol":"WAX","token_precision":8i32} ] },
+        );
         b.push(
             "atomicassets-schemas",
             &doc! { "collection_name": "col", "schema_name": "sch",

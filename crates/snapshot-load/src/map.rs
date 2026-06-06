@@ -84,7 +84,7 @@ pub fn map_row(
         )),
         ("atomicassets", "config") => Some((
             atomicassets::COLL_AA_CONFIG,
-            atomicassets::map_config(ctx, data),
+            atomicassets::map_config(ctx, data, schema_reg),
         )),
         // AtomicMarket state (the `atomicmarket`/`atomic` preset).
         ("atomicmarket", "sales") => Some((
