@@ -38,6 +38,9 @@ pub const TABLE_AA_COLL_FWD: u32 = 20;
 /// by `(template_mint, asset_id)` — the materialized "sort by mint" ordering, reconstructed from the
 /// snapshot (rank within each template) so a history-looking sort stays sub-µs (no Elasticsearch).
 pub const TABLE_AA_SORTED_TMPL: u32 = 21;
+/// Config singleton: sentinel key [`SENTINEL_KEY`], blob = contract / version / collection_format /
+/// supported_tokens (the `/atomicassets/v1/config` payload).
+pub const TABLE_AA_CONFIG: u32 = 22;
 
 /// The single-entry key used by presorted-ordering tables (one blob, looked up by a fixed key).
 pub const SENTINEL_KEY: u64 = 0;
@@ -159,6 +162,8 @@ mod tests {
             TABLE_AA_SORTED_ID,
             TABLE_AA_TMPL_FWD,
             TABLE_AA_COLL_FWD,
+            TABLE_AA_SORTED_TMPL,
+            TABLE_AA_CONFIG,
         ];
         let mut seen = std::collections::HashSet::new();
         for id in ids {

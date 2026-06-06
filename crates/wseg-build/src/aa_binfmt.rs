@@ -377,6 +377,63 @@ pub fn decode_template(b: &[u8]) -> (i32, u64, Vec<Attr>) {
     (template_id, schema, immutable)
 }
 
+// ── config singleton (TABLE_AA_CONFIG) ─────────────────────────────────────────────────────────────
+/// Encode the AtomicAssets config singleton. `supported_tokens` = (token_contract name, symbol,
+/// precision). Layout: `version | contract(u64) | u16 ver_len | ver | u16 fmt_len | <schema-format blob>
+/// | u16 n_tokens | (u64 token_contract, u8 sym_len, sym, u8 precision) × n`.
+pub fn encode_config(
+    contract: u64,
+    version: &str,
+    collection_format: &[(String, String)],
+    supported_tokens: &[(u64, String, i64)],
+) -> Vec<u8> {
+    let mut o = Vec::new();
+    o.push(ASSET_VERSION);
+    pu64(&mut o, contract);
+    let vb = version.as_bytes();
+    let vlen = vb.len().min(u16::MAX as usize);
+    pu16(&mut o, vlen as u16);
+    o.extend_from_slice(&vb[..vlen]);
+    let fmt = encode_schema_format(collection_format);
+    pu16(&mut o, fmt.len().min(u16::MAX as usize) as u16);
+    o.extend_from_slice(&fmt);
+    pu16(&mut o, supported_tokens.len() as u16);
+    for (tc, sym, prec) in supported_tokens {
+        pu64(&mut o, *tc);
+        let sb = sym.as_bytes();
+        let sl = sb.len().min(255);
+        o.push(sl as u8);
+        o.extend_from_slice(&sb[..sl]);
+        o.push(*prec as u8);
+    }
+    o
+}
+
+/// Decode the config singleton: `(contract, version, collection_format, supported_tokens)`.
+pub fn decode_config(b: &[u8]) -> (u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>) {
+    let mut p = 1usize;
+    let contract = gu64(b, &mut p);
+    let vlen = gu16(b, &mut p) as usize;
+    let version = String::from_utf8_lossy(&b[p..p + vlen]).into_owned();
+    p += vlen;
+    let fmt_len = gu16(b, &mut p) as usize;
+    let collection_format = decode_schema_format(&b[p..p + fmt_len]);
+    p += fmt_len;
+    let n = gu16(b, &mut p) as usize;
+    let mut tokens = Vec::with_capacity(n);
+    for _ in 0..n {
+        let tc = gu64(b, &mut p);
+        let sl = b[p] as usize;
+        p += 1;
+        let sym = String::from_utf8_lossy(&b[p..p + sl]).into_owned();
+        p += sl;
+        let prec = b[p];
+        p += 1;
+        tokens.push((tc, sym, prec));
+    }
+    (contract, version, collection_format, tokens)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,5 +562,20 @@ mod tests {
         assert_eq!(tid, 3);
         assert_eq!(schema, crate::name::encode("pokemon"));
         assert_eq!(attrs, immutable);
+    }
+
+    #[test]
+    fn config_round_trips() {
+        let fmt = vec![
+            ("name".to_string(), "string".to_string()),
+            ("img".to_string(), "ipfs".to_string()),
+        ];
+        let tokens = vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4i64)];
+        let blob = encode_config(crate::name::encode("atomicassets"), "1.2.0", &fmt, &tokens);
+        let (c, v, f, t) = decode_config(&blob);
+        assert_eq!(c, crate::name::encode("atomicassets"));
+        assert_eq!(v, "1.2.0");
+        assert_eq!(f, fmt);
+        assert_eq!(t, vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4u8)]);
     }
 }
