@@ -414,7 +414,9 @@ pub fn encode_config(
 
 /// Decode the config singleton: `(contract, version, collection_format, supported_tokens)`.
 /// Fully bounds-checked — a truncated/corrupt blob returns `None` instead of panicking.
-pub fn decode_config(b: &[u8]) -> Option<(u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>)> {
+pub fn decode_config(
+    b: &[u8],
+) -> Option<(u64, String, Vec<(String, String)>, Vec<(u64, String, u8)>)> {
     if b.is_empty() {
         return None;
     }
@@ -601,7 +603,10 @@ mod tests {
         assert_eq!(c, crate::name::encode("atomicassets"));
         assert_eq!(v, "1.2.0");
         assert_eq!(f, fmt);
-        assert_eq!(t, vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4u8)]);
+        assert_eq!(
+            t,
+            vec![(crate::name::encode("eosio.token"), "EOS".to_string(), 4u8)]
+        );
 
         // truncated/empty blobs return None instead of panicking (bounds-checked decoder).
         assert!(decode_config(&[]).is_none());
