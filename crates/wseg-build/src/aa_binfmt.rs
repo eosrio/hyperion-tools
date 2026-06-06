@@ -381,6 +381,26 @@ pub fn decode_template(b: &[u8]) -> (i32, u64, Vec<Attr>) {
 mod tests {
     use super::*;
 
+    /// CROSS-REPO GOLDEN: `encode_asset` for fixed inputs must produce these exact bytes. The SAME
+    /// array is decoded + asserted on the READER side by "golden asset record decodes byte-for-byte"
+    /// in wormdb-domain-atomicassets/src/binfmt.zig. A silent field reorder/resize on either side
+    /// (without a version bump) fails one of the two tests — pinning the cross-repo byte contract.
+    #[test]
+    fn golden_asset_record() {
+        let golden: &[u8] = &[
+            1, // version
+            1, 0, 0, 0, 0, 0, 0, 0, // owner = 1
+            2, 0, 0, 0, 0, 0, 0, 0, // collection = 2
+            3, 0, 0, 0, 0, 0, 0, 0, // schema = 3
+            7, 0, 0, 0, // template_id = 7
+            100, 0, 0, 0, // block_num = 100
+            42, 0, 0, 0, // template_mint = 42
+            0, 0, // immutable attr count
+            0, 0, // mutable attr count
+        ];
+        assert_eq!(encode_asset(1, 2, 3, 7, 100, 42, &[], &[]), golden);
+    }
+
     #[test]
     fn type_tag_round_trips_incl_arrays() {
         for t in ["uint64", "string", "double", "ipfs", "image", "bool"] {
