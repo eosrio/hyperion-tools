@@ -623,15 +623,18 @@ mod roaring_fixtures {
     /// Regenerates the hybrid-posting fixtures the Zig reader's roaring walk is golden-tested against
     /// (`wormdb-domain-atomicassets/src/testdata/roaring_*.bin`). Dev tool, gated behind
     /// `RUN_ROARING_FIXTURES` so it's a no-op in CI; only the bytes ship (the Zig side recomputes the
-    /// expected id set). Run after any change to the roaring serialization (e.g. a `roaring` crate bump):
+    /// expected id set). The output dir is taken from `ROARING_FIXTURE_DIR` (required when running — no
+    /// host-specific default) so it's portable. Run after any change to the roaring serialization
+    /// (e.g. a `roaring` crate bump):
     ///   RUN_ROARING_FIXTURES=1 ROARING_FIXTURE_DIR=<domain>/src/testdata cargo test -p wseg-build write_roaring_fixtures
     #[test]
     fn write_roaring_fixtures() {
         if std::env::var("RUN_ROARING_FIXTURES").is_err() {
             return;
         }
-        let dir = std::env::var("ROARING_FIXTURE_DIR")
-            .unwrap_or_else(|_| "P:/wormdb-domain-atomicassets/src/testdata".to_string());
+        let dir = std::env::var("ROARING_FIXTURE_DIR").expect(
+            "set ROARING_FIXTURE_DIR=<domain>/src/testdata to regenerate the roaring fixtures",
+        );
         std::fs::create_dir_all(&dir).unwrap();
         let base = 1_099_511_627_776u64; // 2^40
                                          // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
