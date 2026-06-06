@@ -1,0 +1,11 @@
+# Runtime image for the wormdb-server binary (lightapi + atomicassets domains composed).
+# The binary is built OUT-OF-BAND by ./build-wormdb.sh (a 4-repo Zig build) into ./bin/wormdb,
+# then copied onto a slim runtime here — same pattern as the Light-API preview release.
+# Build context = hyperion-tools repo root.
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates bash curl libsodium23 && rm -rf /var/lib/apt/lists/*
+COPY deploy/atomicassets/bin/wormdb /usr/local/bin/wormdb
+COPY deploy/atomicassets/wormdb.json /etc/wormdb.json
+COPY deploy/atomicassets/entrypoint-server.sh /entrypoint-server.sh
+RUN chmod +x /usr/local/bin/wormdb /entrypoint-server.sh
