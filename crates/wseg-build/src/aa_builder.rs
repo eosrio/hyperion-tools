@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use mongodb::bson::{Bson, Document};
 
 use crate::aa_binfmt::{
-    encode_asset, encode_config, encode_posting_hybrid, encode_schema_format, encode_template, Attr,
+    encode_asset, encode_collection, encode_config, encode_posting_hybrid, encode_schema_format,
+    encode_template, Attr,
 };
 use crate::aa_tables::*;
 use crate::name;
@@ -20,6 +21,7 @@ use crate::wseg::{write_segment, IndexEntry, Table};
 pub struct AaStats {
     pub schemas: u64,
     pub templates: u64,
+    pub collections: u64,
     pub assets: u64,
     pub bytes: u64,
 }
@@ -59,6 +61,10 @@ pub struct AtomicBuilder {
     asset_fwd: Fwd,
     tmpl_fwd: Fwd,
     schema_fwd: Fwd,
+    coll_fwd: Fwd,
+    /// Global collection-data field → index (from config `collection_format`), to encode collection
+    /// `data` attrs compactly (same idx-keyed scheme as asset/template attrs). Set by `push_config`.
+    coll_format_idx: HashMap<String, u8>,
     by_owner: HashMap<u64, Vec<u64>>,
     by_coll: HashMap<u64, Vec<u64>>,
     by_schema: HashMap<u64, Vec<u64>>,
@@ -85,6 +91,8 @@ impl AtomicBuilder {
             asset_fwd: Fwd::default(),
             tmpl_fwd: Fwd::default(),
             schema_fwd: Fwd::default(),
+            coll_fwd: Fwd::default(),
+            coll_format_idx: HashMap::new(),
             by_owner: HashMap::new(),
             by_coll: HashMap::new(),
             by_schema: HashMap::new(),
@@ -101,6 +109,7 @@ impl AtomicBuilder {
     pub fn push(&mut self, coll: &str, d: &Document) {
         match coll {
             "atomicassets-config" => self.push_config(d),
+            "atomicassets-collections" => self.push_collection(d),
             "atomicassets-schemas" => self.push_schema(d),
             "atomicassets-templates" => self.push_template(d),
             "atomicassets-assets" => self.push_asset(d),
@@ -122,6 +131,14 @@ impl AtomicBuilder {
                 }
             }
         }
+        // Global collection-data field→index, for compact collection `data` attr encoding (push_collection).
+        // The attr field_idx is a u8, so fields past 255 are unrepresentable — skip them (never happens for
+        // a real collection_format, but avoids a silent `as u8` wrap).
+        self.coll_format_idx = fmt
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (n, _))| u8::try_from(i).ok().map(|ix| (n.clone(), ix)))
+            .collect();
         let mut tokens: Vec<(u64, String, i64)> = Vec::new();
         if let Ok(arr) = d.get_array("supported_tokens") {
             for t in arr {
@@ -172,9 +189,54 @@ impl AtomicBuilder {
         };
         let skey = coll_schema_key(coll, sch);
         let immutable = self.attrs(skey, d.get_document("immutable_data").ok());
-        let blob = encode_template(tid, name::encode(sch), &immutable);
+        let blob = encode_template(
+            tid,
+            name::encode(sch),
+            doc_bool(d, "transferable") as u8,
+            doc_bool(d, "burnable") as u8,
+            doc_u32(d, "max_supply"),
+            doc_u32(d, "issued_supply"),
+            &immutable,
+        );
         self.tmpl_fwd.push(template_key(tid as i64), &blob);
         self.stats.templates += 1;
+    }
+
+    /// `atomicassets-collections` → the collection forward record (TABLE_AA_COLL_FWD), keyed by the
+    /// name-encoded collection. `data` attrs are encoded against the global config `collection_format`.
+    fn push_collection(&mut self, d: &Document) {
+        let Some(coll) = doc_str(d, "collection_name") else {
+            return;
+        };
+        let author = doc_str(d, "author").map(name::encode).unwrap_or(0);
+        let authorized = doc_name_array(d, "authorized_accounts");
+        let notify = doc_name_array(d, "notify_accounts");
+        if authorized.len() > 255 || notify.len() > 255 {
+            eprintln!(
+                "[aa-build] WARN collection {coll}: account list exceeds the 255 cap (authorized={}, notify={}) — truncating",
+                authorized.len(),
+                notify.len()
+            );
+        }
+        // collection `data` attrs keyed by the global collection_format index (mirrors asset/template).
+        let data: Vec<Attr> = match d.get_document("data").ok() {
+            Some(doc) => doc
+                .iter()
+                .filter_map(|(k, v)| self.coll_format_idx.get(k).map(|&i| (i, bson_canon(v))))
+                .collect(),
+            None => Vec::new(),
+        };
+        let blob = encode_collection(
+            collection_key(coll),
+            author,
+            doc_bool(d, "allow_notify") as u8,
+            &authorized,
+            &notify,
+            doc_f64(d, "market_fee"),
+            &data,
+        );
+        self.coll_fwd.push(collection_key(coll), &blob);
+        self.stats.collections += 1;
     }
 
     fn push_asset(&mut self, d: &Document) {
@@ -248,13 +310,59 @@ impl AtomicBuilder {
         self.stats.schemas += 1;
     }
 
-    /// Register a template forward record (its immutable attrs, stored once).
-    pub fn push_template_raw(&mut self, template_id: i32, schema_u: u64, immutable: &[Attr]) {
+    /// Register a template forward record (its immutable attrs + v2 fields, stored once).
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_template_raw(
+        &mut self,
+        template_id: i32,
+        schema_u: u64,
+        transferable: u8,
+        burnable: u8,
+        max_supply: u32,
+        issued_supply: u32,
+        immutable: &[Attr],
+    ) {
         self.tmpl_fwd.push(
             template_key(template_id as i64),
-            &encode_template(template_id, schema_u, immutable),
+            &encode_template(
+                template_id,
+                schema_u,
+                transferable,
+                burnable,
+                max_supply,
+                issued_supply,
+                immutable,
+            ),
         );
         self.stats.templates += 1;
+    }
+
+    /// Register a collection forward record (already-decoded fields), keyed by the name-encoded
+    /// collection. Used by compaction to carry COLL_FWD over into a fresh segment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_collection_raw(
+        &mut self,
+        collection: u64,
+        author: u64,
+        allow_notify: u8,
+        authorized: &[u64],
+        notify: &[u64],
+        market_fee: f64,
+        data: &[Attr],
+    ) {
+        self.coll_fwd.push(
+            collection,
+            &encode_collection(
+                collection,
+                author,
+                allow_notify,
+                authorized,
+                notify,
+                market_fee,
+                data,
+            ),
+        );
+        self.stats.collections += 1;
     }
 
     /// Add one already-decoded current asset to the forward store + every inverted index. `facet_keys`
@@ -359,6 +467,7 @@ impl AtomicBuilder {
             std::mem::take(&mut self.asset_fwd).into_table(TABLE_AA_FWD),
             std::mem::take(&mut self.tmpl_fwd).into_table(TABLE_AA_TMPL_FWD),
             std::mem::take(&mut self.schema_fwd).into_table(TABLE_AA_SCHEMAS),
+            std::mem::take(&mut self.coll_fwd).into_table(TABLE_AA_COLL_FWD),
             posting_table(TABLE_AA_BY_OWNER, std::mem::take(&mut self.by_owner)),
             posting_table(TABLE_AA_BY_COLL, std::mem::take(&mut self.by_coll)),
             posting_table(TABLE_AA_BY_SCHEMA, std::mem::take(&mut self.by_schema)),
@@ -453,6 +562,32 @@ fn doc_i64(d: &Document, k: &str) -> Option<i64> {
         Some(Bson::Int64(i)) => Some(*i),
         Some(Bson::Double(f)) => Some(*f as i64),
         _ => None,
+    }
+}
+fn doc_bool(d: &Document, k: &str) -> bool {
+    match d.get(k) {
+        Some(Bson::Boolean(v)) => *v,
+        Some(Bson::Int32(i)) => *i != 0,
+        Some(Bson::Int64(i)) => *i != 0,
+        _ => false,
+    }
+}
+fn doc_f64(d: &Document, k: &str) -> f64 {
+    match d.get(k) {
+        Some(Bson::Double(f)) => *f,
+        Some(Bson::Int32(i)) => *i as f64,
+        Some(Bson::Int64(i)) => *i as f64,
+        _ => 0.0,
+    }
+}
+/// Collect a BSON string array (e.g. authorized/notify accounts) as name-encoded u64s.
+fn doc_name_array(d: &Document, k: &str) -> Vec<u64> {
+    match d.get_array(k) {
+        Ok(arr) => arr
+            .iter()
+            .filter_map(|b| b.as_str().map(name::encode))
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 
