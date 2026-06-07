@@ -271,7 +271,10 @@ impl<'a> Posting<'a> {
 /// A decoded data attribute: schema field index + its canonical string value.
 pub type Attr = (u8, String);
 
-const ASSET_VERSION: u8 = 1;
+// v2 (Cycle B): asset FWD unchanged structurally; template FWD gains transferable/burnable/
+// max_supply/issued_supply; the new collection FWD (TABLE_AA_COLL_FWD) is introduced. The version byte
+// gates every data blob, so a v2 reader fails closed on a v1 segment (rebuild required) and vice-versa.
+const ASSET_VERSION: u8 = 2;
 
 /// Encode an asset forward record. `immutable` is non-empty only for assets without a template
 /// (templated assets get their immutable data from the template blob, joined at read time).
@@ -299,12 +302,28 @@ pub fn encode_asset(
     o
 }
 
-/// Encode a template forward record (its immutable attributes, stored once).
-pub fn encode_template(template_id: i32, schema: u64, immutable: &[Attr]) -> Vec<u8> {
-    let mut o = Vec::with_capacity(16 + immutable.len() * 12);
+/// Encode a template forward record (its immutable attributes, stored once) plus the v2 fields the full
+/// API shape needs: `transferable`/`burnable` (0/1) and `max_supply`/`issued_supply` (uint32; 0 supply =
+/// unlimited). Layout: `version | template_id(i32) | schema(u64) | transferable(u8) | burnable(u8) |
+/// max_supply(u32) | issued_supply(u32) | immutable attrs` — attrs start at offset 23.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_template(
+    template_id: i32,
+    schema: u64,
+    transferable: u8,
+    burnable: u8,
+    max_supply: u32,
+    issued_supply: u32,
+    immutable: &[Attr],
+) -> Vec<u8> {
+    let mut o = Vec::with_capacity(23 + immutable.len() * 12);
     o.push(ASSET_VERSION);
     pi32(&mut o, template_id);
     pu64(&mut o, schema);
+    o.push(transferable);
+    o.push(burnable);
+    pu32(&mut o, max_supply);
+    pu32(&mut o, issued_supply);
     put_attrs(&mut o, immutable);
     o
 }
@@ -368,13 +387,113 @@ pub fn decode_asset(b: &[u8]) -> AssetRec {
     }
 }
 
-/// Decoded template forward record: (template_id, schema, immutable attrs).
-pub fn decode_template(b: &[u8]) -> (i32, u64, Vec<Attr>) {
-    let mut p = 1usize;
+/// Decoded template forward record (v2).
+#[derive(Debug, PartialEq)]
+pub struct TemplateRec {
+    pub template_id: i32,
+    pub schema: u64,
+    pub transferable: u8,
+    pub burnable: u8,
+    pub max_supply: u32,
+    pub issued_supply: u32,
+    pub immutable: Vec<Attr>,
+}
+
+pub fn decode_template(b: &[u8]) -> TemplateRec {
+    let mut p = 1usize; // skip version
     let template_id = gi32(b, &mut p);
     let schema = gu64(b, &mut p);
+    let transferable = b[p];
+    p += 1;
+    let burnable = b[p];
+    p += 1;
+    let max_supply = gu32(b, &mut p);
+    let issued_supply = gu32(b, &mut p);
     let immutable = get_attrs(b, &mut p);
-    (template_id, schema, immutable)
+    TemplateRec {
+        template_id,
+        schema,
+        transferable,
+        burnable,
+        max_supply,
+        issued_supply,
+        immutable,
+    }
+}
+
+// ── collection forward record (TABLE_AA_COLL_FWD) ───────────────────────────────────────────────────
+/// Encode a collection forward record. Layout: `version | collection(u64) | author(u64) |
+/// allow_notify(u8) | auth_count(u8) | authorized(u64×N) | notify_count(u8) | notify(u64×M) |
+/// market_fee(f64) | data attrs`. `market_fee` is the contract `double` (stored as f64 to avoid the
+/// precision loss an f32 would introduce in the parity diff). Account lists are capped at 255 each (u8
+/// count) — real collections carry a handful, far below the cap; the builder (`push_collection`) warns if
+/// the cap ever bites, so the truncation is never silent.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_collection(
+    collection: u64,
+    author: u64,
+    allow_notify: u8,
+    authorized: &[u64],
+    notify: &[u64],
+    market_fee: f64,
+    data: &[Attr],
+) -> Vec<u8> {
+    let nauth = authorized.len().min(255);
+    let nnotify = notify.len().min(255);
+    let mut o = Vec::with_capacity(27 + (nauth + nnotify) * 8 + data.len() * 12);
+    o.push(ASSET_VERSION);
+    pu64(&mut o, collection);
+    pu64(&mut o, author);
+    o.push(allow_notify);
+    o.push(nauth as u8);
+    for &acc in &authorized[..nauth] {
+        pu64(&mut o, acc);
+    }
+    o.push(nnotify as u8);
+    for &acc in &notify[..nnotify] {
+        pu64(&mut o, acc);
+    }
+    o.extend_from_slice(&market_fee.to_le_bytes());
+    put_attrs(&mut o, data);
+    o
+}
+
+/// Decoded collection forward record.
+#[derive(Debug, PartialEq)]
+pub struct CollectionRec {
+    pub collection: u64,
+    pub author: u64,
+    pub allow_notify: u8,
+    pub authorized: Vec<u64>,
+    pub notify: Vec<u64>,
+    pub market_fee: f64,
+    pub data: Vec<Attr>,
+}
+
+pub fn decode_collection(b: &[u8]) -> CollectionRec {
+    let mut p = 1usize; // skip version
+    let collection = gu64(b, &mut p);
+    let author = gu64(b, &mut p);
+    let allow_notify = b[p];
+    p += 1;
+    let nauth = b[p] as usize;
+    p += 1;
+    let authorized: Vec<u64> = (0..nauth).map(|_| gu64(b, &mut p)).collect();
+    let nnotify = b[p] as usize;
+    p += 1;
+    let notify: Vec<u64> = (0..nnotify).map(|_| gu64(b, &mut p)).collect();
+    let market_fee = f64::from_le_bytes(b[p..p + 8].try_into().unwrap());
+    p += 8;
+    let data = get_attrs(b, &mut p);
+    CollectionRec {
+        collection,
+        author,
+        allow_notify,
+        authorized,
+        notify,
+        market_fee,
+        data,
+    }
 }
 
 // ── config singleton (TABLE_AA_CONFIG) ─────────────────────────────────────────────────────────────
@@ -474,7 +593,7 @@ mod tests {
     #[test]
     fn golden_asset_record() {
         let golden: &[u8] = &[
-            1, // version
+            2, // version (Cycle B = 2)
             1, 0, 0, 0, 0, 0, 0, 0, // owner = 1
             2, 0, 0, 0, 0, 0, 0, 0, // collection = 2
             3, 0, 0, 0, 0, 0, 0, 0, // schema = 3
@@ -485,6 +604,59 @@ mod tests {
             0, 0, // mutable attr count
         ];
         assert_eq!(encode_asset(1, 2, 3, 7, 100, 42, &[], &[]), golden);
+    }
+
+    /// Cross-repo byte golden for the v2 template FWD record (must match GOLDEN_TEMPLATE_V2 in
+    /// wormdb-domain-atomicassets/src/binfmt.zig). Raw field values (not name-encoded) so the byte array
+    /// is mirrored verbatim on both sides — the same lock as `golden_asset_record`.
+    #[test]
+    fn golden_template_v2_record() {
+        let golden: &[u8] = &[
+            2, // version
+            3, 0, 0, 0, // template_id = 3
+            99, 0, 0, 0, 0, 0, 0, 0, // schema = 99
+            1, // transferable = 1
+            0, // burnable = 0
+            0, 0, 0, 0, // max_supply = 0 (unlimited)
+            5, 0, 0, 0, // issued_supply = 5
+            1, 0, // immutable attr count = 1
+            0, // field_idx = 0
+            9, 0, // val_len = 9
+            67, 104, 97, 114, 105, 122, 97, 114, 100, // "Charizard"
+        ];
+        let attrs = vec![(0u8, "Charizard".to_string())];
+        assert_eq!(
+            encode_template(3, 99, 1, 0, 0, 5, &attrs),
+            golden,
+            "template v2 byte layout drift — update GOLDEN_TEMPLATE_V2 in the Zig reader too"
+        );
+    }
+
+    /// Cross-repo byte golden for the collection FWD record (must match GOLDEN_COLLECTION_V2 in the Zig
+    /// reader). Raw field values; market_fee=0.0 (8 zero bytes) keeps the array unambiguous — the f64
+    /// value path is covered by `collection_record_round_trips`. One authorized account, no notify.
+    #[test]
+    fn golden_collection_v2_record() {
+        let golden: &[u8] = &[
+            2, // version
+            77, 0, 0, 0, 0, 0, 0, 0, // collection = 77
+            88, 0, 0, 0, 0, 0, 0, 0, // author = 88
+            1, // allow_notify = 1
+            1, // auth_count = 1
+            66, 0, 0, 0, 0, 0, 0, 0, // authorized[0] = 66
+            0, // notify_count = 0
+            0, 0, 0, 0, 0, 0, 0, 0, // market_fee = 0.0 (f64 LE)
+            1, 0, // data attr count = 1
+            0, // field_idx = 0 (name)
+            5, 0, // val_len = 5
+            77, 121, 67, 111, 108, // "MyCol"
+        ];
+        let data = vec![(0u8, "MyCol".to_string())];
+        assert_eq!(
+            encode_collection(77, 88, 1, &[66], &[], 0.0, &data),
+            golden,
+            "collection byte layout drift — update GOLDEN_COLLECTION_V2 in the Zig reader too"
+        );
     }
 
     #[test]
@@ -586,11 +758,38 @@ mod tests {
     #[test]
     fn template_record_round_trips() {
         let immutable = vec![(0u8, "Charizard".to_string()), (2u8, "150".to_string())];
-        let blob = encode_template(3, crate::name::encode("pokemon"), &immutable);
-        let (tid, schema, attrs) = decode_template(&blob);
-        assert_eq!(tid, 3);
-        assert_eq!(schema, crate::name::encode("pokemon"));
-        assert_eq!(attrs, immutable);
+        let blob = encode_template(3, crate::name::encode("pokemon"), 1, 0, 100, 42, &immutable);
+        let t = decode_template(&blob);
+        assert_eq!(t.template_id, 3);
+        assert_eq!(t.schema, crate::name::encode("pokemon"));
+        assert_eq!(t.transferable, 1);
+        assert_eq!(t.burnable, 0);
+        assert_eq!(t.max_supply, 100);
+        assert_eq!(t.issued_supply, 42);
+        assert_eq!(t.immutable, immutable);
+    }
+
+    #[test]
+    fn collection_record_round_trips() {
+        let data = vec![(0u8, "MyCol".to_string()), (1u8, "Qmimg".to_string())];
+        let auth = vec![crate::name::encode("alice"), crate::name::encode("bob")];
+        let blob = encode_collection(
+            crate::name::encode("mycol"),
+            crate::name::encode("alice"),
+            1,
+            &auth,
+            &[],
+            0.06,
+            &data,
+        );
+        let c = decode_collection(&blob);
+        assert_eq!(c.collection, crate::name::encode("mycol"));
+        assert_eq!(c.author, crate::name::encode("alice"));
+        assert_eq!(c.allow_notify, 1);
+        assert_eq!(c.authorized, auth);
+        assert!(c.notify.is_empty());
+        assert_eq!(c.market_fee, 0.06);
+        assert_eq!(c.data, data);
     }
 
     #[test]

@@ -90,14 +90,26 @@ async fn main() -> Result<()> {
 
     let t0 = Instant::now();
     let mut b = AtomicBuilder::new(fields);
-    // config first (singleton — contract/collection_format/supported_tokens), then schemas (need
+    // config first (singleton — contract/collection_format/supported_tokens; sets the collection_format
+    // index), then collections (depend on that index for their `data` attrs), then schemas (need
     // `format`), then templates, then assets (projected).
     stream(&db, "atomicassets-config", doc! {}, 0, &mut b, t0).await?;
+    stream(
+        &db,
+        "atomicassets-collections",
+        doc! { "collection_name": 1, "author": 1, "allow_notify": 1, "authorized_accounts": 1,
+        "notify_accounts": 1, "market_fee": 1, "data": 1 },
+        0,
+        &mut b,
+        t0,
+    )
+    .await?;
     stream(&db, "atomicassets-schemas", doc! {}, 0, &mut b, t0).await?;
     stream(
         &db,
         "atomicassets-templates",
-        doc! { "collection_name": 1, "schema_name": 1, "template_id": 1, "immutable_data": 1 },
+        doc! { "collection_name": 1, "schema_name": 1, "template_id": 1, "immutable_data": 1,
+        "transferable": 1, "burnable": 1, "max_supply": 1, "issued_supply": 1 },
         0,
         &mut b,
         t0,
@@ -118,11 +130,12 @@ async fn main() -> Result<()> {
     let stats = b.finish(&args.out).context("write segment")?;
     let sz = std::fs::metadata(&args.out)?.len();
     eprintln!(
-        "[aa-build] wrote {} | {} assets, {} templates, {} schemas | {} MiB ({} bytes) in {:.0}s",
+        "[aa-build] wrote {} | {} assets, {} templates, {} schemas, {} collections | {} MiB ({} bytes) in {:.0}s",
         args.out,
         stats.assets,
         stats.templates,
         stats.schemas,
+        stats.collections,
         sz >> 20,
         sz,
         t0.elapsed().as_secs_f64()

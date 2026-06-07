@@ -1107,8 +1107,16 @@ impl LiveSeg {
             b.push_schema_raw(key, &decode_schema_format(blob));
         });
         self.base.for_each_entry(TABLE_AA_TMPL_FWD, |_k, blob| {
-            let (tid, schema_u, immut) = decode_template(blob);
-            b.push_template_raw(tid, schema_u, &immut);
+            let t = decode_template(blob);
+            b.push_template_raw(
+                t.template_id,
+                t.schema,
+                t.transferable,
+                t.burnable,
+                t.max_supply,
+                t.issued_supply,
+                &t.immutable,
+            );
         });
 
         // every CURRENT asset, exactly once: base assets (overlay-current, tombstones dropped) …
