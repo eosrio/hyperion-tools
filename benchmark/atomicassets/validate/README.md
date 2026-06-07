@@ -43,3 +43,41 @@ exact matches vs `test.wax.api.atomicassets.io`. On-disk footprint (WiredTiger-c
 fully indexed ≈ **8 GB**, dominated by the `data.$**` wildcard. (Report on-disk `storageSize`, not the
 uncompressed `size`.) The one parity fix this surfaced: asset `float`/`double` attributes render as
 strings on the live API (templates keep numbers) — handled in `map_asset`.
+
+## HTTP load benchmark (WormDB vs the Postgres atomicassets-api)
+
+`http-bench.mjs` measures **end-to-end served latency + throughput** for the read path. Cycle B made
+WormDB serve the identical eosio-contract-api shape + query params as the reference Postgres
+`atomicassets-api`, so the **same URL corpus hits both** and the comparison is apples-to-apples.
+
+```sh
+# one or both targets; same corpus, run sequentially so the client never self-contends
+WORMDB=http://127.0.0.1:6390 ATOMIC=https://wax.api.atomicassets.io \
+  N=50000 C=100 STATS_WORMDB=aa-wormdb OUT=wax-run node http-bench.mjs
+```
+
+It samples a real corpus (ids / owners / collections / (coll,schema) pairs, newest+oldest pages), runs a
+weighted mix — `point` `/assets/:id`, `coll`, `owner`, `faceted` (coll+schema), `browse`, `account` —
+and reports per-type + overall **p50/p95/p99** (min/mean/max + a latency histogram in the JSON) and
+**req/s**. Writes `<OUT>.json` + `<OUT>.md`.
+
+| env | meaning |
+|---|---|
+| `WORMDB` / `ATOMIC` | target base URLs (set one or both) |
+| `N` / `DURATION` | requests per target, or seconds of steady-state load (`DURATION` wins) |
+| `C` | concurrency |
+| `SAMPLE` / `SAMPLE_FROM` | corpus size / base URL to sample from (default `WORMDB`) |
+| `MIX` | override weights, e.g. `MIX=point=50,coll=20,owner=10,faceted=10,browse=5,account=5` |
+| `STATS_WORMDB` / `STATS_ATOMIC` | container to sample CPU/RSS via `docker stats` during that run |
+| `OUT` | results-file prefix (default `bench-results`) |
+
+**Same-data assumption.** A fair side-by-side requires both targets on the same chain/head. With 2+
+targets the harness reduces the corpus to the **cross-target intersection** (entities present on every
+target) so a divergent dataset can't make them do different work for the same URL; the dropped counts are
+recorded in the JSON `coverage` block so any divergence is visible. (Point misses already surface as
+errors; the intersection is what protects the list queries, whose misses are HTTP 200 with smaller pages.)
+
+**Proving run = WAX 232M on native Linux**, both targets on the same data. Note that latency on the
+**Windows Docker-Desktop loopback adds ~2–4 ms** and a tiny testnet segment makes postings trivial — so a
+jungle4 run validates the harness but is *not* a proving number. The WSEG micro-bench already shows the
+storage win (~33×) + µs in-process lookups; this harness is the served-HTTP p50/95/99 + throughput half.
