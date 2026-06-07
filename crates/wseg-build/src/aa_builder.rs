@@ -132,10 +132,12 @@ impl AtomicBuilder {
             }
         }
         // Global collection-data field→index, for compact collection `data` attr encoding (push_collection).
+        // The attr field_idx is a u8, so fields past 255 are unrepresentable — skip them (never happens for
+        // a real collection_format, but avoids a silent `as u8` wrap).
         self.coll_format_idx = fmt
             .iter()
             .enumerate()
-            .map(|(i, (n, _))| (n.clone(), i as u8))
+            .filter_map(|(i, (n, _))| u8::try_from(i).ok().map(|ix| (n.clone(), ix)))
             .collect();
         let mut tokens: Vec<(u64, String, i64)> = Vec::new();
         if let Ok(arr) = d.get_array("supported_tokens") {

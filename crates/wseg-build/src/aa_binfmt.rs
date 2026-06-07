@@ -316,7 +316,7 @@ pub fn encode_template(
     issued_supply: u32,
     immutable: &[Attr],
 ) -> Vec<u8> {
-    let mut o = Vec::with_capacity(23 + immutable.len() * 12);
+    let mut o = Vec::with_capacity(25 + immutable.len() * 12); // 23 header + 2 attr-count prefix
     o.push(ASSET_VERSION);
     pi32(&mut o, template_id);
     pu64(&mut o, schema);
@@ -440,7 +440,7 @@ pub fn encode_collection(
 ) -> Vec<u8> {
     let nauth = authorized.len().min(255);
     let nnotify = notify.len().min(255);
-    let mut o = Vec::with_capacity(27 + (nauth + nnotify) * 8 + data.len() * 12);
+    let mut o = Vec::with_capacity(30 + (nauth + nnotify) * 8 + data.len() * 12); // 28 fixed + 2 attr-count
     o.push(ASSET_VERSION);
     pu64(&mut o, collection);
     pu64(&mut o, author);
