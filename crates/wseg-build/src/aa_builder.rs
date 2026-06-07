@@ -337,6 +337,34 @@ impl AtomicBuilder {
         self.stats.templates += 1;
     }
 
+    /// Register a collection forward record (already-decoded fields), keyed by the name-encoded
+    /// collection. Used by compaction to carry COLL_FWD over into a fresh segment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_collection_raw(
+        &mut self,
+        collection: u64,
+        author: u64,
+        allow_notify: u8,
+        authorized: &[u64],
+        notify: &[u64],
+        market_fee: f64,
+        data: &[Attr],
+    ) {
+        self.coll_fwd.push(
+            collection,
+            &encode_collection(
+                collection,
+                author,
+                allow_notify,
+                authorized,
+                notify,
+                market_fee,
+                data,
+            ),
+        );
+        self.stats.collections += 1;
+    }
+
     /// Add one already-decoded current asset to the forward store + every inverted index. `facet_keys`
     /// are the precomputed `data_attr_key`s the asset participates in (0 or 1 per configured facet).
     #[allow(clippy::too_many_arguments)]

@@ -400,6 +400,10 @@ pub struct TemplateRec {
 }
 
 pub fn decode_template(b: &[u8]) -> TemplateRec {
+    debug_assert_eq!(
+        b[0], ASSET_VERSION,
+        "decode_template: version byte mismatch (rebuild the segment)"
+    );
     let mut p = 1usize; // skip version
     let template_id = gi32(b, &mut p);
     let schema = gu64(b, &mut p);
@@ -471,6 +475,10 @@ pub struct CollectionRec {
 }
 
 pub fn decode_collection(b: &[u8]) -> CollectionRec {
+    debug_assert_eq!(
+        b[0], ASSET_VERSION,
+        "decode_collection: version byte mismatch (rebuild the segment)"
+    );
     let mut p = 1usize; // skip version
     let collection = gu64(b, &mut p);
     let author = gu64(b, &mut p);

@@ -19,7 +19,9 @@ use std::sync::Arc;
 use memmap2::Mmap;
 use roaring::RoaringTreemap;
 
-use crate::aa_binfmt::{decode_asset, decode_schema_format, decode_template, Attr, Posting};
+use crate::aa_binfmt::{
+    decode_asset, decode_collection, decode_schema_format, decode_template, Attr, Posting,
+};
 use crate::aa_builder::{AaStats, AtomicBuilder};
 use crate::aa_tables::*;
 use crate::name;
@@ -1116,6 +1118,19 @@ impl LiveSeg {
                 t.max_supply,
                 t.issued_supply,
                 &t.immutable,
+            );
+        });
+        // collection forward records carry over too (v2 TABLE_AA_COLL_FWD) — else compaction drops them.
+        self.base.for_each_entry(TABLE_AA_COLL_FWD, |_k, blob| {
+            let c = decode_collection(blob);
+            b.push_collection_raw(
+                c.collection,
+                c.author,
+                c.allow_notify,
+                &c.authorized,
+                &c.notify,
+                c.market_fee,
+                &c.data,
             );
         });
 
