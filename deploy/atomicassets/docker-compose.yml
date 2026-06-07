@@ -88,7 +88,7 @@ services:
     profiles: ["state", "all"]
     healthcheck:
       # the bun feed (aa-feed) waits on this; the wormdb image ships curl, so probe the HTTP gateway.
-      test: ["CMD-SHELL", "curl -fsS http://localhost:6390/atomicassets/v1/config >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:6390/atomicassets/v1/config >/dev/null || exit 1"]
       interval: 5s
       timeout: 4s
       retries: 30
@@ -98,7 +98,9 @@ services:
   # from the wormdb bun app; EXECs aa_mint/aa_transfer/aa_burn over WormWire into wormdb-aa:6389.
   aa-feed:
     build:
-      context: ../../../../wormdb/apps/bun
+      # Default assumes `wormdb` is a SIBLING of this repo (…/hyperion-tools + …/wormdb). For a different
+      # layout, set WORMDB_DIR in .env to the wormdb repo path relative to this compose file's directory.
+      context: ${WORMDB_DIR:-../../../wormdb}/apps/bun
       dockerfile: Dockerfile.feed
     image: aa-stack/feed:latest
     container_name: aa-feed
