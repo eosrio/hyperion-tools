@@ -1,6 +1,6 @@
 {
   "data": "/var/lib/wormdb",
-  "store": { "persistence": "none" },
+  "store": { "persistence": "full" },
   "server": { "port": 6389 },
   "gateway": { "enabled": true, "port": 6390 },
   "auth": { "require_auth": false }

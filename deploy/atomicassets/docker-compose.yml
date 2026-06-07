@@ -72,6 +72,7 @@ services:
       AA_SEGMENT: /data/aa.wseg
     volumes:
       - aa-data:/data
+      - aa-wormdb-data:/var/lib/wormdb # WAL + snapshot (persistence:full) → overlay survives a restart
       - ./wormdb.json:/etc/wormdb.json:ro
     # Loopback-only. 6390 = HTTP read API (curl from the host); 6389 = WormWire (privileged exec/peer
     # wire) — the Phase-2 SHiP feed reaches it over the bridge, so neither needs off-host exposure.
@@ -85,10 +86,49 @@ services:
         condition: service_completed_successfully
     networks: [aa-stack]
     profiles: ["state", "all"]
+    healthcheck:
+      # the bun feed (aa-feed) waits on this; the wormdb image ships curl, so probe the HTTP gateway.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:6390/atomicassets/v1/config >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 8s
+
+  # Phase 2: bun SHiP feed — keeps the overlay live from the Jungle 4 node (host.docker.internal). Built
+  # from the wormdb bun app; EXECs aa_mint/aa_transfer/aa_burn over WormWire into wormdb-aa:6389.
+  # In the "all" profile only (NOT a standalone "feed" profile): it depends_on wormdb-aa, which is in
+  # state/all, so a `--profile feed`-only project would reference an ignored service and be invalid. Run
+  # the live stack with `docker compose --profile all up`; attach just the feed to a running state stack
+  # with `docker compose --profile all up -d aa-feed` (the named service resolves its deps without
+  # restarting them); `docker compose --profile state up` serves the static snapshot without the feed.
+  aa-feed:
+    build:
+      # Default assumes `wormdb` is a SIBLING of this repo (…/hyperion-tools + …/wormdb). For a different
+      # layout, set WORMDB_DIR in .env to the wormdb repo path relative to this compose file's directory.
+      context: ${WORMDB_DIR:-../../../wormdb}/apps/bun
+      dockerfile: Dockerfile.feed
+    image: aa-stack/feed:latest
+    container_name: aa-feed
+    restart: on-failure
+    environment:
+      SHIP: ws://host.docker.internal:28080/
+      CHAIN_API: http://host.docker.internal:28888
+      CHAIN: ${CHAIN:-jungle4}
+      AA_CONTRACT: atomicassets
+      WORMHOST: wormdb-aa
+      PORT: "6389"
+      START: ${FEED_START:-269541093} # snapshot block; the per-block checkpoint overrides on restart
+    extra_hosts: *host_gw
+    depends_on:
+      wormdb-aa:
+        condition: service_healthy
+    networks: [aa-stack]
+    profiles: ["all"]
 
 volumes:
   mongo-data:
   aa-data:
+  aa-wormdb-data:
 
 networks:
   aa-stack:
