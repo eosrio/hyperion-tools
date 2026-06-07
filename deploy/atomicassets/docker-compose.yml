@@ -96,6 +96,11 @@ services:
 
   # Phase 2: bun SHiP feed — keeps the overlay live from the Jungle 4 node (host.docker.internal). Built
   # from the wormdb bun app; EXECs aa_mint/aa_transfer/aa_burn over WormWire into wormdb-aa:6389.
+  # In the "all" profile only (NOT a standalone "feed" profile): it depends_on wormdb-aa, which is in
+  # state/all, so a `--profile feed`-only project would reference an ignored service and be invalid. Run
+  # the live stack with `docker compose --profile all up`; attach just the feed to a running state stack
+  # with `docker compose --profile all up -d aa-feed` (the named service resolves its deps without
+  # restarting them); `docker compose --profile state up` serves the static snapshot without the feed.
   aa-feed:
     build:
       # Default assumes `wormdb` is a SIBLING of this repo (…/hyperion-tools + …/wormdb). For a different
@@ -118,7 +123,7 @@ services:
       wormdb-aa:
         condition: service_healthy
     networks: [aa-stack]
-    profiles: ["feed", "all"]
+    profiles: ["all"]
 
 volumes:
   mongo-data:
