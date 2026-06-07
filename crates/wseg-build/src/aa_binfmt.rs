@@ -400,7 +400,7 @@ pub struct TemplateRec {
 }
 
 pub fn decode_template(b: &[u8]) -> TemplateRec {
-    debug_assert_eq!(
+    assert_eq!(
         b[0], ASSET_VERSION,
         "decode_template: version byte mismatch (rebuild the segment)"
     );
@@ -475,7 +475,7 @@ pub struct CollectionRec {
 }
 
 pub fn decode_collection(b: &[u8]) -> CollectionRec {
-    debug_assert_eq!(
+    assert_eq!(
         b[0], ASSET_VERSION,
         "decode_collection: version byte mismatch (rebuild the segment)"
     );
