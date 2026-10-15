@@ -9,7 +9,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::TryStreamExt;
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{Document, doc};
 use mongodb::options::FindOptions;
 use mongodb::{Client, Database};
 use wseg_build::aa_builder::AtomicBuilder;

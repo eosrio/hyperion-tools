@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use rs_abieos::Abieos;
 
 use crate::abi::build_abi_doc;
@@ -182,7 +182,7 @@ fn worker_scan(
     let mut ob = [0u8; 8];
     idx.read_exact(&mut ob)?;
     let mut pos = u64::from_le_bytes(ob); // byte offset of the current entry
-                                          // 8 MiB buffer to cut read syscalls and feed the filesystem prefetcher on a cold, I/O-bound log.
+    // 8 MiB buffer to cut read syscalls and feed the filesystem prefetcher on a cold, I/O-bound log.
     let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     log.seek(SeekFrom::Start(pos))?;
 
@@ -274,7 +274,7 @@ pub fn scan_disk<W: Write + Send>(
     use std::collections::BTreeSet;
     use std::io::Read;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{mpsc, Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
     use std::time::{Duration, Instant};
 
     let log_path = format!("{dir}/chain_state_history.log");
@@ -334,7 +334,9 @@ pub fn scan_disk<W: Write + Send>(
     let cursor = Arc::new(AtomicU64::new(start as u64));
     // Completed chunk start-offsets, for computing the contiguous resume watermark.
     let completed = Arc::new(Mutex::new(BTreeSet::<u64>::new()));
-    eprintln!("[disk] log [{first_block}..{last_block}]; scanning [{start}..{end}] ({total} blocks) with {threads} threads");
+    eprintln!(
+        "[disk] log [{first_block}..{last_block}]; scanning [{start}..{end}] ({total} blocks) with {threads} threads"
+    );
     let t0 = Instant::now();
 
     let scanned = Arc::new(AtomicU64::new(0));
@@ -399,29 +401,31 @@ pub fn scan_disk<W: Write + Send>(
                 cursor.clone(),
                 completed.clone(),
             );
-            handles.push(s.spawn(move || loop {
-                let cs64 = cur.fetch_add(chunk, Relaxed);
-                if cs64 > end as u64 {
-                    break;
-                }
-                let cs = cs64 as u32;
-                let ce = (cs64 + chunk - 1).min(end as u64) as u32;
-                match worker_scan(
-                    &lp,
-                    &ip,
-                    first_block,
-                    cs,
-                    ce,
-                    log_len,
-                    stream_threshold,
-                    &txc,
-                    &scc,
-                ) {
-                    // mark the chunk done only on success, so a failed chunk is re-scanned on resume
-                    Ok(()) => {
-                        cmp.lock().unwrap().insert(cs64);
+            handles.push(s.spawn(move || {
+                loop {
+                    let cs64 = cur.fetch_add(chunk, Relaxed);
+                    if cs64 > end as u64 {
+                        break;
                     }
-                    Err(e) => eprintln!("[disk] worker {i} [{cs}..{ce}] FAILED: {e:#}"),
+                    let cs = cs64 as u32;
+                    let ce = (cs64 + chunk - 1).min(end as u64) as u32;
+                    match worker_scan(
+                        &lp,
+                        &ip,
+                        first_block,
+                        cs,
+                        ce,
+                        log_len,
+                        stream_threshold,
+                        &txc,
+                        &scc,
+                    ) {
+                        // mark the chunk done only on success, so a failed chunk is re-scanned on resume
+                        Ok(()) => {
+                            cmp.lock().unwrap().insert(cs64);
+                        }
+                        Err(e) => eprintln!("[disk] worker {i} [{cs}..{ce}] FAILED: {e:#}"),
+                    }
                 }
             }));
         }
@@ -603,7 +607,7 @@ mod tests {
         row.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0xea, 0x30, 0x55]); // "eosio"
         row.extend_from_slice(&[0x80, 0xd6, 0x14, 0x49]); // creation_date
         row.extend_from_slice(&[0x02, 0x0e, 0x65]); // abi: varuint len 2, bytes 0e 65
-                                                    // table_delta[]: n_tables=1, table0 = account with 1 row
+        // table_delta[]: n_tables=1, table0 = account with 1 row
         let mut deltas = vec![0x01]; // n_tables = 1
         deltas.push(0x00); // variant
         deltas.push(0x07); // name_len = 7

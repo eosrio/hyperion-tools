@@ -202,3 +202,35 @@ path fast (design from the workflow; both implemented + measured):
    (Note: the varied-key workload here *hydrates* the 100 forward blobs per page — as a real server
    renders results — which raises the working set to **~5.6 GB** @ 232M vs the 3.9 GB earlier non-hydrating
    measurement. Still an evictable page cache; throughput 118k req/s, p50 2.6 µs.)
+
+## The served-HTTP half: WormDB vs the production atomicassets-api, same WAX dataset (2026-06-10)
+
+The micro-bench above is in-process. This is the **end-to-end served-HTTP proving run** the harness
+(`validate/http-bench.mjs`) was built for — run on the production box (`wrx80e-3975wx`, 3975WX/64t,
+PG 18.4), both targets serving the **same 227,213,139-asset WAX state** (snapshot block 439,159,350):
+
+- **WormDB**: `wax-439159350.wseg` (**20.7 GiB**, built from Mongo in 21 min; Mongo itself loaded from
+  the snapshot in 85 min), served by the Zig server (znver2 ReleaseFast), gateway HTTP, no cache tier.
+- **Reference**: a dedicated `atomicassets-api` v1.7.11 instance (`:9002`) on the production PostgreSQL
+  18 database (1.48 TB, live filler at head) with its production redis express-cache enabled.
+- Same real-entity corpus (cross-target intersection), sequential targets, 60 s steady-state per run,
+  zero errors on both sides. Raw artifacts: `validate/wax-c20.{json,md}`, `validate/wax-c100.{json,md}`.
+
+| 60 s steady-state | WormDB | atomicassets-api | factor |
+|---|---|---|---|
+| **C=20** req/s | **1,476** | 141 | **10.5×** |
+| C=20 p50 / p95 / p99 (ms) | 13.3 / 18.7 / 23.9 | 84.6 / 372 / 1,252 | 6× / 20× / 52× |
+| **C=100** req/s | **1,489** | 138 | **10.8×** |
+| C=100 p50 / p95 / p99 (ms) | 66.8 / 77.4 / 83.0 | 522 / 1,808 / 4,621 | 8× / 23× / 56× |
+| worst single request | 164 ms | **10.4 s** (whale `/accounts`) | — |
+| process RSS after ~178k reqs | 2.15 GiB (evictable mmap page cache) | 550 MiB node (+ 16 GB PG shared_buffers + redis behind it) | — |
+
+Notes for honest reading: at C=100 WormDB's throughput is flat vs C=20 (server-saturated ~1.5k req/s on
+this box) and the added latency is pure queueing — p99/p50 = **1.24** vs the reference's 8.8; the
+reference degrades to multi-second tails with its cache ON, and its worst class is the same
+whale-account pattern that needed `maxValueBytes` cache skips in production. The reference shares its
+PG with the live filler (production-realistic for both sides — WormDB shares the same box). Decode
+parity context for this dataset: 2,000/2,000 crosscheck assets byte-identical (`immutable_data` exact);
+shape gaps = the 9 history-tier timestamp fields (Phase 3 by design), a stray nested `contract` field
+we emit, and `template_mint` (snapshot-rank undercounts vs true mint ordinal when a template has heavy
+burns — needs history hydration).

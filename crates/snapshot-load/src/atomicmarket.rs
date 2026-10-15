@@ -13,7 +13,7 @@
 //! all `*_at_time` timestamps, and the `atomicmarket_stats_markets` trade-fact table — are **omitted**
 //! and left to the live feed / ES. Every doc carries `block_num` as state provenance.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::atomicassets::{parse_asset, parse_symbol_spec};
 use crate::map::RowCtx;

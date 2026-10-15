@@ -269,12 +269,14 @@ impl<'a> Posting<'a> {
 
 // ── asset + template forward blobs ───────────────────────────────────────────────────────────────
 /// A decoded data attribute: schema field index + its canonical string value.
-pub type Attr = (u8, String);
+/// The index is `u16`: real WAX schemas exceed 255 fields (e.g. `onmars/land.plots` has 2413), so a
+/// `u8` index silently wrapped (mod 256) for high-index attributes — corrupting those assets' data.
+pub type Attr = (u16, String);
 
-// v2 (Cycle B): asset FWD unchanged structurally; template FWD gains transferable/burnable/
-// max_supply/issued_supply; the new collection FWD (TABLE_AA_COLL_FWD) is introduced. The version byte
-// gates every data blob, so a v2 reader fails closed on a v1 segment (rebuild required) and vice-versa.
-const ASSET_VERSION: u8 = 2;
+// v3: attr schema-field index widened u8 -> u16 (v2 wrapped past 255 fields). v2 (Cycle B) added
+// transferable/burnable/max_supply/issued_supply to the template FWD + the collection FWD. The version
+// byte gates every data blob, so a v3 reader fails closed on a v2 segment (rebuild required) and v.v.
+const ASSET_VERSION: u8 = 3;
 
 /// Encode an asset forward record. `immutable` is non-empty only for assets without a template
 /// (templated assets get their immutable data from the template blob, joined at read time).
@@ -331,7 +333,7 @@ pub fn encode_template(
 fn put_attrs(o: &mut Vec<u8>, attrs: &[Attr]) {
     pu16(o, attrs.len() as u16);
     for (idx, val) in attrs {
-        o.push(*idx);
+        pu16(o, *idx);
         let vb = val.as_bytes();
         pu16(o, vb.len() as u16);
         o.extend_from_slice(vb);
@@ -342,8 +344,7 @@ fn get_attrs(b: &[u8], p: &mut usize) -> Vec<Attr> {
     let n = gu16(b, p) as usize;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        let idx = b[*p];
-        *p += 1;
+        let idx = gu16(b, p);
         let len = gu16(b, p) as usize;
         let val = String::from_utf8_lossy(&b[*p..*p + len]).into_owned();
         *p += len;
@@ -601,7 +602,7 @@ mod tests {
     #[test]
     fn golden_asset_record() {
         let golden: &[u8] = &[
-            2, // version (Cycle B = 2)
+            3, // version (v3 = u16 attr idx)
             1, 0, 0, 0, 0, 0, 0, 0, // owner = 1
             2, 0, 0, 0, 0, 0, 0, 0, // collection = 2
             3, 0, 0, 0, 0, 0, 0, 0, // schema = 3
@@ -614,13 +615,13 @@ mod tests {
         assert_eq!(encode_asset(1, 2, 3, 7, 100, 42, &[], &[]), golden);
     }
 
-    /// Cross-repo byte golden for the v2 template FWD record (must match GOLDEN_TEMPLATE_V2 in
+    /// Cross-repo byte golden for the v3 template FWD record (must match GOLDEN_TEMPLATE_V3 in
     /// wormdb-domain-atomicassets/src/binfmt.zig). Raw field values (not name-encoded) so the byte array
     /// is mirrored verbatim on both sides — the same lock as `golden_asset_record`.
     #[test]
-    fn golden_template_v2_record() {
+    fn golden_template_v3_record() {
         let golden: &[u8] = &[
-            2, // version
+            3, // version
             3, 0, 0, 0, // template_id = 3
             99, 0, 0, 0, 0, 0, 0, 0, // schema = 99
             1, // transferable = 1
@@ -628,25 +629,25 @@ mod tests {
             0, 0, 0, 0, // max_supply = 0 (unlimited)
             5, 0, 0, 0, // issued_supply = 5
             1, 0, // immutable attr count = 1
-            0, // field_idx = 0
+            0, 0, // field_idx = 0 (u16)
             9, 0, // val_len = 9
             67, 104, 97, 114, 105, 122, 97, 114, 100, // "Charizard"
         ];
-        let attrs = vec![(0u8, "Charizard".to_string())];
+        let attrs = vec![(0u16, "Charizard".to_string())];
         assert_eq!(
             encode_template(3, 99, 1, 0, 0, 5, &attrs),
             golden,
-            "template v2 byte layout drift — update GOLDEN_TEMPLATE_V2 in the Zig reader too"
+            "template v3 byte layout drift — update GOLDEN_TEMPLATE_V3 in the Zig reader too"
         );
     }
 
-    /// Cross-repo byte golden for the collection FWD record (must match GOLDEN_COLLECTION_V2 in the Zig
+    /// Cross-repo byte golden for the collection FWD record (must match GOLDEN_COLLECTION_V3 in the Zig
     /// reader). Raw field values; market_fee=0.0 (8 zero bytes) keeps the array unambiguous — the f64
     /// value path is covered by `collection_record_round_trips`. One authorized account, no notify.
     #[test]
-    fn golden_collection_v2_record() {
+    fn golden_collection_v3_record() {
         let golden: &[u8] = &[
-            2, // version
+            3, // version
             77, 0, 0, 0, 0, 0, 0, 0, // collection = 77
             88, 0, 0, 0, 0, 0, 0, 0, // author = 88
             1, // allow_notify = 1
@@ -655,16 +656,29 @@ mod tests {
             0, // notify_count = 0
             0, 0, 0, 0, 0, 0, 0, 0, // market_fee = 0.0 (f64 LE)
             1, 0, // data attr count = 1
-            0, // field_idx = 0 (name)
+            0, 0, // field_idx = 0 (name, u16)
             5, 0, // val_len = 5
             77, 121, 67, 111, 108, // "MyCol"
         ];
-        let data = vec![(0u8, "MyCol".to_string())];
+        let data = vec![(0u16, "MyCol".to_string())];
         assert_eq!(
             encode_collection(77, 88, 1, &[66], &[], 0.0, &data),
             golden,
-            "collection byte layout drift — update GOLDEN_COLLECTION_V2 in the Zig reader too"
+            "collection byte layout drift — update GOLDEN_COLLECTION_V3 in the Zig reader too"
         );
+    }
+
+    /// Regression for the u8→u16 attr-index widening: a schema field index > 255 (WAX
+    /// `onmars/land.plots` has 2413 fields) must round-trip intact. Under the old u8 layout the index
+    /// wrapped mod 256, corrupting the asset's data; here 2412 must survive.
+    #[test]
+    fn high_attr_index_round_trips() {
+        let mutable = vec![
+            (2412u16, "plot-data".to_string()),
+            (300u16, "x".to_string()),
+        ];
+        let blob = encode_asset(1, 2, 3, 7, 100, 0, &[], &mutable);
+        assert_eq!(decode_asset(&blob).mutable, mutable);
     }
 
     #[test]
@@ -748,7 +762,7 @@ mod tests {
             block_num: 409250749,
             template_mint: 1422,
             immutable: vec![],
-            mutable: vec![(0u8, "female".to_string()), (1u8, "83".to_string())],
+            mutable: vec![(0u16, "female".to_string()), (1u16, "83".to_string())],
         };
         let blob = encode_asset(
             rec.owner,
@@ -765,7 +779,7 @@ mod tests {
 
     #[test]
     fn template_record_round_trips() {
-        let immutable = vec![(0u8, "Charizard".to_string()), (2u8, "150".to_string())];
+        let immutable = vec![(0u16, "Charizard".to_string()), (2u16, "150".to_string())];
         let blob = encode_template(3, crate::name::encode("pokemon"), 1, 0, 100, 42, &immutable);
         let t = decode_template(&blob);
         assert_eq!(t.template_id, 3);
@@ -779,7 +793,7 @@ mod tests {
 
     #[test]
     fn collection_record_round_trips() {
-        let data = vec![(0u8, "MyCol".to_string()), (1u8, "Qmimg".to_string())];
+        let data = vec![(0u16, "MyCol".to_string()), (1u16, "Qmimg".to_string())];
         let auth = vec![crate::name::encode("alice"), crate::name::encode("bob")];
         let blob = encode_collection(
             crate::name::encode("mycol"),
@@ -844,7 +858,7 @@ mod roaring_fixtures {
         );
         std::fs::create_dir_all(&dir).unwrap();
         let base = 1_099_511_627_776u64; // 2^40
-                                         // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
+        // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
         let mut a: Vec<u64> = (0..600u64).map(|i| base + i * 9_000_000).collect();
         std::fs::write(
             format!("{dir}/roaring_sparse.bin"),

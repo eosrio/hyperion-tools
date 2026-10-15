@@ -1,7 +1,7 @@
 //! Assembly of the cc32d9 `chain{}` metadata block: static `[[networks]]` config + the live
 //! freshest `block_num`/`block_time`/`sync` read from Mongo.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ApiError;
 use crate::state::AppState;

@@ -1,7 +1,7 @@
 //! Router: maps each cc32d9 path to its handler. All endpoints are GET and live under `/api`.
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 
 use crate::handlers;
 use crate::state::AppState;

@@ -27,15 +27,15 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
-use hyperion_ship::blocks::{slot_to_iso, BlockLog};
+use hyperion_ship::blocks::{BlockLog, slot_to_iso};
 use hyperion_ship::disk::{decode_payload, is_ship_magic};
 use hyperion_ship::trace;
 
@@ -345,10 +345,8 @@ fn h_transfer(doc: &mut Map<String, Value>, memo_in_field: bool) {
         x.insert("symbol".into(), Value::from(symbol.to_string()));
         data.remove("from");
         data.remove("to");
-        if memo_in_field {
-            if let Some(m) = data.remove("memo") {
-                x.insert("memo".into(), m);
-            }
+        if memo_in_field && let Some(m) = data.remove("memo") {
+            x.insert("memo".into(), m);
         }
         x
     };
@@ -749,7 +747,9 @@ fn worker(
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         if payload_size > log_len {
             // a payload can't exceed the whole log — a wrong offset, not a real entry.
-            bail!("payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error");
+            bail!(
+                "payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error"
+            );
         }
         let mut payload = vec![0u8; payload_size as usize];
         log.read_exact(&mut payload)?;
@@ -941,12 +941,12 @@ fn worker(
                     body.push_str(&act.elapsed.to_string());
                     body.push_str("\",");
                 }
-                if let Some(rv) = act.return_value {
-                    if rv.1 > 0 {
-                        body.push_str("\"return_value\":");
-                        push_json_str(&mut body, &hex::encode_upper(&inflated[rv.0..rv.0 + rv.1]));
-                        body.push(',');
-                    }
+                if let Some(rv) = act.return_value
+                    && rv.1 > 0
+                {
+                    body.push_str("\"return_value\":");
+                    push_json_str(&mut body, &hex::encode_upper(&inflated[rv.0..rv.0 + rv.1]));
+                    body.push(',');
                 }
                 let mut ram_open = false;
                 for (a, d) in &act.account_ram_deltas {
@@ -1175,7 +1175,9 @@ fn main() -> Result<()> {
     let threads = args.threads.max(1);
     let total = (end - start + 1) as u64;
     let chunk = total.div_ceil(threads as u64) as u32;
-    eprintln!("[action-proto] decoding action_traces [{start}..{end}] ({total} blocks) with {threads} threads");
+    eprintln!(
+        "[action-proto] decoding action_traces [{start}..{end}] ({total} blocks) with {threads} threads"
+    );
 
     let stats = Arc::new(Stats::default());
     let failures = Arc::new(Failures::default());
@@ -1286,7 +1288,11 @@ fn main() -> Result<()> {
         "[action-proto] done: {b} blocks in {secs:.1}s ({:.0} blk/s) | txs={txs} actions={actions} -> docs={} | act.data decoded={decoded} ({:.2}%) + raw={raw} recovered_via_block-1={} no_abi={}",
         b as f64 / secs.max(1e-9),
         stats.docs.load(Relaxed),
-        if actions > 0 { 100.0 * decoded as f64 / actions as f64 } else { 0.0 },
+        if actions > 0 {
+            100.0 * decoded as f64 / actions as f64
+        } else {
+            0.0
+        },
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
@@ -1302,7 +1308,9 @@ fn main() -> Result<()> {
             mb / secs.max(1e-9),
         );
         if errors > 0 {
-            eprintln!("[action-proto] WARNING: {errors} bulk request(s) reported errors — inspect ES response / mapping conflicts.");
+            eprintln!(
+                "[action-proto] WARNING: {errors} bulk request(s) reported errors — inspect ES response / mapping conflicts."
+            );
         }
     }
     let f = failures.lock().unwrap();
@@ -1314,7 +1322,7 @@ fn main() -> Result<()> {
         }
         eprintln!("[action-proto] raw (undecodable) act.data by reason: {by_reason:?}");
         let mut top: Vec<_> = f.iter().collect();
-        top.sort_by_key(|e| std::cmp::Reverse(e.1 .0));
+        top.sort_by_key(|e| std::cmp::Reverse(e.1.0));
         eprintln!("[action-proto] top undecoded contract/action:");
         for ((reason, code, action), (cnt, sample)) in top.into_iter().take(25) {
             eprintln!("  {cnt:>6}  {reason:<8} {code}/{action}  {sample}");

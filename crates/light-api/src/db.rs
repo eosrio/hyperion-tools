@@ -3,7 +3,7 @@
 //! the `chain{}` metadata.
 
 use futures::TryStreamExt;
-use mongodb::bson::{doc, Bson, Document};
+use mongodb::bson::{Bson, Document, doc};
 use mongodb::{Database, IndexModel};
 
 use crate::config::NetworkCfg;
@@ -151,10 +151,10 @@ impl Inner {
     /// candidate collections first (they have `@block_time`), then falls back to the newest `voters`
     /// doc for `block_num` with an empty time.
     pub async fn freshest(&self, chain: &str) -> Result<CachedMeta, ApiError> {
-        if let Some(c) = self.meta_cache.read().await.get(chain) {
-            if c.at.elapsed() < self.meta_ttl {
-                return Ok(c.clone());
-            }
+        if let Some(c) = self.meta_cache.read().await.get(chain)
+            && c.at.elapsed() < self.meta_ttl
+        {
+            return Ok(c.clone());
         }
         let db = self.db_for(chain)?;
         let meta = self.read_freshest(&db).await?;

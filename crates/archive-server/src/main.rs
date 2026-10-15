@@ -29,7 +29,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use tiny_http::{Header, Request, Response, Server};
@@ -866,15 +866,15 @@ fn handle_block(w: &mut Worker, info: &LogInfo, n: u32) -> Reply {
             body.push(']');
         }
         // return_value (v1 traces)
-        if let Some((roff, rlen)) = a.ret {
-            if rlen > 0 {
-                let block = w.cache.slots[slot].1.as_ref().unwrap();
-                body.push_str(",\"return_value\":");
-                push_json_str(
-                    &mut body,
-                    &hex::encode_upper(&block.inflated[roff..roff + rlen]),
-                );
-            }
+        if let Some((roff, rlen)) = a.ret
+            && rlen > 0
+        {
+            let block = w.cache.slots[slot].1.as_ref().unwrap();
+            body.push_str(",\"return_value\":");
+            push_json_str(
+                &mut body,
+                &hex::encode_upper(&block.inflated[roff..roff + rlen]),
+            );
         }
         // act { account, name, authorization, data }
         body.push_str(",\"act\":{\"account\":");
@@ -1510,7 +1510,9 @@ fn main() -> Result<()> {
     let delta_info = match open_log_info(&args.from_disk, "chain_state_history") {
         Ok(li) => Some(Arc::new(li)),
         Err(e) => {
-            eprintln!("[archive-server] chain_state_history not available ({e:#}) — POST /deltas disabled; actions + GET endpoints unaffected");
+            eprintln!(
+                "[archive-server] chain_state_history not available ({e:#}) — POST /deltas disabled; actions + GET endpoints unaffected"
+            );
             None
         }
     };

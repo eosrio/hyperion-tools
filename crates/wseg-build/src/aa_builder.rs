@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use mongodb::bson::{Bson, Document};
 
 use crate::aa_binfmt::{
-    encode_asset, encode_collection, encode_config, encode_posting_hybrid, encode_schema_format,
-    encode_template, Attr,
+    Attr, encode_asset, encode_collection, encode_config, encode_posting_hybrid,
+    encode_schema_format, encode_template,
 };
 use crate::aa_tables::*;
 use crate::name;
-use crate::wseg::{write_segment, IndexEntry, Table};
+use crate::wseg::{IndexEntry, Table, write_segment};
 
 /// Build stats returned by [`AtomicBuilder::finish`].
 #[derive(Debug, Default)]
@@ -53,7 +53,7 @@ impl Fwd {
 }
 
 /// Per-schema info: the ordered `(name, type)` fields + a field-name → index map.
-type SchemaInfo = (Vec<(String, String)>, HashMap<String, u8>);
+type SchemaInfo = (Vec<(String, String)>, HashMap<String, u16>);
 
 pub struct AtomicBuilder {
     /// coll_schema_key → schema fields + name→index.
@@ -64,7 +64,7 @@ pub struct AtomicBuilder {
     coll_fwd: Fwd,
     /// Global collection-data field → index (from config `collection_format`), to encode collection
     /// `data` attrs compactly (same idx-keyed scheme as asset/template attrs). Set by `push_config`.
-    coll_format_idx: HashMap<String, u8>,
+    coll_format_idx: HashMap<String, u16>,
     by_owner: HashMap<u64, Vec<u64>>,
     by_coll: HashMap<u64, Vec<u64>>,
     by_schema: HashMap<u64, Vec<u64>>,
@@ -124,20 +124,20 @@ impl AtomicBuilder {
         let mut fmt: Vec<(String, String)> = Vec::new();
         if let Ok(arr) = d.get_array("collection_format") {
             for f in arr {
-                if let Bson::Document(fd) = f {
-                    if let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type")) {
-                        fmt.push((n.to_string(), t.to_string()));
-                    }
+                if let Bson::Document(fd) = f
+                    && let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type"))
+                {
+                    fmt.push((n.to_string(), t.to_string()));
                 }
             }
         }
         // Global collection-data field→index, for compact collection `data` attr encoding (push_collection).
-        // The attr field_idx is a u8, so fields past 255 are unrepresentable — skip them (never happens for
-        // a real collection_format, but avoids a silent `as u8` wrap).
+        // The attr field_idx is a u16 (real WAX schemas exceed 255 fields); skip only the (never-seen)
+        // overflow past 65535, which avoids a silent `as u16` wrap.
         self.coll_format_idx = fmt
             .iter()
             .enumerate()
-            .filter_map(|(i, (n, _))| u8::try_from(i).ok().map(|ix| (n.clone(), ix)))
+            .filter_map(|(i, (n, _))| u16::try_from(i).ok().map(|ix| (n.clone(), ix)))
             .collect();
         let mut tokens: Vec<(u64, String, i64)> = Vec::new();
         if let Ok(arr) = d.get_array("supported_tokens") {
@@ -161,17 +161,17 @@ impl AtomicBuilder {
         let mut fields: Vec<(String, String)> = Vec::new();
         if let Ok(arr) = d.get_array("format") {
             for f in arr {
-                if let Bson::Document(fd) = f {
-                    if let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type")) {
-                        fields.push((n.to_string(), t.to_string()));
-                    }
+                if let Bson::Document(fd) = f
+                    && let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type"))
+                {
+                    fields.push((n.to_string(), t.to_string()));
                 }
             }
         }
-        let idx: HashMap<String, u8> = fields
+        let idx: HashMap<String, u16> = fields
             .iter()
             .enumerate()
-            .map(|(i, (n, _))| (n.clone(), i as u8))
+            .filter_map(|(i, (n, _))| u16::try_from(i).ok().map(|ix| (n.clone(), ix)))
             .collect();
         let key = coll_schema_key(coll, sch);
         self.schema_fwd.push(key, &encode_schema_format(&fields));

@@ -4,8 +4,8 @@
 use axum::extract::{Path, State};
 use axum::response::Response;
 use futures::future::join_all;
-use mongodb::bson::{doc, Bson, Document};
-use serde_json::{json, Value};
+use mongodb::bson::{Bson, Document, doc};
+use serde_json::{Value, json};
 
 use crate::db::{self, bson_i64, bson_string};
 use crate::error::ApiError;
@@ -384,16 +384,16 @@ async fn load_rex_input(
     if let Some(f) = &rexfund {
         input.fund = f.get_str("balance").ok().and_then(asset::parse);
     }
-    if let Some(p) = &rexpool {
-        if let (Some(lend), Some(rx)) = (
+    if let Some(p) = &rexpool
+        && let (Some(lend), Some(rx)) = (
             p.get_str("total_lendable").ok().and_then(asset::parse),
             p.get_str("total_rex").ok().and_then(asset::parse),
-        ) {
-            input.pool = Some(RexPool {
-                total_lendable: lend,
-                total_rex: rx,
-            });
-        }
+        )
+    {
+        input.pool = Some(RexPool {
+            total_lendable: lend,
+            total_rex: rx,
+        });
     }
     Ok(input)
 }

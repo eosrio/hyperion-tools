@@ -15,7 +15,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// 2000-01-01T00:00:00.000 UTC in unix milliseconds — the `block_timestamp_type` epoch.
 const BLOCK_TIMESTAMP_EPOCH_MS: i64 = 946_684_800_000;
@@ -42,7 +42,9 @@ impl BlockLog {
         let version = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
         let first_block = u32::from_le_bytes(hdr[4..8].try_into().unwrap());
         if version == 0 || first_block == 0 {
-            bail!("{log_path} is not a recognizable block log (version={version}, first_block={first_block})");
+            bail!(
+                "{log_path} is not a recognizable block log (version={version}, first_block={first_block})"
+            );
         }
         let n_blocks = (index.metadata()?.len() / 8) as u32;
         Ok(Self {

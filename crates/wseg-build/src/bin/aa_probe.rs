@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use memmap2::Mmap;
-use wseg_build::aa_binfmt::{decode_asset, Posting};
+use wseg_build::aa_binfmt::{Posting, decode_asset};
 use wseg_build::aa_tables::*;
 
 #[derive(Parser)]
@@ -265,11 +265,10 @@ fn main() -> std::io::Result<()> {
         if let Some(b) = seg.lookup(TABLE_AA_FWD, asset_id) {
             let a = decode_asset(b);
             h ^= a.owner;
-            if a.template_id >= 0 {
-                if let Some(tb) = seg.lookup(TABLE_AA_TMPL_FWD, template_key(a.template_id as i64))
-                {
-                    h ^= tb.len() as u64;
-                }
+            if a.template_id >= 0
+                && let Some(tb) = seg.lookup(TABLE_AA_TMPL_FWD, template_key(a.template_id as i64))
+            {
+                h ^= tb.len() as u64;
             }
         }
         h
@@ -483,12 +482,11 @@ fn run_workload(seg: &Seg, n: usize, base_rss: f64, mock_es_ms: u64, es_display_
             if let Some(b) = seg.lookup(TABLE_AA_FWD, aid) {
                 let a = decode_asset(b);
                 h ^= a.owner;
-                if a.template_id >= 0 {
-                    if let Some(tb) =
+                if a.template_id >= 0
+                    && let Some(tb) =
                         seg.lookup(TABLE_AA_TMPL_FWD, template_key(a.template_id as i64))
-                    {
-                        h ^= tb.len() as u64;
-                    }
+                {
+                    h ^= tb.len() as u64;
                 }
             }
         } else if r < 65 && !owners.is_empty() {

@@ -15,13 +15,13 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use rs_abieos::{AbiHandle, Abieos};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::map::{COLL_PERMISSIONS, COLL_PUB_KEYS};
 use crate::mongo::SinkItem;
-use crate::reader::{find, Section, SnapRead};
+use crate::reader::{Section, SnapRead, find};
 
 #[derive(Default, Debug)]
 pub struct PermStats {

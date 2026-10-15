@@ -20,7 +20,7 @@ use memmap2::Mmap;
 use roaring::RoaringTreemap;
 
 use crate::aa_binfmt::{
-    decode_asset, decode_collection, decode_schema_format, decode_template, Attr, Posting,
+    Attr, Posting, decode_asset, decode_collection, decode_schema_format, decode_template,
 };
 use crate::aa_builder::{AaStats, AtomicBuilder};
 use crate::aa_tables::*;
@@ -495,17 +495,18 @@ impl LiveSeg {
             let Some(idx) = fields.iter().position(|(n, _)| n == fld) else {
                 continue;
             };
-            let idx = idx as u8;
+            let idx = idx as u16;
             // immutable-first, matching the base builder's by_data (aa_builder.rs push_asset) exactly —
             // so the overlay's facet key for an asset equals the one the frozen base indexed it under.
             let val = immutable
                 .iter()
                 .find(|(i, _)| *i == idx)
                 .or_else(|| mutable.iter().find(|(i, _)| *i == idx));
-            if let Some((_, v)) = val {
-                if !v.is_empty() && v.len() <= 64 {
-                    return Some(data_attr_key(coll_s, sch_s, fld, v));
-                }
+            if let Some((_, v)) = val
+                && !v.is_empty()
+                && v.len() <= 64
+            {
+                return Some(data_attr_key(coll_s, sch_s, fld, v));
             }
         }
         None
@@ -1095,11 +1096,11 @@ impl LiveSeg {
         let facet_field = self.facet_fields.first().cloned().unwrap_or_default();
 
         // rarity field index per schema (so the asset loop doesn't re-decode the schema 232M times).
-        let mut facet_idx: HashMap<u64, u8> = HashMap::new();
+        let mut facet_idx: HashMap<u64, u16> = HashMap::new();
         self.base.for_each_entry(TABLE_AA_SCHEMAS, |key, blob| {
             let fields = decode_schema_format(blob);
             if let Some(p) = fields.iter().position(|(n, _)| *n == facet_field) {
-                facet_idx.insert(key, p as u8);
+                facet_idx.insert(key, p as u16);
             }
         });
 
@@ -1160,10 +1161,10 @@ impl LiveSeg {
             });
         // … then the overlay mints (Live records with no base row).
         for (&aid, st) in ov.fwd.iter() {
-            if let FwdState::Live(a) = st {
-                if self.base.lookup(TABLE_AA_FWD, aid).is_none() {
-                    fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key);
-                }
+            if let FwdState::Live(a) = st
+                && self.base.lookup(TABLE_AA_FWD, aid).is_none()
+            {
+                fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key);
             }
         }
         b.finish(out)
@@ -1245,7 +1246,7 @@ impl LiveSeg {
 /// field index (base-unchanged assets).
 fn fold_emit(
     b: &mut AtomicBuilder,
-    facet_idx: &HashMap<u64, u8>,
+    facet_idx: &HashMap<u64, u16>,
     facet_field: &str,
     aid: u64,
     a: &AssetLive,
@@ -1410,7 +1411,7 @@ mod tests {
                     template_id: 7,
                     facet_key: Some(fkey("rarity", "Mythic")),
                     immutable: vec![],
-                    mutable: vec![(1u8, "Mythic".to_string())],
+                    mutable: vec![(1u16, "Mythic".to_string())],
                 }),
             ],
         );
@@ -1570,7 +1571,7 @@ mod tests {
                 template_id: 7,
                 facet_key: Some(fkey("rarity", "Mythic")),
                 immutable: vec![],
-                mutable: vec![(1u8, "Mythic".to_string())],
+                mutable: vec![(1u16, "Mythic".to_string())],
             })],
         );
         let ov = live.overlay();
@@ -1606,7 +1607,7 @@ mod tests {
             101,
             &[Delta::SetData(SetDataD {
                 asset_id: 1002,
-                mutable: vec![(1u8, "Mythic".to_string())],
+                mutable: vec![(1u16, "Mythic".to_string())],
                 facet_old: Some(fkey("rarity", "Common")),
                 facet_new: Some(fkey("rarity", "Mythic")),
             })],
@@ -1622,9 +1623,10 @@ mod tests {
             3,
             "joined Mythic"
         );
-        assert!(live
-            .page(&ov, DIM_FACET, fkey("rarity", "Mythic"), 100)
-            .contains(&1002));
+        assert!(
+            live.page(&ov, DIM_FACET, fkey("rarity", "Mythic"), 100)
+                .contains(&1002)
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1658,7 +1660,7 @@ mod tests {
                 Delta::Burn(BurnD { asset_id: 1001 }),
                 Delta::SetData(SetDataD {
                     asset_id: 1002,
-                    mutable: vec![(1u8, "Mythic".to_string())],
+                    mutable: vec![(1u16, "Mythic".to_string())],
                     facet_old: Some(fkey("rarity", "Common")),
                     facet_new: Some(fkey("rarity", "Mythic")),
                 }),
@@ -1671,7 +1673,7 @@ mod tests {
                     template_id: 7,
                     facet_key: Some(fkey("rarity", "Mythic")),
                     immutable: vec![],
-                    mutable: vec![(1u8, "Mythic".to_string())],
+                    mutable: vec![(1u16, "Mythic".to_string())],
                 }),
             ],
         );

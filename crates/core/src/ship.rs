@@ -7,13 +7,13 @@
 
 use std::io::Write;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use futures::{SinkExt, StreamExt};
 use rs_abieos::Abieos;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async_with_config;
-use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::protocol::{Message, WebSocketConfig};
 
 use crate::abi::build_abi_doc;
 use crate::delta::{account_setabi, for_each_account_row, parse_result};
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(req[0], 1); // get_blocks_request_v0 variant
         assert_eq!(u32::from_le_bytes(req[1..5].try_into().unwrap()), 2); // start
         assert_eq!(u32::from_le_bytes(req[5..9].try_into().unwrap()), 101); // end exclusive
-                                                                            // tail: have_positions=0, irreversible=1, fetch_block=0, fetch_traces=0, fetch_deltas=1
+        // tail: have_positions=0, irreversible=1, fetch_block=0, fetch_traces=0, fetch_deltas=1
         assert_eq!(&req[13..18], &[0, 1, 0, 0, 1]);
         assert_eq!(build_ack(1), vec![2, 1, 0, 0, 0]);
     }
