@@ -6,10 +6,10 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use crate::model::{ProducerStats, RawRow, Targets};
-use crate::reader::{Section, SnapRead, READ_SKIP_MAX, SECONDARY_ROW_SIZES};
+use crate::reader::{READ_SKIP_MAX, SECONDARY_ROW_SIZES, Section, SnapRead};
 
 /// Read an untrusted per-row value length (varuint) and reject it if it cannot fit in the bytes
 /// remaining before `end` — preventing a `vec![0u8; vlen]` over-allocation (and the subsequent
@@ -175,7 +175,9 @@ pub fn walk_v8(
         let t_id = s.u64()?;
         let count = s.varuint()?;
         if (t_id as i128) <= prev_tid {
-            bail!("v8 key_value t_id not strictly increasing: {t_id} after {prev_tid} — framing error");
+            bail!(
+                "v8 key_value t_id not strictly increasing: {t_id} after {prev_tid} — framing error"
+            );
         }
         prev_tid = t_id as i128;
         ps.tables += 1;
@@ -185,24 +187,24 @@ pub fn walk_v8(
             let payer = s.u64()?;
             let vlen = read_vlen(s, end)?;
             ps.kv_rows += 1;
-            if let Some((code, scope, table)) = sel {
-                if !ps.limited {
-                    let mut value = vec![0u8; vlen];
-                    s.read_buf(&mut value)?;
-                    sink(RawRow {
-                        code,
-                        scope,
-                        table,
-                        pk,
-                        payer,
-                        value,
-                    })?;
-                    ps.emitted += 1;
-                    if matches!(limit, Some(l) if ps.emitted >= l) {
-                        ps.limited = true;
-                    }
-                    continue;
+            if let Some((code, scope, table)) = sel
+                && !ps.limited
+            {
+                let mut value = vec![0u8; vlen];
+                s.read_buf(&mut value)?;
+                sink(RawRow {
+                    code,
+                    scope,
+                    table,
+                    pk,
+                    payer,
+                    value,
+                })?;
+                ps.emitted += 1;
+                if matches!(limit, Some(l) if ps.emitted >= l) {
+                    ps.limited = true;
                 }
+                continue;
             }
             s.read_into(vlen, &mut scratch)?;
         }

@@ -18,10 +18,10 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
@@ -300,7 +300,9 @@ fn worker(
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         if payload_size > log_len {
             // a payload can't exceed the whole log — a wrong offset, not a real entry.
-            bail!("payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error");
+            bail!(
+                "payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error"
+            );
         }
         let mut payload = vec![0u8; payload_size as usize];
         log.read_exact(&mut payload)?;
@@ -425,7 +427,9 @@ fn main() -> Result<()> {
     let threads = args.threads.max(1);
     let total = (end - start + 1) as u64;
     let chunk = total.div_ceil(threads as u64) as u32;
-    eprintln!("[delta-proto] decoding contract_row deltas [{start}..{end}] ({total} blocks) with {threads} threads");
+    eprintln!(
+        "[delta-proto] decoding contract_row deltas [{start}..{end}] ({total} blocks) with {threads} threads"
+    );
 
     let stats = Arc::new(Stats::default());
     let failures = Arc::new(Failures::default());
@@ -498,7 +502,11 @@ fn main() -> Result<()> {
         "[delta-proto] done: {b} blocks in {secs:.1}s ({:.0} blk/s) | contract_row present={rows} -> docs={} (decoded={decoded} data, {:.2}% + raw={raw} value) recovered_via_block-1={} no_abi={}",
         b as f64 / secs.max(1e-9),
         decoded + raw,
-        if rows > 0 { 100.0 * decoded as f64 / rows as f64 } else { 0.0 },
+        if rows > 0 {
+            100.0 * decoded as f64 / rows as f64
+        } else {
+            0.0
+        },
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
@@ -512,7 +520,7 @@ fn main() -> Result<()> {
         }
         eprintln!("[delta-proto] raw (undecodable) rows by reason: {by_reason:?}");
         let mut top: Vec<_> = f.iter().collect();
-        top.sort_by_key(|e| std::cmp::Reverse(e.1 .0));
+        top.sort_by_key(|e| std::cmp::Reverse(e.1.0));
         eprintln!("[delta-proto] top undecoded contract/table (table not in ABI):");
         for ((reason, code, table), (cnt, sample)) in top.into_iter().take(25) {
             eprintln!("  {cnt:>6}  {reason:<8} {code}/{table}  {sample}");

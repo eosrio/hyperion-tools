@@ -7,7 +7,7 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 pub const MAGIC: u32 = 0x3051_0550;
 pub const FILE_FORMAT_VERSION: u32 = 1;
@@ -326,7 +326,9 @@ pub fn enumerate_sections(s: &mut Snap) -> Result<Vec<Section>> {
         // before the later `size >= header_bytes` check bails — desyncing the parse. (The full
         // `size >= 8 + name + NUL` check still runs after the name is read.)
         if size < 8 {
-            bail!("section at offset {start}: size {size} < 8 (cannot hold row_count) — malformed framing");
+            bail!(
+                "section at offset {start}: size {size} < 8 (cannot hold row_count) — malformed framing"
+            );
         }
         let after_size = s.pos;
         let rows = s.u64()?;

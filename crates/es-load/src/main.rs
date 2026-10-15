@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
 use serde_json::Value;
 
@@ -83,7 +83,9 @@ fn guard_local(es: &str) -> Result<()> {
         .unwrap_or("");
     let local = matches!(host, "localhost" | "127.0.0.1" | "::1" | "");
     if !local && std::env::var("BENCH_ALLOW_EXTERNAL_ES").as_deref() != Ok("1") {
-        bail!("REFUSING: ES host '{host}' is not loopback — local benchmarking only (set BENCH_ALLOW_EXTERNAL_ES=1 to override).");
+        bail!(
+            "REFUSING: ES host '{host}' is not loopback — local benchmarking only (set BENCH_ALLOW_EXTERNAL_ES=1 to override)."
+        );
     }
     Ok(())
 }

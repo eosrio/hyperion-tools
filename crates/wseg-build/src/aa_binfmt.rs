@@ -673,7 +673,10 @@ mod tests {
     /// wrapped mod 256, corrupting the asset's data; here 2412 must survive.
     #[test]
     fn high_attr_index_round_trips() {
-        let mutable = vec![(2412u16, "plot-data".to_string()), (300u16, "x".to_string())];
+        let mutable = vec![
+            (2412u16, "plot-data".to_string()),
+            (300u16, "x".to_string()),
+        ];
         let blob = encode_asset(1, 2, 3, 7, 100, 0, &[], &mutable);
         assert_eq!(decode_asset(&blob).mutable, mutable);
     }
@@ -855,7 +858,7 @@ mod roaring_fixtures {
         );
         std::fs::create_dir_all(&dir).unwrap();
         let base = 1_099_511_627_776u64; // 2^40
-                                         // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
+        // (A) sparse → array containers, multiple high-32 keys: base + i*9_000_000, i in 0..600.
         let mut a: Vec<u64> = (0..600u64).map(|i| base + i * 9_000_000).collect();
         std::fs::write(
             format!("{dir}/roaring_sparse.bin"),

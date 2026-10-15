@@ -11,7 +11,7 @@
 //!
 //!   cargo run -p atomicdata --example validate < cases.json
 
-use atomicdata::{deserialize, Field};
+use atomicdata::{Field, deserialize};
 use serde_json::{Map, Value};
 use std::io::Read;
 

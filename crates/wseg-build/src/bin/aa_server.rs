@@ -13,8 +13,8 @@
 //!     fold, then atomically swaps — the only stall is a brief final tail-replay under the write lock.
 
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
@@ -339,21 +339,21 @@ fn main() {
         let tmp_dir = args.tmp_dir.clone();
         let threshold = args.compact_threshold_mb * 1_048_576;
         std::thread::spawn(move || {
-            let mut gen = 0usize;
+            let mut generation = 0usize;
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(1000));
                 let (heap, _) = store.load().overlay_heap_bytes();
                 if heap < threshold {
                     continue;
                 }
-                gen += 1;
-                let out = format!("{tmp_dir}/aa-server-compact-{gen}.wseg");
+                generation += 1;
+                let out = format!("{tmp_dir}/aa-server-compact-{generation}.wseg");
                 let heap_mb = heap / 1_048_576;
                 let (assets, fold_s, residual, swap_us, snap_ms) =
                     compact_and_swap(&store, &ff, &out);
                 compactions.fetch_add(1, Ordering::Relaxed);
                 println!(
-                    "  [compact #{gen}] trigger {heap_mb} MB → snapshot {snap_ms} ms, folded {assets} assets \
+                    "  [compact #{generation}] trigger {heap_mb} MB → snapshot {snap_ms} ms, folded {assets} assets \
                      in {fold_s:.1}s (background), replayed {residual} residual, SWAP STALL {swap_us} µs; reset",
                 );
             }

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use mongodb::options::ClientOptions;
 use mongodb::Client;
+use mongodb::options::ClientOptions;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::config::{Config, NetworkCfg};
@@ -64,10 +64,10 @@ impl AppState {
         opts.app_name = Some("light-api".to_string());
         // Apply auth_source only when the URI already carries a credential — see snapshot-load
         // mongo.rs: a username-less credential is rejected at connect time.
-        if let Some(src) = &cfg.mongo.auth_source {
-            if let Some(cred) = &mut opts.credential {
-                cred.source = Some(src.clone());
-            }
+        if let Some(src) = &cfg.mongo.auth_source
+            && let Some(cred) = &mut opts.credential
+        {
+            cred.source = Some(src.clone());
         }
         let client = Client::with_options(opts)?;
         Ok(AppState(Arc::new(Inner {

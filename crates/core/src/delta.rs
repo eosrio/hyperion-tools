@@ -3,7 +3,7 @@
 //! Everything here works identically for the SHiP and from-disk paths: the
 //! `deltas` bytes are the same on the wire and on disk (once inflated).
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rs_abieos::Abieos;
 
 /// Read a LEB128 varuint32. Returns (value, bytes_consumed).
@@ -187,11 +187,13 @@ mod tests {
             0x64, // data_len = 100 — would run off the buffer, but we never get here
         ];
         let mut hits = 0;
-        assert!(for_each_account_row(&buf, |_| {
-            hits += 1;
-            Ok(())
-        })
-        .is_ok());
+        assert!(
+            for_each_account_row(&buf, |_| {
+                hits += 1;
+                Ok(())
+            })
+            .is_ok()
+        );
         assert_eq!(hits, 0, "no account table -> no rows visited");
     }
 

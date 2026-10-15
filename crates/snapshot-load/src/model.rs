@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
 use crate::reader::{Section, SnapRead};
@@ -343,7 +343,12 @@ pub fn format_line(names: &Abieos, row: &RawRow, block: u32, dec: &Dec, decoded:
     let _ = write!(
         s,
         "{{\"code\":\"{}\",\"scope\":\"{}\",\"table\":\"{}\",\"primary_key\":\"{}\",\"payer\":\"{}\",\"block_num\":{},\"present\":true,",
-        n(row.code), n(row.scope), n(row.table), row.pk, n(row.payer), block
+        n(row.code),
+        n(row.scope),
+        n(row.table),
+        row.pk,
+        n(row.payer),
+        block
     );
     match dec {
         Dec::Ok => {

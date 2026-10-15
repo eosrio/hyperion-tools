@@ -11,13 +11,13 @@
 //! carrier docs, so they are buffered in the bridge thread and merged + written at end-of-stream.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::stream::StreamExt;
-use mongodb::bson::{doc, Bson, DateTime, Document};
+use mongodb::bson::{Bson, DateTime, Document, doc};
 use mongodb::error::{Error as MongoError, ErrorKind};
 use mongodb::options::{Acknowledgment, ClientOptions, IndexOptions, WriteConcern};
 use mongodb::{Client, IndexModel};
@@ -94,10 +94,10 @@ async fn run_writer(
     // Only set it when the URI ALREADY carries a credential: `get_or_insert_with(Credential::default)`
     // would fabricate a username-less credential on a credential-less URI, which the driver rejects at
     // connect time. authSource without auth is meaningless anyway.
-    if let Some(src) = &cfg.auth_source {
-        if let Some(cred) = &mut opts.credential {
-            cred.source = Some(src.clone());
-        }
+    if let Some(src) = &cfg.auth_source
+        && let Some(cred) = &mut opts.credential
+    {
+        cred.source = Some(src.clone());
     }
     opts.write_concern = Some(
         WriteConcern::builder()
@@ -214,10 +214,10 @@ async fn run_writer(
                         // by) the collection drop. Re-check under the write lock to settle the race
                         // between a concurrent first-batch's read and this write.
                         let mut w = dropped.write().await;
-                        if w.insert(coll) {
-                            if let Err(e) = db_for_drop.collection::<Document>(coll).drop().await {
-                                eprintln!("[snapshot-load][mongo] drop {coll} failed: {e}");
-                            }
+                        if w.insert(coll)
+                            && let Err(e) = db_for_drop.collection::<Document>(coll).drop().await
+                        {
+                            eprintln!("[snapshot-load][mongo] drop {coll} failed: {e}");
                         }
                     }
                 }

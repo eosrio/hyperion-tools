@@ -14,4 +14,4 @@ pub mod name;
 pub mod wseg;
 
 pub use builder::Builder;
-pub use wseg::{write_segment, IndexEntry, Table};
+pub use wseg::{IndexEntry, Table, write_segment};

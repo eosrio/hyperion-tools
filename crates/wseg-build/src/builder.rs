@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use mongodb::bson::{Bson, Document};
 
 use crate::name;
-use crate::wseg::{write_segment, IndexEntry, Table};
+use crate::wseg::{IndexEntry, Table, write_segment};
 
 pub const TABLE_BALANCES: u32 = 0;
 pub const TABLE_ACCINFO: u32 = 5;
@@ -63,11 +63,7 @@ fn asset_units(s: &str) -> i64 {
         }
     }
     let v: i64 = buf.parse().unwrap_or(0);
-    if neg {
-        -v
-    } else {
-        v
-    }
+    if neg { -v } else { v }
 }
 
 /// i64 from Int64/Int32/Double or a numeric string (ram_bytes is stored as a string).
@@ -85,7 +81,7 @@ use crate::binfmt::{self, Perm};
 
 type Resources = (i64, i64, i64); // net, cpu, ram
 type Deleg = (String, i64, i64); // peer, cpu, net
-                                 // (contract, symbol) -> holders; each holder = (account, sort-units i128, amount string).
+// (contract, symbol) -> holders; each holder = (account, sort-units i128, amount string).
 type TokenHolders = HashMap<(String, String), Vec<(String, i128, String)>>;
 // modern (PUB_K1) key string -> (legacy EOS form, holders[(account, perm, weight)]).
 type KeyHolders = HashMap<String, (String, Vec<(String, String, i64)>)>;
@@ -121,11 +117,7 @@ fn amount_units(s: &str) -> i128 {
         }
     }
     let v: i128 = buf.parse().unwrap_or(0);
-    if neg {
-        -v
-    } else {
-        v
-    }
+    if neg { -v } else { v }
 }
 
 /// Stable key for a (contract, symbol) token: FNV1a-64 of "contract:symbol". Must match the Zig
@@ -489,11 +481,7 @@ impl Builder {
             .iter()
             .filter_map(|(&k, &(net, cpu, _ram))| {
                 let s = net.saturating_add(cpu);
-                if s > 0 {
-                    Some((s, cpu, net, k))
-                } else {
-                    None
-                }
+                if s > 0 { Some((s, cpu, net, k)) } else { None }
             })
             .collect();
         stake_rows.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.3.cmp(&b.3)));

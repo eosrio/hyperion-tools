@@ -1,6 +1,6 @@
 //! abi_def decoding and the abi-index NDJSON doc builder.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rs_abieos::Abieos;
 use serde_json::Value;
 

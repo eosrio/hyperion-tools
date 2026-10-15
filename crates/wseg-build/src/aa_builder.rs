@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use mongodb::bson::{Bson, Document};
 
 use crate::aa_binfmt::{
-    encode_asset, encode_collection, encode_config, encode_posting_hybrid, encode_schema_format,
-    encode_template, Attr,
+    Attr, encode_asset, encode_collection, encode_config, encode_posting_hybrid,
+    encode_schema_format, encode_template,
 };
 use crate::aa_tables::*;
 use crate::name;
-use crate::wseg::{write_segment, IndexEntry, Table};
+use crate::wseg::{IndexEntry, Table, write_segment};
 
 /// Build stats returned by [`AtomicBuilder::finish`].
 #[derive(Debug, Default)]
@@ -124,10 +124,10 @@ impl AtomicBuilder {
         let mut fmt: Vec<(String, String)> = Vec::new();
         if let Ok(arr) = d.get_array("collection_format") {
             for f in arr {
-                if let Bson::Document(fd) = f {
-                    if let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type")) {
-                        fmt.push((n.to_string(), t.to_string()));
-                    }
+                if let Bson::Document(fd) = f
+                    && let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type"))
+                {
+                    fmt.push((n.to_string(), t.to_string()));
                 }
             }
         }
@@ -161,10 +161,10 @@ impl AtomicBuilder {
         let mut fields: Vec<(String, String)> = Vec::new();
         if let Ok(arr) = d.get_array("format") {
             for f in arr {
-                if let Bson::Document(fd) = f {
-                    if let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type")) {
-                        fields.push((n.to_string(), t.to_string()));
-                    }
+                if let Bson::Document(fd) = f
+                    && let (Some(n), Some(t)) = (doc_str(fd, "name"), doc_str(fd, "type"))
+                {
+                    fields.push((n.to_string(), t.to_string()));
                 }
             }
         }

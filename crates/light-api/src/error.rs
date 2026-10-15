@@ -1,7 +1,7 @@
 //! HTTP error type. cc32d9 returns plain-text error bodies (e.g. `Invalid count: 3`), so all errors
 //! here render as `text/plain` with an appropriate status. Internal/driver detail is never leaked.
 
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 #[derive(Debug)]

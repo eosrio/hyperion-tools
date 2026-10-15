@@ -35,7 +35,7 @@
 //! as numbers; `string`/`image`/`ipfs` as strings; arrays as JSON arrays. Output preserves blob order
 //! (ascending schema index for the present attributes).
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Number, Value};
 
 /// AtomicAssets `RESERVED` identifier offset: on-blob id = 0-based schema-format index + 4.

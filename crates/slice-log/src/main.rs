@@ -14,7 +14,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 #[derive(Parser)]

@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::TryStreamExt;
-use mongodb::bson::{doc, Document};
+use mongodb::bson::{Document, doc};
 use mongodb::{Client, Database};
 use wseg_build::Builder;
 

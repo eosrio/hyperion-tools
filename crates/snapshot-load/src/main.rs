@@ -24,15 +24,15 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use rs_abieos::Abieos;
 
 use model::{
-    format_line, load_abis, AbiRegistry, Dec, Filter, ProducerStats, RawRow, Targets, WorkerStats,
+    AbiRegistry, Dec, Filter, ProducerStats, RawRow, Targets, WorkerStats, format_line, load_abis,
 };
 use reader::{
-    enumerate_sections, find, Section, Snap, SnapRead, StreamSnap, FILE_FORMAT_VERSION, MAGIC,
+    FILE_FORMAT_VERSION, MAGIC, Section, Snap, SnapRead, StreamSnap, enumerate_sections, find,
 };
 
 #[derive(Parser, Debug)]
@@ -148,12 +148,12 @@ fn block_num_from_filename(path: &str) -> Option<u32> {
     let stem = file
         .strip_suffix(".bin.zst")
         .or_else(|| file.strip_suffix(".bin"))?;
-    if let Some(rest) = stem.strip_prefix("snapshot-") {
-        if rest.len() >= 64 && rest[..64].bytes().all(|b| b.is_ascii_hexdigit()) {
-            if let Ok(h) = u32::from_str_radix(&rest[..8], 16) {
-                return Some(h);
-            }
-        }
+    if let Some(rest) = stem.strip_prefix("snapshot-")
+        && rest.len() >= 64
+        && rest[..64].bytes().all(|b| b.is_ascii_hexdigit())
+        && let Ok(h) = u32::from_str_radix(&rest[..8], 16)
+    {
+        return Some(h);
     }
     let digits: String = stem
         .chars()
@@ -277,16 +277,11 @@ where
                         // Decode the row's value (unless --raw NDJSON), tally, then build the mapped doc.
                         if raw {
                             // raw NDJSON: emit hex value, no decode (preserves the byte-diff path).
-                            if let OutChan::Ndjson(tx) = &*out_chan {
-                                if !stats_only {
-                                    let _ = tx.send(format_line(
-                                        &names,
-                                        &row,
-                                        block_num,
-                                        &Dec::Err,
-                                        "",
-                                    ));
-                                }
+                            if let OutChan::Ndjson(tx) = &*out_chan
+                                && !stats_only
+                            {
+                                let _ =
+                                    tx.send(format_line(&names, &row, block_num, &Dec::Err, ""));
                             }
                             continue;
                         }
@@ -346,10 +341,10 @@ where
                             OutChan::Mongo(tx) => {
                                 // Encode JSON -> BSON HERE (in the parallel worker), so the accumulator just
                                 // batches and the parallel writers actually saturate the sink.
-                                if let Some((coll, value)) = mapped {
-                                    if let Ok(bdoc) = mongodb::bson::to_document(&value) {
-                                        let _ = tx.send((coll, bdoc));
-                                    }
+                                if let Some((coll, value)) = mapped
+                                    && let Ok(bdoc) = mongodb::bson::to_document(&value)
+                                {
+                                    let _ = tx.send((coll, bdoc));
                                 }
                             }
                         }
@@ -789,7 +784,9 @@ fn build_targets(specs: &[&str], names: &Abieos) -> Result<Targets> {
                 [table] => Filter::Table(nm(table)?),
                 [code, table] => Filter::CodeTable(nm(code)?, nm(table)?),
                 [code, scope, table] => Filter::CodeScopeTable(nm(code)?, nm(scope)?, nm(table)?),
-                _ => bail!("bad --tables spec '{sp}' (use: table | code:table | code:scope:table | voters | accounts | *)"),
+                _ => bail!(
+                    "bad --tables spec '{sp}' (use: table | code:table | code:scope:table | voters | accounts | *)"
+                ),
             },
         };
         filters.push(f);
@@ -1083,18 +1080,26 @@ fn run_url_path(args: &Args) -> Result<()> {
     // Permissions-to-Mongo (and thus the `lightapi` preset) needs random access to interleave the
     // native permission sections with the contract-table pass; it is seek-path only for now.
     if lightapi_preset {
-        bail!("--tables lightapi is supported on the seek path only (--snapshot <file>); download the snapshot then load it");
+        bail!(
+            "--tables lightapi is supported on the seek path only (--snapshot <file>); download the snapshot then load it"
+        );
     }
     // The AtomicAssets/AtomicMarket preset needs a two-pass (schema-format registry) over the
     // contract-table section, which requires random access — seek path only.
     if atomic_preset {
-        bail!("--tables atomicassets/atomicmarket/atomic is supported on the seek path only (--snapshot <file>); download the snapshot then load it");
+        bail!(
+            "--tables atomicassets/atomicmarket/atomic is supported on the seek path only (--snapshot <file>); download the snapshot then load it"
+        );
     }
     if want_permissions && args.mongo.is_some() {
-        bail!("loading `permissions` into --mongo is supported on the seek path only (--snapshot <file>) for now");
+        bail!(
+            "loading `permissions` into --mongo is supported on the seek path only (--snapshot <file>) for now"
+        );
     }
     if want_permissions && !table_specs.is_empty() {
-        bail!("`permissions` is a native section, not a contract table — run it alone: --tables permissions");
+        bail!(
+            "`permissions` is a native section, not a contract table — run it alone: --tables permissions"
+        );
     }
 
     let t0 = Instant::now();
@@ -1109,7 +1114,9 @@ fn run_url_path(args: &Args) -> Result<()> {
 
     eprintln!("[snapshot-load] streaming from {url}");
     if args.tee.is_some() && args.limit.is_some() {
-        eprintln!("[snapshot-load] note: --tee forces a full read; --limit only short-circuits the decode walk and would truncate the teed .bin");
+        eprintln!(
+            "[snapshot-load] note: --tee forces a full read; --limit only short-circuits the decode walk and would truncate the teed .bin"
+        );
     }
 
     // Open the stream first: a `.tar.gz` yields its inner `snapshot-<block_id>.bin` entry name, which
@@ -1217,7 +1224,8 @@ fn main() -> Result<()> {
     let chain_version = s.u32()?;
     eprintln!(
         "[snapshot-load] file_format_version={FILE_FORMAT_VERSION} chain_snapshot_version={chain_version} sections={} threads={}",
-        secs.len(), args.threads
+        secs.len(),
+        args.threads
     );
     match chain_version {
         // 2..=6 all use the commingled `contract_tables` section (FIO is v2, Telos/WAX v6); 8 is split.
@@ -1227,7 +1235,9 @@ fn main() -> Result<()> {
         v => bail!("unsupported chain snapshot version {v}"),
     }
     if chain_version < 6 {
-        eprintln!("[snapshot-load] note: v{chain_version} (pre-v6) — commingled layout, relying on consumption/count invariants");
+        eprintln!(
+            "[snapshot-load] note: v{chain_version} (pre-v6) — commingled layout, relying on consumption/count invariants"
+        );
     }
 
     let block_num = match args.block_num {
@@ -1303,12 +1313,16 @@ fn main() -> Result<()> {
 
     let mongo_cfg = build_mongo_cfg(&args)?;
     if lightapi_preset && mongo_cfg.is_none() {
-        bail!("--tables lightapi requires --mongo (it bootstraps the Light-API collections into MongoDB)");
+        bail!(
+            "--tables lightapi requires --mongo (it bootstraps the Light-API collections into MongoDB)"
+        );
     }
     // Over NDJSON, `permissions` must be the sole selector (native single-threaded decode). With
     // --mongo it is loaded as a dedicated pass that can accompany the contract-table pipeline.
     if want_permissions && mongo_cfg.is_none() && !table_specs.is_empty() {
-        bail!("`permissions` is a native section — over NDJSON run it alone (--tables permissions), or use --mongo to load it alongside contract tables");
+        bail!(
+            "`permissions` is a native section — over NDJSON run it alone (--tables permissions), or use --mongo to load it alongside contract tables"
+        );
     }
 
     // Permissions native pass (`permission_object` / `permission_link_object`).

@@ -20,7 +20,7 @@ use memmap2::Mmap;
 use roaring::RoaringTreemap;
 
 use crate::aa_binfmt::{
-    decode_asset, decode_collection, decode_schema_format, decode_template, Attr, Posting,
+    Attr, Posting, decode_asset, decode_collection, decode_schema_format, decode_template,
 };
 use crate::aa_builder::{AaStats, AtomicBuilder};
 use crate::aa_tables::*;
@@ -502,10 +502,11 @@ impl LiveSeg {
                 .iter()
                 .find(|(i, _)| *i == idx)
                 .or_else(|| mutable.iter().find(|(i, _)| *i == idx));
-            if let Some((_, v)) = val {
-                if !v.is_empty() && v.len() <= 64 {
-                    return Some(data_attr_key(coll_s, sch_s, fld, v));
-                }
+            if let Some((_, v)) = val
+                && !v.is_empty()
+                && v.len() <= 64
+            {
+                return Some(data_attr_key(coll_s, sch_s, fld, v));
             }
         }
         None
@@ -1160,10 +1161,10 @@ impl LiveSeg {
             });
         // … then the overlay mints (Live records with no base row).
         for (&aid, st) in ov.fwd.iter() {
-            if let FwdState::Live(a) = st {
-                if self.base.lookup(TABLE_AA_FWD, aid).is_none() {
-                    fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key);
-                }
+            if let FwdState::Live(a) = st
+                && self.base.lookup(TABLE_AA_FWD, aid).is_none()
+            {
+                fold_emit(&mut b, &facet_idx, &facet_field, aid, a, a.facet_key);
             }
         }
         b.finish(out)
@@ -1622,9 +1623,10 @@ mod tests {
             3,
             "joined Mythic"
         );
-        assert!(live
-            .page(&ov, DIM_FACET, fkey("rarity", "Mythic"), 100)
-            .contains(&1002));
+        assert!(
+            live.page(&ov, DIM_FACET, fkey("rarity", "Mythic"), 100)
+                .contains(&1002)
+        );
         let _ = std::fs::remove_file(&path);
     }
 

@@ -8,7 +8,7 @@
 //! Doc-shape parity is verified against the live indexer's Mongo writes (`mongo-routes.ts`) and the
 //! `hyp-control sync` modules (`sync-{voters,accounts,proposals,contract-state}.ts`). See README.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::atomicassets::{self, SchemaRegistry};
 use crate::atomicmarket;
@@ -311,10 +311,10 @@ fn decode_action_data_inplace(action: &mut Value, reg: &mut AbiRegistry) {
     ) else {
         return;
     };
-    if let Some(decoded) = reg.decode_action_json(account, name, data_hex) {
-        if let Value::Object(map) = action {
-            map.insert("data".into(), decoded);
-        }
+    if let Some(decoded) = reg.decode_action_json(account, name, data_hex)
+        && let Value::Object(map) = action
+    {
+        map.insert("data".into(), decoded);
     }
 }
 

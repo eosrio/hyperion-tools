@@ -22,13 +22,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rs_abieos::{AbiHandle, Abieos};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::map::RowCtx;
 use crate::model::{Filter, RawRow, Targets};
-use crate::reader::{find, Section, Snap};
+use crate::reader::{Section, Snap, find};
 use crate::tables;
 
 /// Mongo collection names (Hyperion's `${code}-${table}` dynamic convention, so they sit alongside
@@ -154,15 +154,14 @@ pub fn build_schema_registry(
         if row.table == schemas_t {
             // schemas scope = collection_name.
             let collection = names.name_to_string(row.scope).unwrap_or_default();
-            if let Some(schema_name) = data.get("schema_name").and_then(Value::as_str) {
-                if let Ok(fields) =
+            if let Some(schema_name) = data.get("schema_name").and_then(Value::as_str)
+                && let Ok(fields) =
                     atomicdata::Field::from_format_json(data.get("format").unwrap_or(&Value::Null))
-                {
-                    reg.schemas
-                        .entry(collection)
-                        .or_default()
-                        .insert(schema_name.to_string(), fields);
-                }
+            {
+                reg.schemas
+                    .entry(collection)
+                    .or_default()
+                    .insert(schema_name.to_string(), fields);
             }
         } else if row.table == config_t {
             if let Ok(fields) = atomicdata::Field::from_format_json(
@@ -617,8 +616,9 @@ mod tests {
             .insert("s".into(), fmt);
 
         // blob: id=4 name:string "Hi"; id=5 score:double 0.5 (IEEE-754 LE = 00 00 00 00 00 00 E0 3F)
-        let blob =
-            json!([0x04, 0x02, 0x48, 0x69, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F]);
+        let blob = json!([
+            0x04, 0x02, 0x48, 0x69, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F
+        ]);
         let ctx = RowCtx {
             code: "atomicassets",
             scope: "alice",
