@@ -17,7 +17,7 @@ use crate::format::{
 use crate::io::{MAX_BYTES, create_dir, create_file, hash};
 use crate::repair::{LogFile, Sources, rebuild, target_flags};
 use crate::report::{Out, arg};
-use crate::target::{Extent, Target};
+use crate::target::{Extent, ORPHANS_UNREPAIRABLE, Target};
 
 /// Results the server may send ahead of acknowledgements. Each result is acknowledged on
 /// receipt, and the per-endpoint byte budget still bounds the whole transfer.
@@ -412,10 +412,14 @@ pub async fn fetch(
         &out.join("source.json"),
         &serde_json::to_vec_pretty(&report)?,
     )?;
-    validation.context(
+    let unrepairable =
+        matches!(&validation, Err(e) if format!("{e:#}").contains(ORPHANS_UNREPAIRABLE));
+    validation.context(if unrepairable {
+        "fetched data was saved; see source.json"
+    } else {
         "fetched data was saved but does not fit the target; see source.json; use a matching \
-         archive or blocklog+snapshot replay",
-    )?;
+         archive or blocklog+snapshot replay"
+    })?;
     let extents: Vec<Extent> = t.extents().copied().collect();
     let text = format!(
         "Fetched {block_count} block(s) for {} region(s) from {} endpoint(s) into {}.\n\

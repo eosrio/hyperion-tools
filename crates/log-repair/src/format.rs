@@ -237,14 +237,28 @@ impl Log {
         ensure!(b - a <= MAX_BYTES, "block {n} exceeds 256 MiB safety limit");
         Ok((a, b))
     }
+    /// Entry `n` without its position trailer. A SHIP entry ends where its header says; any
+    /// bytes from there to the next index position must be orphaned fork entries.
     pub fn body(&self, n: u32) -> Result<Vec<u8>> {
         let (a, b) = self.bounds(n)?;
         let mut bytes = self.log.read(a, b - a)?;
+        let own = if self.kind == Kind::Blocks {
+            bytes.len()
+        } else {
+            let own = ship_entry_size(&bytes);
+            ensure!(
+                own <= bytes.len() as u64,
+                "SHIP payload_size of block {n} runs past the next index position"
+            );
+            orphans(&bytes[own as usize..], a + own)
+                .with_context(|| format!("bytes after block {n}'s SHIP entry"))?;
+            own as usize
+        };
         ensure!(
-            u64le(&bytes[bytes.len() - 8..]) == a,
+            u64le(&bytes[own - 8..own]) == a,
             "position trailer mismatch at block {n}"
         );
-        bytes.truncate(bytes.len() - 8);
+        bytes.truncate(own - 8);
         self.id(n, &bytes)?;
         Ok(bytes)
     }
@@ -263,14 +277,23 @@ impl Log {
             u64le(&h) == SHIP_MAGIC,
             "unsupported SHIP header at block {n}"
         );
+        let own = ship_entry_size(&h);
         ensure!(
-            u64le(&h[40..]) == b - a - 56,
-            "SHIP payload_size disagrees with index at block {n}"
+            own <= b - a,
+            "SHIP payload_size of block {n} runs past the next index position"
         );
         ensure!(
-            u64le(&self.log.read(b - 8, 8)?) == a,
+            u64le(&self.log.read(a + own - 8, 8)?) == a,
             "position trailer mismatch at block {n}"
         );
+        if own < b - a {
+            ensure!(
+                b - a - own <= MAX_BYTES,
+                "over 256 MiB of orphaned entries after block {n}"
+            );
+            orphans(&self.log.read(a + own, b - a - own)?, a + own)
+                .with_context(|| format!("bytes after block {n}'s SHIP entry"))?;
+        }
         let id: [u8; 32] = h[8..40].try_into()?;
         ensure!(num(&id) == n, "SHIP entry {n} has wrong block number");
         Ok(id)
@@ -286,6 +309,39 @@ impl Log {
             Ok(id)
         }
     }
+}
+
+/// Bytes of a SHIP entry (header, payload, position trailer) from its 48-byte header.
+pub fn ship_entry_size(header: &[u8]) -> u64 {
+    56 + u64le(&header[40..48])
+}
+
+/// Count the orphaned fork entries in `bytes`, which start at file offset `at`. After a
+/// fork, nodeos appends the replacement entries and leaves the abandoned ones in place, so
+/// the bytes between an entry and the next index position are whole SHIP entries whose
+/// trailers name their own positions. Nothing reads them; they are checked, never rebuilt.
+pub fn orphans(mut bytes: &[u8], mut at: u64) -> Result<u64> {
+    let mut count = 0;
+    while !bytes.is_empty() {
+        ensure!(
+            bytes.len() >= 56 && u64le(bytes) == SHIP_MAGIC,
+            "no orphaned SHIP entry header at byte {at}"
+        );
+        let size = ship_entry_size(bytes);
+        ensure!(
+            size <= bytes.len() as u64,
+            "the orphaned entry at byte {at} runs past the next index position"
+        );
+        let size = size as usize;
+        ensure!(
+            u64le(&bytes[size - 8..size]) == at,
+            "the orphaned entry at byte {at} has a wrong position trailer"
+        );
+        count += 1;
+        at += size as u64;
+        bytes = &bytes[size..];
+    }
+    Ok(count)
 }
 
 /// Verify framing, Adler checksum, exact compressed consumption, and bounded expansion.

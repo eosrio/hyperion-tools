@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::format::{Blocks, Kind, Log, block_header, container};
+use crate::format::{Blocks, Kind, Log, block_header, container, orphans};
 use crate::io::{Disk, MAX_BYTES, Stamp, create_dir, create_file, hash, media_error, sync_dir};
 use crate::report::{Out, arg, bytes, duration};
-use crate::target::{Extent, Located, Region, Target, analyze, describe, first_unreadable};
+use crate::target::{
+    Extent, Located, ORPHANS_UNREPAIRABLE, Region, Target, analyze, describe, first_unreadable,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -540,17 +542,47 @@ fn rebuild_region(
         } else {
             packed.clone()
         };
+        let own = body.len() as u64 + 8;
+        let mismatch = || {
+            format!(
+                "entry {n} length {own} differs from target {}; cannot safely splice this \
+                 encoding; use a matching archive or replay build/configuration",
+                b - a
+            )
+        };
         ensure!(
-            body.len() as u64 + 8 == b - a,
-            "entry {n} length {} differs from target {}; cannot safely splice this encoding; \
-             use a matching archive or replay build/configuration",
-            body.len() + 8,
-            b - a
+            own == b - a || (log.kind != Kind::Blocks && own < b - a),
+            "{}",
+            mismatch()
         );
+        // A shorter SHIP entry leaves orphaned fork entries before the next index position.
+        // They are kept as they are: readable, outside every damaged extent, and framed.
+        let gap = if own < b - a {
+            let (from, to) = (a + own, b);
+            if let Some(e) = r.extents.iter().find(|e| e.offset < to && from < e.end()) {
+                bail!(
+                    "block {n} is followed by orphaned fork entries at bytes {from}..{to}, and \
+                     damage at bytes {}..{} reaches them; {ORPHANS_UNREPAIRABLE}",
+                    e.offset,
+                    e.end()
+                );
+            }
+            let gap = log.log.read(from, to - from)?;
+            orphans(&gap, from).with_context(|| {
+                format!(
+                    "{}, and the bytes after it are not orphaned fork entries",
+                    mismatch()
+                )
+            })?;
+            gap
+        } else {
+            Vec::new()
+        };
         digest.update((body.len() as u64).to_le_bytes());
         digest.update(&body);
         span.extend_from_slice(&body);
         span.extend_from_slice(&a.to_le_bytes());
+        span.extend_from_slice(&gap);
     }
     ensure!(
         span.len() as u64 == r.span_end - r.span_start,

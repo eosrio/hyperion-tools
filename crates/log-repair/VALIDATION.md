@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-39 tests on Linux; 29 on Windows, where the scan-with-faults, media-write,
+42 tests on Linux; 31 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -16,6 +16,12 @@ A write covering a whole damaged range heals it, as a full-record write does on 
   indexes, malformed varints, and oversized lengths. Re-encoded SHIP payloads use
   32 KiB stored blocks, checked at 0 B, one block, 49,349 B, an exact 64 KiB, and
   70,000 B.
+- **Orphaned fork entries (SHIP):** both SHIP kinds with abandoned entries from another
+  fork between an entry and the next index position. Every entry reads as in the clean
+  log, and an orphan with a wrong trailer is refused. Damage beside the orphans rebuilds
+  byte-exactly from a donor with or without them, and heals on media (Unix). Damage
+  that reaches them is refused by the plan when the entry's header is readable, and by
+  the rebuild when it is not.
 - **Geometry:** every pair of non-adjacent damaged records in block and trace
   fixtures, at 512 B and 1 KiB records, groups into regions whose anchors lie wholly
   outside every extent. Each such pair rebuilds byte-exactly, and some pairs share a
@@ -122,6 +128,22 @@ Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1
   matches its entries. The tool refuses them, as documented; donor logs work.
 - `prepare` on a live, appending log fails with `target changed during fetch` once
   a fetch outlasts a block interval. Stop nodeos first.
+
+**Orphaned fork entries, Libre mainnet (Spring 1.2.3-alpha1, ext4).** A static
+30,000-block copy of each SHIP log keeps all 1,859 orphaned fork entries; positions and
+trailers are rebased. It was tested with `prepare --ship` against the node's own endpoint,
+one 4 KiB record at a time:
+
+| Records sampled | Before the orphan fix | After |
+|---|---|---|
+| 30 with no orphans nearby | `already identical` | `already identical` |
+| 21 next to orphans, which lie outside the record | refused (`does not fit the target`) | `already identical` |
+| 30 holding orphan bytes | refused, blaming the encoding | refused, naming the orphans |
+
+The same copies on a disposable btrfs had 8 records damaged beneath the data
+checksums, 6 of them next to orphans. Whole-file scans found all 8 as repairable,
+`prepare --ship` and `apply` wrote them, and after a remount both files were
+byte-identical to the originals.
 
 **Copies of real WAX testnet logs.** These are `blocks.log` (1.3 GB), `trace_history.log`
 (1.8 GB), and `chain_state_history.log` (4.9 GB), with real transactions. The index was

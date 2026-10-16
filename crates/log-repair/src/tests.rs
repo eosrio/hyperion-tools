@@ -1323,3 +1323,163 @@ fn scan_drops_only_the_pages_it_brought_into_the_cache() {
         "pages only the scan read are dropped: {after:?}"
     );
 }
+
+/// The fixture rewritten as nodeos leaves a SHIP log after a fork: two abandoned entries for
+/// blocks `after + 1` and `after + 2`, from another fork, sit between block `after`'s entry
+/// and the next index position. The donor keeps the original layout, without orphans.
+fn orphaned(kind: Kind, after: u32) -> Fixture {
+    let mut f = Fixture::new(kind);
+    let log = f.open(false);
+    let (mut bytes, mut index) = (Vec::new(), Vec::new());
+    for n in log.first..=log.last {
+        let p = bytes.len() as u64;
+        index.extend_from_slice(&p.to_le_bytes());
+        bytes.extend_from_slice(&log.body(n).unwrap());
+        bytes.extend_from_slice(&p.to_le_bytes());
+        if n == after {
+            for orphan in [after + 1, after + 2] {
+                let mut id = [0xEE; 32];
+                id[..4].copy_from_slice(&orphan.to_be_bytes());
+                let p = bytes.len() as u64;
+                bytes.extend_from_slice(&encode_ship(&id, b"abandoned fork entry", 1).unwrap());
+                bytes.extend_from_slice(&p.to_le_bytes());
+            }
+        }
+    }
+    drop(log);
+    fs::write(&f.path, &bytes).unwrap();
+    fs::write(f.path.with_extension("index"), index).unwrap();
+    f.log_bytes = bytes;
+    f
+}
+
+/// Block `n`'s own entry end and the next index position in `log`.
+fn own_and_next(log: &Log, n: u32) -> (u64, u64, u64) {
+    let (a, b) = log.bounds(n).unwrap();
+    let own = format::ship_entry_size(&fs::read(&log.log.path).unwrap()[a as usize..]);
+    (a, a + own, b)
+}
+
+/// A block followed by orphans whose entry crosses a record boundary before its orphans
+/// begin, so one record holds part of the entry and none of the orphans.
+fn straddling(kind: Kind) -> (Fixture, u32, u64) {
+    for n in 1005..1030 {
+        let f = orphaned(kind, n);
+        let log = f.open(false);
+        let (a, end, b) = own_and_next(&log, n);
+        assert!(end < b, "orphans follow block {n}");
+        let boundary = (a / RS + 1) * RS;
+        if a % RS != 0 && boundary <= end {
+            return (f, n, a / RS);
+        }
+    }
+    panic!("no fixture block crosses a record boundary before its orphans");
+}
+
+#[test]
+fn ship_logs_frame_entries_by_payload_size_and_accept_orphaned_fork_entries() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        let clean = Fixture::new(kind);
+        let f = orphaned(kind, 1012);
+        let log = f.open(false);
+        let reference = clean.open(false);
+        for n in log.first..=log.last {
+            assert_eq!(
+                log.body(n).unwrap(),
+                reference.body(n).unwrap(),
+                "{kind:?} {n}"
+            );
+            assert_eq!(
+                log.ship_entry_id(n).unwrap(),
+                reference.ship_entry_id(n).unwrap()
+            );
+        }
+        // An orphan whose trailer does not name its own position is not an orphan.
+        let (_, end, _) = own_and_next(&log, 1012);
+        let mut bytes = f.log_bytes.clone();
+        let orphan_size = format::ship_entry_size(&bytes[end as usize..]) as usize;
+        bytes[end as usize + orphan_size - 8] ^= 1;
+        drop(log);
+        fs::write(&f.path, &bytes).unwrap();
+        let log = f.open(false);
+        let error = log.body(1012).unwrap_err_string();
+        assert!(error.contains("wrong position trailer"), "{error}");
+        assert!(log.ship_entry_id(1012).is_err());
+    }
+}
+
+#[test]
+fn rebuild_keeps_readable_orphans_and_refuses_damage_that_reaches_them() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        // Damage in the entry before its orphans: the donor has no orphans, the target keeps
+        // its own, and the rebuild is byte-exact.
+        let (f, n, record) = straddling(kind);
+        let log = f.open(false);
+        let t = Target::new(&log, RS, &[ext(record, record)]).unwrap();
+        assert!(t.regions[0].last_block >= n, "{kind:?}");
+        assert_eq!(f.rebuild(&log, &t).unwrap().replacement, f.expected(&t));
+        let b = repair::build(&log, &t, &f.source, &f.bundle()).unwrap();
+        assert_eq!(b.json["extent_states"], json!(["identical"]));
+
+        // A donor that has the same orphans works as well.
+        let donor = &f.source.donors[0].log;
+        fs::copy(&f.path, donor).unwrap();
+        fs::copy(
+            f.path.with_extension("index"),
+            donor.with_extension("index"),
+        )
+        .unwrap();
+        assert_eq!(f.rebuild(&log, &t).unwrap().replacement, f.expected(&t));
+
+        // Damage that reaches the orphans: the header is readable, so the plan refuses it.
+        let (a, end, _) = own_and_next(&log, n);
+        let gap_record = end / RS;
+        assert!(a < gap_record * RS && gap_record > record);
+        let error = Target::new(&log, RS, &[ext(gap_record, gap_record)]).unwrap_err_string();
+        assert!(error.contains("orphaned fork entries"), "{kind:?}: {error}");
+    }
+    // Damage covering an entry's header and its orphans: refused once the rebuilt length
+    // shows where the orphans start.
+    for kind in [Kind::Trace, Kind::ChainState] {
+        let mut refused = false;
+        for n in 1005..1030 {
+            let f = orphaned(kind, n);
+            let log = f.open(false);
+            let (a, end, _) = own_and_next(&log, n);
+            if a / RS != end / RS {
+                continue;
+            }
+            let record = a / RS;
+            let Ok(t) = Target::new(&log, RS, &[ext(record, record)]) else {
+                continue;
+            };
+            let error = f.rebuild(&log, &t).unwrap_err_string();
+            assert!(error.contains("orphaned fork entries"), "{kind:?}: {error}");
+            assert!(error.contains(target::ORPHANS_UNREPAIRABLE), "{error}");
+            refused = true;
+            break;
+        }
+        assert!(
+            refused,
+            "{kind:?}: no fixture block has its header and orphans in one record"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn media_repair_next_to_orphaned_fork_entries_heals_byte_exactly() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        let (f, _, record) = straddling(kind);
+        let mut log = f.open(true);
+        let t = Target::new(&log, RS, &[ext(record, record)]).unwrap();
+        let fault = f.damage(&mut log, &t);
+        let b = repair::build(&log, &t, &f.source, &f.bundle()).unwrap();
+        assert_eq!(b.json["extent_states"], json!(["unreadable"]));
+        let (plan, replacement) = repair::read_plan(&f.bundle(), &approval(&b)).unwrap();
+        let report = repair::apply_open(&log, &plan, &replacement, &f.bundle()).unwrap();
+        assert_eq!(report.json["applied"], true, "{kind:?}");
+        assert_eq!(fault.writes(), 1);
+        assert_eq!(fs::read(&f.path).unwrap(), f.log_bytes);
+    }
+}

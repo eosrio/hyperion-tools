@@ -111,6 +111,7 @@ The tool repairs bytes the operating system **refuses to read**: reads that fail
 | Silent corruption: the bytes read back, but wrong | **No.** Nothing tells the tool which bytes are bad, and it never overwrites readable data |
 | Damage in the first entry, the head (last) entry, or the file header | No: a readable neighbor entry is needed on both sides |
 | Damaged or missing `.index` | No: the index defines entry boundaries |
+| SHIP damage inside orphaned fork entries (abandoned entries nodeos leaves after a fork) | No: no other node, endpoint, or replay holds those bytes. Damage next to them is repaired, and they are kept as they are (see [FORMAT.md](FORMAT.md#target-logs)) |
 | Pruned block logs, SHIP logs with feature flags | No: refused as unsupported formats |
 | A truncated log, or damage at the end of the file | No: use your node's normal recovery for the head of the log |
 
@@ -424,6 +425,7 @@ the plan.
 | `byte N near this damage is unreadable too` | An anchor or readable gap also fails | Scan a wider range or the whole file so all nearby damage is in one plan |
 | `stopped after N failed reads` | Widespread damage | Check the device and pool health. Raise `--max-bad-reads` only if you are sure |
 | `this platform reports no filesystem block size` | Windows, or an unusual filesystem | Pass `--record-size` |
+| `followed by orphaned fork entries … reaches them` | The damage covers entries nodeos abandoned after a fork, which no source holds | Not repairable. Narrow the selection to the other regions; for these bytes, resync or restore the log |
 | `entry N length … differs from target` | The source encodes this entry differently: another compressor, node version, or debug setting | Use replay with the original nodeos version and settings, or a donor from an identical node |
 | `rebuilt bytes … differ from the readable target bytes` | The source does not match your log | Wrong chain or fork, or a differently configured source node |
 | `belongs to another chain or fork` | Anchor IDs do not match | The source is from another chain or fork |

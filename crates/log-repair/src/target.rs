@@ -9,9 +9,13 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::format::{Log, MAX_BLOCKS};
+use crate::format::{Kind, Log, MAX_BLOCKS, ship_entry_size};
 use crate::io::{Disk, MAX_BYTES, media_error};
 
+/// Why damage inside orphaned fork entries is refused: nothing outside the damaged log holds
+/// those abandoned bytes, not another node's log, a state-history endpoint, or a replay.
+pub const ORPHANS_UNREPAIRABLE: &str = "no other node, endpoint, or replay holds those abandoned bytes, so this damage cannot be \
+     rebuilt";
 pub const MIN_RECORD: u64 = 512;
 pub const MAX_RECORD: u64 = 16 * 1024 * 1024;
 /// Regions (independent damaged areas) in one plan.
@@ -86,6 +90,34 @@ impl Region {
                 );
             }
             cursor = e.end();
+        }
+        // Damage inside orphaned fork entries cannot be rebuilt: no source holds them. An entry
+        // whose own header is damaged is checked again once its rebuilt length is known.
+        if log.kind != Kind::Blocks {
+            let damaged = |from: u64, to: u64| {
+                self.extents
+                    .iter()
+                    .find(|e| e.offset < to && from < e.end())
+                    .copied()
+            };
+            for n in self.first_block..=self.last_block {
+                let (a, b) = log.bounds(n)?;
+                if damaged(a, a + 48).is_some() {
+                    continue;
+                }
+                let own = ship_entry_size(&log.log.read(a, 48)?);
+                if own < b - a
+                    && let Some(e) = damaged(a + own, b)
+                {
+                    bail!(
+                        "block {n} is followed by orphaned fork entries at bytes {}..{b}, and \
+                         damage at bytes {}..{} reaches them; {ORPHANS_UNREPAIRABLE}",
+                        a + own,
+                        e.offset,
+                        e.end()
+                    );
+                }
+            }
         }
         Ok(())
     }

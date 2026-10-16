@@ -44,8 +44,26 @@ completion, the Adler checksum, and full consumption of the compressed input, wi
 256 MiB decompression ceiling. No state-history ABI semantics are guessed from a
 damaged payload.
 
-The intact `.index` is the only authority for entry boundaries. Every entry read
-checks its trailer against its index position.
+The intact `.index` is the only authority for where entries start. Every entry read
+checks its trailer against its index position. A `blocks.log` entry ends at the next
+index position. A SHIP entry ends where its own `payload_size` says, which can be
+earlier.
+
+**Orphaned fork entries (SHIP).** After a fork, nodeos appends the replacement entries
+and leaves the abandoned ones in place. The bytes between an entry's end and the next
+index position are then whole SHIP entries from the abandoned fork, and each trailer
+names its own position. Nothing reads them: the index skips them. They are common on
+fast-forking chains: one per 16 blocks in a 30,000-block Libre range (1,859 orphans),
+and 44 in 500,000 EOS blocks.
+
+- Reads check that the gap is made of such entries, and refuse anything else.
+- A rebuild keeps the gap's original bytes: they must be readable, lie outside every
+  damaged extent, and frame correctly.
+- Damage that reaches orphaned entries cannot be repaired. Nothing outside the
+  damaged log holds those bytes: not another node's log (its orphans differ), not a
+  state-history endpoint, not a replay. `scan` reports it as not repairable when the
+  entry's header is readable; otherwise `build` refuses once the rebuilt entry shows
+  where the orphans begin.
 
 ## Damage geometry
 
