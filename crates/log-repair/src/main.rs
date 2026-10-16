@@ -88,13 +88,16 @@ impl TargetArgs {
         }
     }
 
-    fn locate(&self, announce_full_scan: bool) -> Result<(format::Log, target::Located)> {
+    fn locate(&self) -> Result<(format::Log, target::Located)> {
         let log = format::Log::open(&self.log, self.index.as_deref(), false)?;
         let selection = self.selection();
-        if announce_full_scan && matches!(selection, Selection::Whole) {
+        if matches!(selection, Selection::Whole) {
             eprintln!(
-                "No damage location given: scanning all of {}. Narrow with --damaged-block or \
-                 --block-range, or name records with --record-index.",
+                "Reading all {} of {} (no --damaged-block, --block-range, or --record-index \
+                 given). On a live node this is a long sequential read competing with nodeos: \
+                 prefer a narrow range, a quiet node or copy, or off-peak hours. Nothing is \
+                 written; Ctrl-C stops it safely.",
+                report::bytes(log.size),
                 log.log.path.display()
             );
         }
@@ -104,7 +107,7 @@ impl TargetArgs {
 
     /// Damage that must exist and be repairable.
     fn target(&self) -> Result<(format::Log, target::Target)> {
-        let (log, located) = self.locate(true)?;
+        let (log, located) = self.locate()?;
         ensure!(
             !located.extents.is_empty(),
             "no unreadable data found in the selected range of {}; nothing to repair",
@@ -351,7 +354,7 @@ async fn main() {
 async fn run(cli: Cli) -> Result<Out> {
     match cli.command {
         Command::Scan { target } => {
-            let (log, located) = target.locate(false)?;
+            let (log, located) = target.locate()?;
             repair::scan_report(&log, &located)
         }
         Command::Prepare {

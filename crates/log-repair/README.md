@@ -158,10 +158,18 @@ Choose how much to read:
 
 | Flag | Reads | Use when |
 |---|---|---|
-| *(none)* | The whole file | You know the file but not where. Fast on healthy disks, roughly at sequential read speed |
+| *(none)* | The whole file | You know the file but not where. Costly on a live node: see below |
 | `--damaged-block N` | The records holding block N's entry, following the damage outward | nodeos or a client reported a failing block number |
 | `--block-range A-B` | The records holding blocks A through B, following the damage outward | You know an approximate range |
 | `--record-index N` or `A-B` (repeatable) | Nothing; you name the records | You already have them, for example from ZFS (below) |
+
+**Cost of a whole-file scan.** It reads every byte at sequential disk speed. On a
+mainnet node, `blocks.log` and the SHIP logs can be several terabytes, which means hours
+of heavy reads competing with nodeos. Start with `--damaged-block` or `--block-range`,
+and run full scans on a copy, a quiet node, or off-peak. The scan prints its progress,
+rate, and time left every 4 GiB, and Ctrl-C stops it safely. On Linux it drops the pages
+it alone brought into the page cache, so cold log data does not evict a live node's
+working set. Pages already cached stay cached.
 
 **Record size.** By default it is the file's filesystem block size (`st_blksize`). On
 ZFS that is the file's own record size; on ext4/xfs/btrfs it is 4 KiB. Override it with

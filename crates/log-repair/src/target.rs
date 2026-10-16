@@ -444,6 +444,9 @@ pub fn scan(
     let mut pos = from;
     while pos < to {
         let len = chunk.min(to - pos);
+        // Remember what was cached, so pages only this scan brought in can be dropped again.
+        #[cfg(target_os = "linux")]
+        let cached = disk.cached_pages(pos, len.min(size - pos));
         if !probe(pos, len, &mut failed, &mut bytes_read)? {
             let mut r = pos;
             while r < pos + len {
@@ -453,14 +456,22 @@ pub fn scan(
                 r += record_size;
             }
         }
+        #[cfg(target_os = "linux")]
+        if let Some(cached) = &cached {
+            disk.uncache(cached);
+        }
         pos += len;
         if to - from > progress_every && pos - from >= next_progress {
             next_progress += progress_every;
+            let done = (pos - from) as f64;
+            let rate = done / started.elapsed().as_secs_f64().max(0.001);
             eprintln!(
-                "scanned {} of {} ({:.0}%), {} unreadable records so far",
+                "scanned {} of {} ({:.0}%) at {}/s, about {} left; {} unreadable record(s) so far",
                 crate::report::bytes(pos - from),
                 crate::report::bytes(to - from),
-                (pos - from) as f64 * 100.0 / (to - from) as f64,
+                done * 100.0 / (to - from) as f64,
+                crate::report::bytes(rate as u64),
+                crate::report::duration((to - pos) as f64 / rate),
                 bad.len()
             );
         }

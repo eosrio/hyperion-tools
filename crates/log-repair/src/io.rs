@@ -21,6 +21,20 @@ pub struct Stamp {
     pub inode: u64,
 }
 
+/// Which pages of a page-aligned range were in the page cache.
+#[cfg(target_os = "linux")]
+pub struct CachedPages {
+    pub start: u64,
+    pub cached: Vec<bool>,
+}
+
+#[cfg(target_os = "linux")]
+fn page_size() -> u64 {
+    // SAFETY: sysconf has no preconditions.
+    let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    u64::try_from(size).unwrap_or(4096).max(512)
+}
+
 pub struct Disk {
     pub file: File,
     pub path: PathBuf,
@@ -161,6 +175,82 @@ impl Disk {
             }
         }
         Ok(bytes)
+    }
+
+    /// Page-cache residency of `offset..offset + len`, page by page (Linux `mincore`). The
+    /// mapping is never touched, so damaged pages are not read. `None` when unavailable.
+    #[cfg(target_os = "linux")]
+    pub fn cached_pages(&self, offset: u64, len: u64) -> Option<CachedPages> {
+        use std::os::fd::AsRawFd;
+        let page = page_size();
+        let start = offset - offset % page;
+        let end = offset.checked_add(len)?.next_multiple_of(page);
+        let map_len = usize::try_from(end - start).ok()?;
+        if map_len == 0 {
+            return Some(CachedPages {
+                start,
+                cached: Vec::new(),
+            });
+        }
+        let mut residency = vec![0u8; map_len / page as usize];
+        // SAFETY: a read-only shared mapping of our own descriptor, inspected with mincore
+        // and unmapped before returning; no byte of it is ever dereferenced.
+        unsafe {
+            let addr = libc::mmap(
+                std::ptr::null_mut(),
+                map_len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                self.file.as_raw_fd(),
+                libc::off_t::try_from(start).ok()?,
+            );
+            if addr == libc::MAP_FAILED {
+                return None;
+            }
+            let rc = libc::mincore(addr, map_len, residency.as_mut_ptr());
+            libc::munmap(addr, map_len);
+            if rc != 0 {
+                return None;
+            }
+        }
+        Some(CachedPages {
+            start,
+            cached: residency.iter().map(|b| b & 1 == 1).collect(),
+        })
+    }
+
+    /// Drop from the page cache the pages that `before` recorded as not cached, so a scan
+    /// does not evict a live node's working set with cold log data. Best effort.
+    #[cfg(target_os = "linux")]
+    pub fn uncache(&self, before: &CachedPages) {
+        use std::os::fd::AsRawFd;
+        let page = page_size();
+        let mut i = 0;
+        while i < before.cached.len() {
+            if before.cached[i] {
+                i += 1;
+                continue;
+            }
+            let j = (i..before.cached.len())
+                .find(|&k| before.cached[k])
+                .unwrap_or(before.cached.len());
+            let (Ok(offset), Ok(len)) = (
+                libc::off_t::try_from(before.start + i as u64 * page),
+                libc::off_t::try_from((j - i) as u64 * page),
+            ) else {
+                return;
+            };
+            // SAFETY: an advisory call on our own descriptor; it never changes file contents.
+            unsafe {
+                libc::posix_fadvise(
+                    self.file.as_raw_fd(),
+                    offset,
+                    len,
+                    libc::POSIX_FADV_DONTNEED,
+                );
+            }
+            i = j;
+        }
     }
 
     /// Filesystem-preferred I/O size (`st_blksize`). On ZFS this is the file's data block

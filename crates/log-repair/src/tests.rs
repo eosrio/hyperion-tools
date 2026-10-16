@@ -1250,3 +1250,42 @@ fn cli_definition_is_consistent() {
     use clap::CommandFactory;
     Cli::command().debug_assert();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn scan_drops_only_the_pages_it_brought_into_the_cache() {
+    let f = Fixture::new(Kind::Blocks);
+    let log = f.open(false);
+    log.log.file.sync_all().unwrap();
+    let all = log.log.cached_pages(0, log.size).unwrap();
+    let pages = all.cached.len();
+    assert!(pages >= 3, "fixture must span several pages");
+    log.log.uncache(&io::CachedPages {
+        start: 0,
+        cached: vec![false; pages],
+    });
+    if log
+        .log
+        .cached_pages(0, log.size)
+        .unwrap()
+        .cached
+        .iter()
+        .any(|c| *c)
+    {
+        eprintln!("this filesystem keeps pages cached regardless (tmpfs?); skipping");
+        return;
+    }
+    // The node's working set: the newest page. Readahead only runs forward, so reading the
+    // last page caches nothing else.
+    log.log.read(log.size - 1, 1).unwrap();
+    target::scan(&log.log, log.size, RS, 0, log.size, 8).unwrap();
+    let after = log.log.cached_pages(0, log.size).unwrap().cached;
+    assert!(
+        after[pages - 1],
+        "a page cached before the scan stays cached"
+    );
+    assert!(
+        after[..pages - 1].iter().all(|c| !c),
+        "pages only the scan read are dropped: {after:?}"
+    );
+}
