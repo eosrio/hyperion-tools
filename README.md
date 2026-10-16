@@ -26,6 +26,12 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 | [**action-proto**](crates/action-proto) | experimental | Direct-from-disk action reader: decodes `action_traces` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Next-gen indexer read path. |
 | [**delta-proto**](crates/delta-proto) | experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas into Hyperion-shaped delta NDJSON. |
 
+### Log recovery
+
+| crate | status | what it does |
+|---|---|---|
+| [**antelope-log-repair**](crates/log-repair) | experimental | Finds and repairs unreadable records in block and SHIP logs: scans for I/O errors, rebuilds the affected entries from independent SHIP endpoints, another node's blocklog, or an isolated snapshot replay, and writes them back offline after a reviewed plan is approved. |
+
 ### Light API (snapshot → Mongo → serve)
 
 | crate | status | what it does |

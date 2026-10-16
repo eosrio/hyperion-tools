@@ -1,7 +1,7 @@
 name: Release
 
 # Cut a release on a `v*` tag: build the whole toolkit (abi-scanner, action-proto, delta-proto,
-# archive-server, es-load) for portable Linux targets — musl-static binaries run on ANY Linux
+# archive-server, es-load, antelope-log-repair) for portable Linux targets — musl-static binaries run on ANY Linux
 # regardless of glibc — attach the tarballs (+ sha256) to the GitHub Release, and publish a ghcr
 # image for the archive-server service.
 on:
@@ -15,7 +15,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  BINS: abi-scanner action-proto delta-proto archive-server es-load
+  BINS: abi-scanner action-proto delta-proto archive-server es-load antelope-log-repair
 
 jobs:
   binaries:
@@ -53,6 +53,8 @@ jobs:
           done
           [ -f README.md ] && cp README.md "dist/$name/" || true
           [ -f LICENSE ] && cp LICENSE "dist/$name/" || true
+          mkdir -p "dist/$name/docs/log-repair"
+          cp crates/log-repair/{README,FORMAT,VALIDATION}.md "dist/$name/docs/log-repair/"
           tar -C dist -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       - name: Upload to release

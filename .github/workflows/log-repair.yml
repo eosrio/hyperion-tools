@@ -1,0 +1,29 @@
+name: antelope-log-repair
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['crates/log-repair/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.github/workflows/log-repair.yml']
+  pull_request:
+    paths: ['crates/log-repair/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.github/workflows/log-repair.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --package antelope-log-repair --check
+      - run: cargo clippy --locked --package antelope-log-repair --all-targets -- -D warnings
+      - run: cargo test --locked --package antelope-log-repair
+      - run: cargo build --release --locked --package antelope-log-repair
