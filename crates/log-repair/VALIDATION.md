@@ -6,8 +6,8 @@ establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-37 tests on Linux; 28 on Windows, where the scan-with-faults, media-write, and
-process-inspection tests are compiled out. Faults are injected on exact byte ranges.
+38 tests on Linux; 28 on Windows, where the scan-with-faults, media-write,
+page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
 - **Formats:** a real EOS mainnet packed block whose header ID matches the ID nodeos
@@ -24,7 +24,9 @@ A write covering a whole damaged range heals it, as a full-record write does on 
   regions, one of them two records wide, plus an unrepairable head-entry area. The
   report and suggested `--record-index` flags match. A `--damaged-block` scan follows
   its extent outward and ignores other regions. The failed-read budget stops a scan.
-  A clean scan reports nothing (on all platforms).
+  A clean scan reports nothing (on all platforms). On Linux, a page cached before a
+  scan stays cached, and the pages only the scan read are dropped again. The test
+  skips itself on filesystems that ignore cache eviction, such as tmpfs.
 - **Reconstruction:** byte-exact two-region rebuilds for all three log kinds. Also
   covered: rebased donor trailers; a donor anchor checked from framing alone, whose
   payload is never read (on Unix it exceeds the per-entry read limit, as a full-state
