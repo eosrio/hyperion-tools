@@ -34,7 +34,10 @@ use target::Selection;
         Typical use:\n  \
         antelope-log-repair scan --log LOG\n  \
         antelope-log-repair prepare --log LOG --damaged-block N --ship ws://HOST:PORT --out DIR\n  \
-        antelope-log-repair apply --bundle DIR/bundle --approve PLAN_SHA256 --node-stopped"
+        antelope-log-repair apply --bundle DIR/bundle --approve PLAN_SHA256 --node-stopped\n\n\
+        Silent corruption (bytes that read back wrong, e.g. on ext4/xfs) is not repairable, \
+        but `verify` finds it:\n  \
+        antelope-log-repair verify --log LOG [--block-range A-B] [--against OTHER/blocks.log]"
 )]
 struct Cli {
     /// Print one JSON document on stdout instead of a human summary.

@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-42 tests on Linux; 31 on Windows, where the scan-with-faults, media-write,
+47 tests on Linux; 36 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -22,6 +22,19 @@ A write covering a whole damaged range heals it, as a full-record write does on 
   byte-exactly from a donor with or without them, and heals on media (Unix). Damage
   that reaches them is refused by the plan when the entry's header is readable, and by
   the rebuild when it is not.
+- **Verify (silent corruption):** intact logs of every kind report nothing, alone, with
+  a reference, and over a range. Single flipped bytes are found as follows:
+  - a `blocks.log` header byte breaks the chain at the next block, including when a
+    range starts after the damaged block or ends at it;
+  - a `blocks.log` transaction byte is found only against a reference, at its exact
+    file offset;
+  - a position trailer that disagrees with the index is found;
+  - SHIP payload bytes at the start, middle, and Adler-32 trailer of an entry are found;
+  - a SHIP entry-ID byte is found only against a reference.
+
+  Orphaned fork entries are counted, not reported, and a broken orphan trailer is
+  found. The target as its own reference, a SHIP log as a reference, and a range
+  outside the log are refused.
 - **Geometry:** every pair of non-adjacent damaged records in block and trace
   fixtures, at 512 B and 1 KiB records, groups into regions whose anchors lie wholly
   outside every extent. Each such pair rebuilds byte-exactly, and some pairs share a
@@ -182,6 +195,19 @@ copied before the log, then both were trimmed to the last complete entry.
 - **Observed on ZFS:** the plan pins the file's device number, which an export and
   import changes, so apply refuses an older plan. The refusal now names the field.
 
+**`verify` on live nodes, read-only.** Nothing was found anywhere:
+
+| Logs | Filesystem | Coverage | Result |
+|---|---|---|---|
+| Six testnet `blocks.log` files: Telos, WAX, Ultra, Jungle, Proton, and a Telos test client | ext4 | whole files, 46,919,455 entries; 6.1 GiB in 23 s for the largest | no problems |
+| Libre mainnet `blocks.log`, against another node's `blocks.log` | ext4 | 5,000,001 entries, 966 MiB in 2.2 s | no problems |
+| Libre mainnet trace and chain-state logs, against the node's `blocks.log` | ext4 | 5,000,001 entries each, 2.2 and 4.0 GiB in about 50 s | no problems; 449,043 orphaned fork entries each |
+| EOS mainnet trace and chain-state logs, against the node's `blocks.log` | ZFS | 500,001 entries each, 3.3 and 1.5 GiB in 25 and 20 s | no problems; 44 orphaned fork entries each |
+
+An early `verify` build assumed that every SHIP entry fills its index span. It reported
+every orphaned fork entry on Libre as corruption, and that is how the orphan layout was
+found.
+
 ## Not established
 
 - A disk that physically remaps sectors on write. ZFS, btrfs, and dm-integrity heal
@@ -189,6 +215,8 @@ copied before the log, then both were trimmed to the last complete entry.
 - Replay (`replay-ship`, `prepare --nodeos`) on a real chain; it ran only on the
   smoke chain.
 - Leap 3 and Leap 4 logs, and chain-specific builds other than WAX's Leap 5 build.
+- `verify` without a reference does not check `blocks.log` transaction bodies: it does
+  not recompute transaction Merkle roots, and signatures cover only headers.
 - Valid public-certificate WSS end to end. Operators normally use `ws://` inside
   their own network.
 - The snapshot head remains an operator-provided input.
