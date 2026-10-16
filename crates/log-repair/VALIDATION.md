@@ -1,19 +1,21 @@
 # Validation
 
-What the automated tests, the real-nodeos smoke test, and the real-kernel `EIO` test
-establish, and what they do not. Commands are listed in
+What the automated tests, the real-nodeos smoke test, the real-kernel `EIO` test, and
+the real-server runs establish, and what they do not. Commands are listed in
 [README.md](README.md#development).
 
 ## Rust tests
 
-38 tests on Linux; 28 on Windows, where the scan-with-faults, media-write,
+39 tests on Linux; 29 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
 - **Formats:** a real EOS mainnet packed block whose header ID matches the ID nodeos
   reports independently. Also covered: block-log v3 and both SHIP log kinds; all
   three SHIP payload markers; corrupt zlib, sizes, magic, and pruning flags; truncated
-  indexes, malformed varints, and oversized lengths.
+  indexes, malformed varints, and oversized lengths. Re-encoded SHIP payloads use
+  32 KiB stored blocks, checked at 0 B, one block, 49,349 B, an exact 64 KiB, and
+  70,000 B.
 - **Geometry:** every pair of non-adjacent damaged records in block and trace
   fixtures, at 512 B and 1 KiB records, groups into regions whose anchors lie wholly
   outside every extent. Each such pair rebuilds byte-exactly, and some pairs share a
@@ -96,17 +98,79 @@ Last run 2026-10-16 in WSL2 (kernel 6.18), on the smoke test's `blocks.log`:
   so an immediate scan reported no damage. Once caches were dropped, the damage
   reappeared. The README and apply's error message warn about this.
 
+## Real-server runs
+
+Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1 and
+2.2), with the static musl build. Nothing ran against a live log except read-only
+`scan` and `prepare`; every write went to a copy on a disposable filesystem.
+
+**Live nodes, read-only.** EOS mainnet (Spring 1.2.2, full history), WAX testnet
+(Leap 5 WAX build), and Telos testnet (Spring 1.2.3-alpha1), all on ZFS:
+
+- Narrow scans of `blocks.log`, `trace_history.log`, and `chain_state_history.log`
+  found no damage. `st_blksize` reported the 128 KiB record size on every ZFS file.
+- `prepare --ship` against the node's own state-history endpoint rebuilt
+  `blocks.log` records and recent chain-state records byte for byte.
+- Before the 32 KiB stored-block fix, it refused traces and older chain-state
+  entries. The decompressed payloads were identical; only the stored-block split
+  differed (Spring writes 32,768-byte blocks, the previous encoder 31,745). With the
+  fix, the same records rebuild byte for byte. On static 3,000-block mainnet slices
+  (`slice-log`), one region of 2,969 trace entries (18.5 MiB) and one of 2,877
+  chain-state entries (6.4 MiB), with payloads up to 650 KB, rebuild byte for byte and
+  apply as a verified no-op. The unfixed build refuses both.
+- WAX's Leap 5 build writes compressed (not stored) zlib, so a SHIP fetch never
+  matches its entries. The tool refuses them, as documented; donor logs work.
+- `prepare` on a live, appending log fails with `target changed during fetch` once
+  a fetch outlasts a block interval. Stop nodeos first.
+
+**Copies of real WAX testnet logs.** These are `blocks.log` (1.3 GB), `trace_history.log`
+(1.8 GB), and `chain_state_history.log` (4.9 GB), with real transactions. The index was
+copied before the log, then both were trimmed to the last complete entry.
+
+- **No damage:** `prepare --ship` (another node's endpoint) and `prepare --blocks-log`
+  (another node's `blocks.log`, written by a different node version) each found
+  `already identical`, and `apply` verified a no-op with the file hash unchanged.
+  Apply refused a wrong `--approve` hash, a missing `--node-stopped`, and another
+  process holding the log open.
+- **Real damage, healed.** Each damage was written beneath the filesystem's own
+  checksums, so the kernel returned real `EIO`. Every case had three regions in
+  `blocks.log` and two in each SHIP log, including an extent of two adjacent records.
+
+  | Filesystem | Damage | Records |
+  |---|---|---|
+  | ZFS, `compression=off` and `lz4`, file-backed pool | bytes overwritten inside the L0 blocks on the vdev | 128 KiB, 10 records |
+  | btrfs, single data profile | bytes inverted in the data extents | 4 KiB, 10 records |
+  | ext4 and xfs on dm-integrity (crc32c, separate metadata device) | bytes inverted on the data device | 4 KiB, 10 records each |
+
+  Whole-file scans found exactly the damaged records, and every region was
+  repairable. `prepare` used `--ship` or `--blocks-log` for blocks, and `--donor-log`
+  with `--blocks-log` for SHIP logs. After `apply`, the caches were dropped: the ZFS
+  pool was exported and imported, and the other filesystems were unmounted, with the
+  dm-integrity devices closed and reopened. Then every repaired record read with
+  `O_DIRECT`, whole-file scans were clean, and all files were byte-identical to their
+  pre-damage hashes. On ZFS the records had new block pointers and `zpool scrub`
+  reported no errors.
+- **Observed on XFS:** after a failed read, the scan's retries of neighboring records
+  in the same large folio fail too, so one bad sector was reported as up to 64 KiB.
+  Apply rewrote those bytes with identical data. Documented in the README.
+- **Observed on btrfs:** the repaired files read cleanly, but `btrfs scrub` still
+  counted the old sectors, because the partly used old extents stay allocated.
+  `btrfs filesystem defragment` did not release them; rewriting the files did, and
+  scrub then reported no errors. Documented in the README.
+- **Observed on ZFS:** the plan pins the file's device number, which an export and
+  import changes, so apply refuses an older plan. The refusal now names the field.
+
 ## Not established
 
-- A successful write that heals real damage: ZFS was not available, and the test
-  kernel had no `dm-dust`. The healing write path is covered only by injected faults.
-- ZFS itself, including `st_blksize` reporting the record size, and btrfs.
-- Large historical production traces and deltas, alternate compressor versions, and
-  other chain-specific node builds: the smoke chain contains empty blocks.
+- A disk that physically remaps sectors on write. ZFS, btrfs, and dm-integrity heal
+  the same way, but `dm-dust` was not available to emulate that directly.
+- Replay (`replay-ship`, `prepare --nodeos`) on a real chain; it ran only on the
+  smoke chain.
+- Leap 3 and Leap 4 logs, and chain-specific builds other than WAX's Leap 5 build.
 - Valid public-certificate WSS end to end. Operators normally use `ws://` inside
   their own network.
 - The snapshot head remains an operator-provided input.
 
 Qualify a release on copies of real logs from the intended chain and node version,
-ideally on a disposable ZFS dataset with injected errors (`zinject -t data`) or a
-`dm-dust` device, before relying on it for production repair.
+ideally on a disposable filesystem with real damage beneath its checksums (as above,
+or `zinject -t data` on ZFS), before relying on it for production repair.

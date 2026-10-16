@@ -247,7 +247,8 @@ pub fn scan_report(log: &Log, located: &Located) -> Result<Out> {
     };
     writeln!(
         text,
-        "\nNext (nothing is written; nodeos may keep running):\n  {next}\n{alternative}"
+        "\nNext (nothing is written, but stop nodeos first: the plan pins the log's size and \
+         modification time, which a running node changes with every block):\n  {next}\n{alternative}"
     )?;
     json["next_command"] = json!(next);
     Ok(Out { json, text })
@@ -758,9 +759,11 @@ pub fn apply_open(log: &Log, plan: &Plan, replacement: &[u8], bundle: &Path) -> 
         t == plan.target && log.kind == plan.kind,
         "target layout differs from approved plan"
     );
+    let index_now = log.index.stamp()?;
     ensure!(
-        log.index.stamp()? == plan.index_stamp,
-        "index changed since build"
+        index_now == plan.index_stamp,
+        "index changed since build ({}); build and review a new plan",
+        index_now.changes(&plan.index_stamp)
     );
     log.log.check_path()?;
     log.index.check_path()?;
@@ -785,7 +788,8 @@ pub fn apply_open(log: &Log, plan: &Plan, replacement: &[u8], bundle: &Path) -> 
     if !pending.is_empty() {
         ensure!(
             before == plan.log_stamp,
-            "log changed since build; rebuild the plan"
+            "log changed since build ({}); rebuild the plan",
+            before.changes(&plan.log_stamp)
         );
     }
     let loaded = plan.sources.load(log.kind)?;

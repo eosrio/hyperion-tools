@@ -347,7 +347,8 @@ pub async fn fetch(
     }
     ensure!(
         log.log.stamp()? == before && log.index.stamp()? == idx_before,
-        "target changed during fetch; stop nodeos and repeat"
+        "target changed during fetch (a running nodeos appends every block); stop nodeos and \
+         repeat"
     );
 
     create_dir(out)?;

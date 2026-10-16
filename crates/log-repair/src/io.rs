@@ -21,6 +21,32 @@ pub struct Stamp {
     pub inode: u64,
 }
 
+impl Stamp {
+    /// Names the fields that differ from `then`, for refusal messages.
+    pub fn changes(&self, then: &Stamp) -> String {
+        let mut out = Vec::new();
+        if self.size != then.size {
+            out.push(format!("size {} -> {}", then.size, self.size));
+        }
+        if self.modified_ns != then.modified_ns {
+            out.push("modification time".to_string());
+        }
+        #[cfg(unix)]
+        {
+            if self.inode != then.inode {
+                out.push(format!("inode {} -> {}", then.inode, self.inode));
+            }
+            if self.device != then.device {
+                out.push(format!(
+                    "device {} -> {} (a pool re-import or reboot changes it)",
+                    then.device, self.device
+                ));
+            }
+        }
+        out.join(", ")
+    }
+}
+
 /// Which pages of a page-aligned range were in the page cache.
 #[cfg(target_os = "linux")]
 pub struct CachedPages {

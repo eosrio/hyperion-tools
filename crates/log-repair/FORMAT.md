@@ -136,6 +136,9 @@ for SHIP targets (neither for `blocks.log`).
 
 Payloads are re-encoded with the anchors' marker format as stored zlib, written as
 per-region donor logs, and checked against the target before the command succeeds.
+The stored deflate blocks are 32 KiB, with the last one shorter and marked final, as
+Spring writes them (measured on 1.2.2 and 1.2.3 logs); a generic zlib encoder at
+level 0 splits differently, and any payload over one block would then never match.
 
 ## Replay blocklog slice
 

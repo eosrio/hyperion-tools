@@ -58,15 +58,18 @@ Scanned /data/blocks/blocks.log (blocks.log): 128 KiB in 0.0s, record size 128 K
 Found 1 damaged area(s), 128 KiB in 1 extent(s):
   [1] blocks 1234560..1234571: 128 KiB in 1 extent(s), record(s) 7911: repairable
 
-Next (nothing is written; nodeos may keep running):
+Next (nothing is written, but stop nodeos first: the plan pins the log's size and modification time, which a running node changes with every block):
   antelope-log-repair prepare --log /data/blocks/blocks.log --record-size 131072 --record-index 7911 --ship ws://HOST:PORT --out DIR
 Instead of --ship, --blocks-log PATH uses an intact blocks.log from another node or a backup.
 ```
 
-**2. Prepare a reviewed plan.** This acquires recovery data and builds a bundle. It is
-still read-only on the target.
+**2. Stop nodeos, then prepare a reviewed plan.** This acquires recovery data and builds
+a bundle. It is still read-only on the target. Stop nodeos first: the plan pins the log's
+size and modification time, and a running node appends every block, so a fetch fails
+with `target changed during fetch` and any plan goes stale before apply.
 
 ```sh
+systemctl stop nodeos          # or however you run it
 antelope-log-repair prepare --log /data/blocks/blocks.log --record-size 131072 \
   --record-index 7911 --ship ws://ship-a.example:8080 --ship ws://ship-b.example:8080 \
   --out /scratch/repair-1
@@ -85,10 +88,9 @@ Review plan.json and the source provenance, stop nodeos, then:
   antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837… --node-stopped
 ```
 
-**3. Stop nodeos and apply the approved plan.**
+**3. Apply the approved plan,** with nodeos still stopped.
 
 ```sh
-systemctl stop nodeos          # or however you run it
 antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837… --node-stopped
 ```
 
@@ -103,9 +105,9 @@ The tool repairs bytes the operating system **refuses to read**: reads that fail
 
 | Situation | Supported? |
 |---|---|
-| ZFS permanent data error (checksum/IO) on a log file | Yes: the design target |
-| btrfs checksum error on a log file | Expected to work (same model: the read fails, a full-block write replaces it) |
-| ext4/xfs on a disk with unreadable sectors | Yes, with 4 KiB records, the filesystem default. Validated with real kernel `EIO` (see [Validation](#validation)) |
+| ZFS permanent data error (checksum/IO) on a log file | Yes: the design target. Healed real on-disk damage (see [Validation](#validation)) |
+| btrfs checksum error on a log file | Yes, with 4 KiB records. Healed real checksum damage; see [After the repair](#5-after-the-repair) for scrub |
+| ext4/xfs on a disk with unreadable sectors | Yes, with 4 KiB records, the filesystem default. Healed real sector errors on dm-integrity (see [Validation](#validation)) |
 | Silent corruption: the bytes read back, but wrong | **No.** Nothing tells the tool which bytes are bad, and it never overwrites readable data |
 | Damage in the first entry, the head (last) entry, or the file header | No: a readable neighbor entry is needed on both sides |
 | Damaged or missing `.index` | No: the index defines entry boundaries |
@@ -177,6 +179,12 @@ ZFS that is the file's own record size; on ext4/xfs/btrfs it is 4 KiB. Override 
 For example, a ZFS dataset's `recordsize` changed after the file was created does not
 change that file's existing block size.
 
+**XFS.** XFS caches file data in large folios (up to 64 KiB here). After a failed read,
+the scan's retries of neighboring records in the same folio fail too, so one bad sector
+can be reported as an extent of up to 64 KiB. This is safe: apply writes only bytes
+rebuilt from the sources and checked against the anchors, which match the healthy
+sectors. Your sources must cover the wider region.
+
 **From a ZFS error report.** `zpool status -v` lists files with permanent errors.
 `zpool events -v` shows the details in the checksum or io ereport:
 
@@ -229,9 +237,11 @@ It also holds `source.json` with the endpoints, digests, and compatibility verdi
 Pass the directory to `build --sources`.
 
 SHIP endpoints send uncompressed history payloads, not disk entries. The tool
-re-encodes them in the stored-zlib framing found on the target's anchors. If the
-original node used another compressor, debug setting, or node version, the lengths or
-readable bytes will not match. The fetch then fails and keeps its files and report
+re-encodes them in the stored-zlib framing found on the target's anchors, split into
+32 KiB stored blocks as Spring writes them (measured on Spring 1.2.2 and 1.2.3 logs). If the original node used another
+compressor, debug setting, or node version, the lengths or readable bytes will not
+match. Some chain-specific builds write compressed (not stored) zlib, for example WAX's
+Leap 5 build; their entries never match a SHIP fetch. The fetch then fails and keeps its files and report
 for diagnosis, and build refuses them. Use replay, or a donor log from a node with
 the same configuration.
 
@@ -332,7 +342,9 @@ Apply refuses unless:
 - no other process has the log or index open (checked through `/proc` on Linux; run
   as root so other users' processes are visible). Advisory locks also exclude
   concurrent repair runs, but nodeos does not honor them;
-- the file identity, size, modification time, and index are unchanged since build;
+- the file identity, size, modification time, and index are unchanged since build. The
+  identity includes the device number, which a ZFS pool re-import or a reboot changes:
+  build a fresh plan after either;
 - every damaged extent is either unreadable, or readable and already identical. A
   readable, *different* record is never overwritten;
 - rebuilding from the same sources gives exactly the approved bytes and evidence.
@@ -366,6 +378,12 @@ bundle.
 1. Verify the media with the filesystem's own tools. For ZFS, run `zpool scrub POOL`;
    once it reports no errors, run `zpool clear POOL` so the old error records are
    dropped. On a disk with bad sectors, check SMART reallocation counters.
+   - **btrfs:** the repaired file reads cleanly at once, but `btrfs scrub` keeps
+     reporting the old sectors. Copy-on-write placed the new bytes elsewhere, and the
+     old extent stays allocated while the rest of it is still in use. Its log messages
+     even name the repaired file. `btrfs filesystem defragment` does not release it.
+     Rewriting the file does: with nodeos stopped, `cp --reflink=never LOG LOG.new &&
+     mv LOG.new LOG`, which needs free space for one extra copy.
 2. Restart nodeos.
 3. Fetch the repaired blocks (and traces or deltas) through its HTTP API or SHIP, and
    compare them with another node.
@@ -413,7 +431,8 @@ the plan.
 | `block sources lack block N` / `no donor log covers blocks A..B` | A source does not cover a region | Fetch or provide that range, including both anchors |
 | `snapshot head must be at or before N` | The snapshot is too late | Use an older snapshot |
 | `process(es) [...] have … open` | Something still has the file open | Stop nodeos and any other reader or writer |
-| `log changed since build` / `index changed since build` | The files changed after review | Build and review a new plan |
+| `target changed during fetch` | nodeos is still running and appended blocks | Stop nodeos, then run the fetch or prepare again |
+| `log changed since build` / `index changed since build` | The files changed after review; the message names the fields | Build and review a new plan. `device` alone means a pool re-import or reboot, not a content change |
 | `readable and differ from the approved replacement` | A damaged record became readable with different bytes | Investigate: the tool never overwrites readable data |
 | `write bytes … ; inspect apply-intent.json` | A write failed or was short | See [If apply fails part-way](#4-apply) |
 | `plan hash does not match --approve` | Wrong hash, or `plan.json` was edited | Approve the hash printed by build, after reviewing |
