@@ -518,6 +518,40 @@ fn ship_corrupt_zlib_size_and_magic_are_refused() {
 }
 
 #[test]
+fn ship_payloads_use_nodeos_stored_block_split() {
+    // nodeos (Spring 1.2.x) writes stored zlib in 32 KiB blocks; payloads above one block
+    // must reproduce that split byte for byte, or real traces and deltas never match.
+    let mut id = [0; 32];
+    id[..4].copy_from_slice(&7u32.to_be_bytes());
+    for (len, expected) in [
+        (0usize, vec![(0u16, true)]),
+        (2440, vec![(2440, true)]),
+        (49349, vec![(32768, false), (16581, true)]),
+        (65536, vec![(32768, false), (32768, true)]),
+        (70000, vec![(32768, false), (32768, false), (4464, true)]),
+    ] {
+        let raw: Vec<u8> = (0..len).map(|i| (i * 31 % 251) as u8).collect();
+        let body = encode_ship(&id, &raw, 1).unwrap();
+        assert_eq!(ship_payload(&body).unwrap().1, raw);
+        let z = &body[48 + 12..];
+        assert_eq!(&z[..2], &[0x78, 0x01]);
+        let (mut at, mut blocks) = (2, Vec::new());
+        loop {
+            let size = u16::from_le_bytes([z[at + 1], z[at + 2]]);
+            assert_eq!(!size, u16::from_le_bytes([z[at + 3], z[at + 4]]));
+            let last = z[at] == 1;
+            blocks.push((size, last));
+            at += 5 + usize::from(size);
+            if last {
+                break;
+            }
+        }
+        assert_eq!(blocks, expected, "payload of {len} bytes");
+        assert_eq!(at + 4, z.len(), "adler32 trailer follows the final block");
+    }
+}
+
+#[test]
 fn reviewed_bundle_detects_hash_and_artifact_tampering_and_missing_ack() {
     let f = Fixture::new(Kind::Blocks);
     let log = f.open(false);

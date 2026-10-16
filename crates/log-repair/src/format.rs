@@ -1,10 +1,9 @@
 //! Restricted Antelope formats. Fail closed for unknown versions, pruning, or framing.
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
-use flate2::{Compression, Decompress, FlushDecompress, Status, write::ZlibEncoder};
+use flate2::{Decompress, FlushDecompress, Status};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -357,10 +356,46 @@ pub fn ship_payload(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
     Ok((body[8..40].try_into()?, raw))
 }
 
+/// Stored-block size nodeos writes for SHIP payloads (zlib level 0, 32 KiB window). Measured
+/// on Spring 1.2.2 and 1.2.3 logs; flate2's encoder splits at 31,745 bytes instead, so any
+/// payload larger than that would not reproduce the on-disk bytes.
+const SHIP_STORED_BLOCK: usize = 32 * 1024;
+
+/// zlib stream of stored deflate blocks, split the way nodeos writes them.
+fn stored_zlib(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len() + (raw.len() / SHIP_STORED_BLOCK + 1) * 5 + 6);
+    out.extend_from_slice(&[0x78, 0x01]);
+    let mut chunks = raw.chunks(SHIP_STORED_BLOCK).peekable();
+    if chunks.peek().is_none() {
+        out.extend_from_slice(&[1, 0, 0, 0xff, 0xff]);
+    }
+    while let Some(chunk) = chunks.next() {
+        out.push(u8::from(chunks.peek().is_none()));
+        let len = chunk.len() as u16;
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(chunk);
+    }
+    out.extend_from_slice(&adler32(raw).to_be_bytes());
+    out
+}
+
+fn adler32(data: &[u8]) -> u32 {
+    const MOD: u32 = 65521;
+    let (mut a, mut b) = (1u32, 0u32);
+    for chunk in data.chunks(5552) {
+        for &byte in chunk {
+            a += u32::from(byte);
+            b += a;
+        }
+        a %= MOD;
+        b %= MOD;
+    }
+    (b << 16) | a
+}
+
 pub fn encode_ship(id: &[u8; 32], raw: &[u8], marker: u32) -> Result<Vec<u8>> {
-    let mut z = ZlibEncoder::new(Vec::new(), Compression::none());
-    z.write_all(raw)?;
-    let compressed = z.finish()?;
+    let compressed = stored_zlib(raw);
     let mut body = SHIP_MAGIC.to_le_bytes().to_vec();
     body.extend_from_slice(id);
     body.extend_from_slice(
