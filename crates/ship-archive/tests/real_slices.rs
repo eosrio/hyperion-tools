@@ -343,6 +343,24 @@ impl<'a> View<'a> {
         })
     }
 
+    /// The id `prev_block` gives block `n - 1`: [`Self::id`], else, for a served block `n`
+    /// (the first of a served range), any file holding `n - 1`, served or not, as Spring fills
+    /// `prev_block` from any log it has open. With block logs, the block log's `previous` of
+    /// `n` is always there; without, a file holding only blocks below `--range` names it.
+    fn prev_id(&self, n: u32) -> Option<[u8; 32]> {
+        let p = n.checked_sub(1).filter(|&p| p > 0)?;
+        if let Some(id) = self.id(p) {
+            return Some(id);
+        }
+        if !LogKind::ALL.iter().any(|&k| contains(self.served(k), n)) {
+            return None;
+        }
+        let log = LogKind::ALL
+            .iter()
+            .find_map(|&k| self.logs.ship_log(k, p))?;
+        Some(log.id(p).unwrap_or_else(|e| panic!("{e:#}")))
+    }
+
     fn payload(&self, kind: LogKind, n: u32) -> Option<Vec<u8>> {
         contains(self.served(kind), n).then(|| read(self.logs.ship_log(kind, n).unwrap(), n))
     }
@@ -383,9 +401,7 @@ impl<'a> View<'a> {
             return out;
         };
         let this = BlockPos { num: n, id };
-        let prev = n
-            .checked_sub(1)
-            .and_then(|p| self.id(p).map(|id| BlockPos { num: p, id }));
+        let prev = self.prev_id(n).map(|id| BlockPos { num: n - 1, id });
         let block = req.fetch_block.then(|| self.block(n)).flatten();
         out.extend(protocol::encode_result_base(
             head,
@@ -1140,34 +1156,18 @@ async fn real_logs_split_by_range_meet_at_the_seams() {
                 msg,
                 &right.result(n, &req),
             );
-            let (_, prev) = positions(msg);
             if first {
                 first = false;
-                if real.with_blocks() {
-                    // The block log names the block before the seam: a router can check that
-                    // the two servers continue one chain.
-                    assert_eq!(
-                        prev, last,
-                        "block {n}'s prev_block is the left server's last"
-                    );
-                    assert_same_but_head(&format!("block {n}"), msg, &full.result(n, &req));
-                } else {
-                    // Without block logs no served log of the right server knows block
-                    // seam - 1, so its first result has no prev_block.
-                    assert_eq!(
-                        prev,
-                        None,
-                        "block {n}: no log of the right server names {}",
-                        n - 1
-                    );
-                    eprintln!(
-                        "real: --blocks none: the first result after seam {seam} has no \
-                         prev_block (the block before it is outside --range)"
-                    );
-                }
-            } else {
-                assert_same_but_head(&format!("block {n}"), msg, &full.result(n, &req));
+                // The block before the seam is named, with block logs by the block log's
+                // `previous`, without by the state-history file holding it below --range: a
+                // router can check that the two servers continue one chain.
+                assert_eq!(
+                    positions(msg).1,
+                    last,
+                    "block {n}'s prev_block is the left server's last"
+                );
             }
+            assert_same_but_head(&format!("block {n}"), msg, &full.result(n, &req));
         })
         .await;
     }
@@ -1295,9 +1295,14 @@ fn real_logs_pass_a_deep_check() {
     eprintln!("{}", report.text());
     assert_eq!(report.error_count(), 0);
     assert!(report.findings.iter().all(|f| !f.is_warning()));
-    // A copy of a running node's logs may hold blocks its block log does not have yet.
+    // A copy of a running node's logs may hold blocks its block log does not have yet; without
+    // block logs, no file names the block before the first served one.
     for w in &report.warnings {
-        assert!(w.contains("the block logs do not cover the rest"), "{w}");
+        assert!(
+            w.contains("the block logs do not cover the rest")
+                || (!real.with_blocks() && w.contains("the first served, gets no prev_block")),
+            "{w}"
+        );
     }
     let deep = report.deep.expect("a deep check");
     let entries: u32 = LogKind::ALL

@@ -22,7 +22,8 @@ For one server:
   served state-history log holding `n` (trace, then chain_state, then finality), else as
   block `n + 1`'s `previous` in the served block log. Every id read from an entry header has
   `num(id) == n`. There is no block 0: `id(0)` is never known, so block 1 never has a
-  `prev_block`, as on a Spring node.
+  `prev_block`, as on a Spring node. `prev_block` also takes ids from files outside the
+  served ranges (rule 6).
 
 None of these change while the server runs.
 
@@ -70,8 +71,16 @@ None of these change while the server runs.
    - `head` and `last_irreversible`: `{L*, id(L*)}`.
    - `this_block = {n, id(n)}` iff `id(n)` is known.
    - `prev_block = {n − 1, id(n − 1)}` iff `this_block` is present and `id(n − 1)` is known.
-     For the first block of `I`, it comes from the block log's `previous` of that block,
-     when the block log serves it.
+     For the first block `n` of a served range `S_L`, when no served log knows `n − 1`, the
+     id comes from any open file that names `n − 1`, served or not, as Spring fills
+     `prev_block` from any log it has open: the state-history entry of `n − 1` (the catalogs
+     reach one block below `--range` to keep the file holding it, when that file lines up),
+     the block log's `previous` of `n`, or the hash of block `n − 1`'s header in the block
+     log. With `--blocks required` the block log always names it. With
+     `--verify-ids seams` every such file must give the same id, or the server refuses to
+     start. When no file names it (`--blocks none` over files that begin at `n`), that one
+     result lacks its `prev_block`: startup logs a warning, and `check` and `/health`
+     (`first.prev_block: null`) report it.
    - `block` iff `fetch_block`, `this_block` is present and `n ∈ B`: the stored
      `signed_block`, with a varuint32 length. Its `previous` is `prev_block`'s id, and its
      header hashes to `this_block`'s id.
@@ -151,6 +160,11 @@ for as long as the server runs.
   they are replicas.
 - Block-log coverage is not visible in SHiP status. With `--blocks required` it covers every
   served block (rule 7); `/health` reports `B`.
+- At a seam between two servers, the first result of the second carries the `prev_block`
+  one server over all the logs would send (rule 6), so the router can check that the second
+  server continues the first: its `prev_block` is the first server's `{L*, id(L*)}`.
+  `/health` reports it beforehand as `first` (`{num, prev_block}`, `prev_block` `null`
+  when no file names the block before).
 
 ## Differences from a Spring node
 
@@ -164,6 +178,9 @@ for as long as the server runs.
 - **Ids from the block log** are `previous` of the next block, not the hash of the block's
   own header. So the block just below the first block of `B` has `this_block` (and nothing
   else), where a node holding the same block log would send no id.
+- **Without block logs** (`--blocks none`), the first served block has no `prev_block` when
+  no state-history file holds the block before it, where a node would name it from its
+  block log. Startup warns.
 - **Limits:** at most 1024 queued status requests, requests up to `--max-request-bytes`, and
   10 s for the upgrade. Each drops the connection without a Close frame.
 - **Close 1001 at shutdown**, after the message each session is writing.

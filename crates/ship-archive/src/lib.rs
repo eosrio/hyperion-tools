@@ -479,6 +479,9 @@ fn log_store(store: &Store, findings: &[Finding], cfg: &ServeConfig) {
     for warning in store.uncovered(&cfg.store) {
         warn!("{warning}");
     }
+    if let Some(warning) = store.unlinked() {
+        warn!("{warning}");
+    }
     for finding in findings {
         if finding.is_warning() {
             warn!("{finding}");

@@ -16,8 +16,14 @@
 //! name a block's id (at its served end), its id there is the hash of the block's header.
 //!
 //! Block ids come, in Spring's order, from the trace, chain_state and finality entry headers,
-//! then from the block log, where block `n + 1`'s `previous` is the id of `n`. That last source
-//! gives the first served block its `prev_block`, as the block before it is in no served log.
+//! then from the block log, where block `n + 1`'s `previous` is the id of `n`. The block before
+//! the first served block is in no served log, yet Spring gives that block its `prev_block`
+//! from any log it has open, so the store looks for that id once, at startup, in every open
+//! file holding it, served or not ([`First`]): a state-history entry below `--range` (the
+//! catalogs keep the file holding the block just below the range), the block log's `previous`
+//! of the first served block, or the hash of the block's own header in the block log. With
+//! `--verify-ids seams` they must all agree. Where no file names it, startup warns: a stream
+//! stitched from this server and the one before it cannot be checked for continuity there.
 //!
 //! A block result ([`Package`]) is built in two steps, both blocking. [`Store::plan`] finds
 //! everything block `n`'s result needs and validates the entry headers it reads, without
@@ -280,6 +286,19 @@ impl Served {
     }
 }
 
+/// The first block served from state history and the `prev_block` its result carries: what
+/// links this server's blocks to those of the server before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct First {
+    pub num: u32,
+    /// `None` for block 1, which follows no block, and when no open file names block
+    /// `num - 1` ([`Store::unlinked`]).
+    pub prev: Option<BlockPos>,
+}
+
+/// What one source gives as a block's id: the source, and the id.
+type View = (String, [u8; 32]);
+
 /// The logs of one contiguous range, immutable once open.
 pub struct Store {
     pub trace: Option<Catalog<ShipLog>>,
@@ -289,7 +308,12 @@ pub struct Store {
     pub served: Served,
     /// `{L*, id(L*)}`: the head and LIB of every status and result.
     pub last: BlockPos,
+    /// The first served block and its `prev_block`.
+    pub first: First,
     pub chain_id: [u8; 32],
+    /// The ids of the blocks just below the served ranges that no served log names, found in
+    /// other open files: the `prev_block` of the first block of a served range.
+    below: Vec<BlockPos>,
     abi: Utf8Bytes,
     status_v0: Bytes,
     status_v1: Bytes,
@@ -310,9 +334,21 @@ impl Store {
         let found = catalog::discover(&cfg.dirs, &cfg.index_dirs, cfg.recursive)?;
 
         let mut findings = Vec::new();
+        // The state-history catalogs reach one block below `--range`: a file holding only
+        // blocks before the range would be set aside, but the one ending where the range
+        // begins names the block before the first served one, its `prev_block`. Files there
+        // that do not line up (an overlap the range avoids) are set aside as before.
+        let reach = cfg.range.and_then(|(begin, end)| {
+            let below = begin.checked_sub(1).filter(|&b| b > 0)?;
+            Some((below, end))
+        });
         let mut ship = |kind: LogKind| -> Result<Option<Catalog<ShipLog>>> {
-            let (catalog, f) =
-                catalog::ship_catalog_within(found.ship(kind), kind, &cache, cfg.range)?;
+            let within =
+                |window| catalog::ship_catalog_within(found.ship(kind), kind, &cache, window);
+            let (catalog, f) = match reach {
+                Some(window) => within(Some(window)).or_else(|_| within(cfg.range))?,
+                None => within(cfg.range)?,
+            };
             findings.extend(f);
             Ok(catalog)
         };
@@ -404,7 +440,9 @@ impl Store {
             blocks,
             served,
             last: BlockPos::default(),
+            first: First::default(),
             chain_id,
+            below: Vec::new(),
             abi,
             status_v0: Bytes::new(),
             status_v1: Bytes::new(),
@@ -417,6 +455,7 @@ impl Store {
         if cfg.verify_ids == VerifyIds::Seams {
             store.verify_seams()?;
         }
+        store.link_below(cfg.verify_ids)?;
         store.status_v0 = Bytes::from(protocol::encode_status(false, &store.status()));
         store.status_v1 = Bytes::from(protocol::encode_status(true, &store.status()));
         Ok((store, findings))
@@ -451,6 +490,22 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// A warning when the first served block, above block 1, gets no `prev_block`: no open
+    /// file names the block before it, so a client stitching this server's blocks to those of
+    /// the server before it cannot check that they continue one chain there.
+    pub fn unlinked(&self) -> Option<String> {
+        let First { num, prev } = self.first;
+        (num > 1 && prev.is_none()).then(|| {
+            let before = num - 1;
+            format!(
+                "block {num}, the first served, gets no prev_block: no open log names block \
+                 {before}, so a client cannot check that block {num} follows the blocks before \
+                 it; serve the block log holding block {num}, or the state-history files \
+                 holding block {before}"
+            )
+        })
     }
 
     /// The catalog of `kind`, if any file of it is open.
@@ -502,6 +557,89 @@ impl Store {
             return log.previous(next).context(Source::Blocks).map(Some);
         }
         Ok(None)
+    }
+
+    /// The id `prev_block` gives block `p`: [`Self::id`], else, for the block just below a
+    /// served range, the one startup found in another open file ([`Self::link_below`]).
+    fn prev_id(&self, p: u32, pages: Option<&PageCache>) -> Result<Option<[u8; 32]>> {
+        if let Some(id) = self.id_with(p, pages)? {
+            return Ok(Some(id));
+        }
+        Ok(self.below.iter().find(|b| b.num == p).map(|b| b.id))
+    }
+
+    /// Find the block before the first block `n` of each served state-history range, when no
+    /// served state-history log holds it: every open file's id for it
+    /// ([`Self::outside_views`]), which with `seams` must agree. Where the served block log
+    /// does not name it either, the first of them, in Spring's order, is `n`'s `prev_block`.
+    /// Then record [`Self::first`].
+    fn link_below(&mut self, verify: VerifyIds) -> Result<()> {
+        let begins: BTreeSet<u32> = LogKind::ALL
+            .into_iter()
+            .map(|kind| self.served.ship(kind))
+            .filter(|(begin, end)| begin < end)
+            .map(|(begin, _)| begin)
+            .collect();
+        for &n in &begins {
+            // Block 1 follows no block.
+            let Some(p) = n.checked_sub(1).filter(|&p| p > 0) else {
+                continue;
+            };
+            if LogKind::ALL
+                .into_iter()
+                .any(|kind| contains(self.served.ship(kind), p))
+            {
+                continue;
+            }
+            let views = self.outside_views(p)?;
+            if verify == VerifyIds::Seams {
+                agree(p, &views)?;
+            }
+            if self.id(p)?.is_none()
+                && let Some((_, id)) = views.first()
+            {
+                self.below.push(BlockPos { num: p, id: *id });
+            }
+        }
+        let num = begins.first().copied().unwrap_or_default();
+        let prev = match num.checked_sub(1) {
+            Some(p) => self.prev_id(p, None)?.map(|id| BlockPos { num: p, id }),
+            None => None,
+        };
+        self.first = First { num, prev };
+        Ok(())
+    }
+
+    /// Every open file's id for block `p`, served or not: the entry header of each
+    /// state-history file holding it, and in the block logs block `p + 1`'s `previous` and the
+    /// hash of block `p`'s header.
+    fn outside_views(&self, p: u32) -> Result<Vec<View>> {
+        let mut views = Vec::new();
+        for kind in LogKind::ALL {
+            if let Some(log) = self.catalog(kind).and_then(|c| c.get(p)) {
+                let what = format!("the {} log {}", kind.label(), log.log_path().display());
+                views.push((what, log.id(p)?));
+            }
+        }
+        if let Some(blocks) = &self.blocks {
+            if let Some(next) = p.checked_add(1)
+                && let Some(log) = blocks.get(next)
+            {
+                let what = format!(
+                    "the block log {} (block {next} follows it)",
+                    log.log_path().display()
+                );
+                views.push((what, log.previous(next)?));
+            }
+            if let Some(log) = blocks.get(p) {
+                let what = format!(
+                    "the block log {} (the hash of block {p}'s header)",
+                    log.log_path().display()
+                );
+                views.push((what, log.id(p)?));
+            }
+        }
+        Ok(views)
     }
 
     /// What a status reply reports: head and LIB at `L*`, the served ranges, the chain id.
@@ -592,7 +730,7 @@ impl Store {
         };
         let this = BlockPos { num: n, id };
         let prev = match n.checked_sub(1) {
-            Some(p) => self.id_with(p, pages)?.map(|id| BlockPos { num: p, id }),
+            Some(p) => self.prev_id(p, pages)?.map(|id| BlockPos { num: p, id }),
             None => None,
         };
         let block = match self.block_log(n) {
@@ -733,19 +871,24 @@ impl Store {
             );
             views.push((what, log.id(n)?));
         }
-        if let Some(((first, id), rest)) = views.split_first() {
-            for (what, other) in rest {
-                ensure!(
-                    other == id,
-                    "block ids disagree at block {n}: {first} has {}, {what} has {}; the logs \
-                     must come from one chain and hold only irreversible blocks",
-                    hex::encode(id),
-                    hex::encode(other)
-                );
-            }
-        }
-        Ok(())
+        agree(n, &views)
     }
+}
+
+/// Every view of block `n`'s id must be the same id.
+fn agree(n: u32, views: &[View]) -> Result<()> {
+    if let Some(((first, id), rest)) = views.split_first() {
+        for (what, other) in rest {
+            ensure!(
+                other == id,
+                "block ids disagree at block {n}: {first} has {}, {what} has {}; the logs must \
+                 come from one chain and hold only irreversible blocks",
+                hex::encode(id),
+                hex::encode(other)
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The header of block `n`'s entry in `log`, a `kind` file holding `n`: through `pages` when

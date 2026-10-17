@@ -52,15 +52,17 @@ What they check:
   - Three servers split the range with `--range`, and each passes `check` and reports its own
     end as head and LIB.
   - Around each seam, both sides equal one server's results but for head and LIB.
-  - With block logs, the first result after a seam names the last block before it as
-    `prev_block`. Without them it has none: the block before the seam is outside `--range`.
+  - The first result after a seam names the last block before it as `prev_block`: with block
+    logs from the block log's `previous`, without them from the state-history file holding
+    that block below `--range`.
 - `real_logs_first_state_entry_is_the_full_state_and_streams`:
   - The first chain_state entry (at genesis or from a snapshot) holds the full state, and its
     `global_property` row gives the chain id.
   - Treated as a large entry, it is a `check` warning (exit 2 with `--strict`), streams in frames
     of at most 1 MiB, and `--range` leaves it out.
 - `real_logs_pass_a_deep_check`: `check --deep` (with `--hash` when block logs are there) finds
-  nothing, reads every served entry and block, and reports its rate.
+  nothing, reads every served entry and block, and reports its rate. Without block logs the
+  warning that the first served block gets no `prev_block` is expected.
 
 ## Differential test against a node
 
