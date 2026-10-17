@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::ServeConfig;
+use crate::check::{CheckConfig, IndexConfig, WARN_ENTRY_BYTES};
 use crate::store::{BlocksMode, StoreConfig, VerifyIds};
 
 #[derive(Parser, Debug)]
@@ -31,6 +32,14 @@ pub struct Cli {
 pub enum Command {
     /// Serve the logs of one contiguous range.
     Serve(ServeArgs),
+    /// Validate the logs as `serve` would, without serving them, and report what is served.
+    /// Exits 0 when clean, 1 on errors, and with --strict 2 on warnings.
+    Check(CheckArgs),
+    /// Rebuild missing or wrong state-history indexes (`<stem>.index`) into a sidecar
+    /// directory, for `serve --index-dir`. Nothing is written beside the logs.
+    Index(IndexArgs),
+    /// Print the ABI text a SHiP node sends, to serve it with `--abi`.
+    Abi(AbiArgs),
 }
 
 /// Where the logs are and what to serve of them.
@@ -104,6 +113,20 @@ pub struct ServeArgs {
     /// memory, after a full validation pass.
     #[arg(long, value_name = "BYTES", default_value_t = 4 << 20)]
     pub stream_threshold: u64,
+    /// File reads and inflation running at once (default: twice the available parallelism, at
+    /// most 16).
+    #[arg(long, value_name = "N")]
+    pub io_threads: Option<usize>,
+    /// Results each session builds ahead of sending them, at most (0: none).
+    #[arg(long, value_name = "N", default_value_t = 8)]
+    pub prefetch: usize,
+    /// Bytes all results built ahead may hold together; a result that does not fit is built
+    /// when it is sent instead.
+    #[arg(long, value_name = "BYTES", default_value_t = 1 << 30)]
+    pub memory_budget: u64,
+    /// Serve /health, /ready and /metrics over HTTP at this address.
+    #[arg(long, value_name = "ADDR")]
+    pub http: Option<SocketAddr>,
     /// Log line format; filter with RUST_LOG (default `info`).
     #[arg(long, value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
@@ -111,14 +134,86 @@ pub struct ServeArgs {
 
 impl ServeArgs {
     pub fn config(&self) -> ServeConfig {
+        let defaults = ServeConfig::default();
         ServeConfig {
             store: self.store.config(self.abi.clone()),
             listen: self.listen,
             max_sessions: self.max_sessions,
             max_request_bytes: self.max_request_bytes,
             stream_threshold: self.stream_threshold,
+            io_threads: self.io_threads.unwrap_or(defaults.io_threads),
+            prefetch: self.prefetch,
+            memory_budget: self.memory_budget,
+            http: self.http,
         }
     }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CheckArgs {
+    #[command(flatten)]
+    pub store: StoreArgs,
+    /// Read every served block: entry headers, trailers and whole zlib streams, block-log
+    /// trailers, sizes and `previous` links, and the block ids every log gives.
+    #[arg(long)]
+    pub deep: bool,
+    /// Also recompute every block id from its block header (implies --deep).
+    #[arg(long)]
+    pub hash: bool,
+    /// Entries inflating to more bytes are warnings: a SHiP-aware router or proxy with a 256
+    /// MiB message limit cannot relay them. From 4 GiB they are errors.
+    #[arg(long, value_name = "N", default_value_t = WARN_ENTRY_BYTES)]
+    pub warn_entry_bytes: u64,
+    /// Exit 2 when there are warnings.
+    #[arg(long)]
+    pub strict: bool,
+    /// Print the report as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl CheckArgs {
+    pub fn config(&self) -> CheckConfig {
+        CheckConfig {
+            store: self.store.config(None),
+            deep: self.deep || self.hash,
+            hash: self.hash,
+            warn_entry_bytes: self.warn_entry_bytes,
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct IndexArgs {
+    /// A directory of state-history logs; repeatable.
+    #[arg(long = "dir", value_name = "DIR", required = true)]
+    pub dirs: Vec<PathBuf>,
+    /// Also scan the sub-directories of every --dir.
+    #[arg(long)]
+    pub recursive: bool,
+    /// Where the indexes go (created if missing): never a directory holding the logs.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+}
+
+impl IndexArgs {
+    pub fn config(&self) -> IndexConfig {
+        IndexConfig {
+            dirs: self.dirs.clone(),
+            recursive: self.recursive,
+            out: self.out.clone(),
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AbiArgs {
+    /// The node's SHiP endpoint, `ws://host:port`.
+    #[arg(long, value_name = "URL")]
+    pub from: String,
+    /// Write the ABI to this file instead of standard output.
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -175,7 +270,9 @@ mod tests {
     #[test]
     fn serve_defaults_match_the_documented_ones() {
         let cli = Cli::try_parse_from(["prog", "serve", "--dir", "logs"]).unwrap();
-        let Command::Serve(args) = cli.command;
+        let Command::Serve(args) = cli.command else {
+            panic!("a serve command")
+        };
         let cfg = args.config();
         let default = ServeConfig::default();
         assert_eq!(cfg.listen, default.listen);
@@ -206,7 +303,9 @@ mod tests {
             "off",
         ])
         .unwrap();
-        let Command::Serve(args) = cli.command;
+        let Command::Serve(args) = cli.command else {
+            panic!("a serve command")
+        };
         let store = args.config().store;
         assert_eq!(store.dirs.len(), 2);
         assert_eq!(store.range, Some((10, 20)));
@@ -215,5 +314,103 @@ mod tests {
             (BlocksMode::None, VerifyIds::Off)
         );
         assert!(Cli::try_parse_from(["prog", "serve"]).is_err());
+    }
+
+    #[test]
+    fn hardening_defaults_match_the_documented_ones() {
+        let cli = Cli::try_parse_from(["prog", "serve", "--dir", "logs"]).unwrap();
+        let Command::Serve(args) = cli.command else {
+            panic!("a serve command")
+        };
+        let cfg = args.config();
+        let default = ServeConfig::default();
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(cfg.io_threads, (2 * cores).min(16));
+        assert_eq!(cfg.io_threads, default.io_threads);
+        assert_eq!((cfg.prefetch, cfg.memory_budget), (8, 1 << 30));
+        assert_eq!(
+            (cfg.prefetch, cfg.memory_budget, cfg.http),
+            (default.prefetch, default.memory_budget, default.http)
+        );
+
+        let cli = Cli::try_parse_from([
+            "prog",
+            "serve",
+            "--dir",
+            "logs",
+            "--io-threads",
+            "3",
+            "--prefetch",
+            "0",
+            "--memory-budget",
+            "1000",
+            "--http",
+            "127.0.0.1:9180",
+        ])
+        .unwrap();
+        let Command::Serve(args) = cli.command else {
+            panic!("a serve command")
+        };
+        let cfg = args.config();
+        assert_eq!(
+            (cfg.io_threads, cfg.prefetch, cfg.memory_budget),
+            (3, 0, 1000)
+        );
+        assert_eq!(cfg.http, Some("127.0.0.1:9180".parse().unwrap()));
+    }
+
+    #[test]
+    fn check_index_and_abi_take_their_options() {
+        let cli =
+            Cli::try_parse_from(["prog", "check", "--dir", "a", "--hash", "--strict"]).unwrap();
+        let Command::Check(args) = cli.command else {
+            panic!("a check command")
+        };
+        let cfg = args.config();
+        assert!(cfg.deep && cfg.hash, "--hash implies --deep");
+        assert_eq!(cfg.warn_entry_bytes, 268_435_456);
+        assert!(args.strict && !args.json);
+        assert_eq!(cfg.store.dirs, [PathBuf::from("a")]);
+
+        let cli = Cli::try_parse_from([
+            "prog",
+            "check",
+            "--dir",
+            "a",
+            "--warn-entry-bytes",
+            "10",
+            "--json",
+            "--blocks",
+            "none",
+            "--chain-id",
+            "aca376f206b8fc25a6ed44dbdc66547c36c6c33e3a119ffbeaef943642f0e906",
+        ])
+        .unwrap();
+        let Command::Check(args) = cli.command else {
+            panic!("a check command")
+        };
+        let cfg = args.config();
+        assert!(!cfg.deep && !cfg.hash && args.json);
+        assert_eq!(cfg.warn_entry_bytes, 10);
+        assert_eq!(cfg.store.blocks, BlocksMode::None);
+
+        let cli =
+            Cli::try_parse_from(["prog", "index", "--dir", "a", "--dir", "b", "--out", "side"])
+                .unwrap();
+        let Command::Index(args) = cli.command else {
+            panic!("an index command")
+        };
+        let cfg = args.config();
+        assert_eq!((cfg.dirs.len(), cfg.out), (2, PathBuf::from("side")));
+        assert!(Cli::try_parse_from(["prog", "index", "--dir", "a"]).is_err());
+
+        let cli = Cli::try_parse_from(["prog", "abi", "--from", "ws://127.0.0.1:8080"]).unwrap();
+        let Command::Abi(args) = cli.command else {
+            panic!("an abi command")
+        };
+        assert_eq!(
+            (args.from.as_str(), args.out),
+            ("ws://127.0.0.1:8080", None)
+        );
     }
 }

@@ -20,7 +20,9 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
-serde_json = { workspace = true }   # checks that an --abi file is JSON before serving it
+serde_json = { workspace = true }   # --abi files, /health and `check --json`
+# /health, /ready and /metrics (--http): a blocking thread beside the SHiP listener.
+tiny_http = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 # Leveled, structured server logs (per-session close lines, per-read warnings, text or JSON),

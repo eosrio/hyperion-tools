@@ -7,6 +7,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
@@ -14,6 +15,8 @@ use hyperion_ship::protocol::{self, BlockPos, BlocksReq, Request, Status};
 use hyperion_ship::shiplog::LogKind;
 use hyperion_ship::testkit::SyntheticChain;
 use hyperion_ship::testkit::ship::Encoding;
+use ship_archive::fetch::MemoryBudget;
+use ship_archive::metrics::Metrics;
 use ship_archive::store::StoreConfig;
 use ship_archive::{ServeConfig, Server};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -121,6 +124,10 @@ pub fn serve_config(store: StoreConfig) -> ServeConfig {
 /// A server running in the test's runtime. Dropping it shuts the server down.
 pub struct Running {
     pub addr: SocketAddr,
+    /// Where `/health`, `/ready` and `/metrics` are served, with `--http`.
+    pub http: Option<SocketAddr>,
+    pub metrics: Arc<Metrics>,
+    pub budget: Arc<MemoryBudget>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<anyhow::Result<()>>>,
 }
@@ -150,12 +157,17 @@ impl Drop for Running {
 pub async fn start(cfg: ServeConfig) -> Running {
     let server = Server::bind(cfg).await.expect("the server starts");
     let addr = server.local_addr();
+    let http = server.http_addr();
+    let (metrics, budget) = (Arc::clone(server.metrics()), Arc::clone(server.budget()));
     let (stop, stopped) = oneshot::channel::<()>();
     let task = tokio::spawn(server.run(async move {
         let _ = stopped.await;
     }));
     Running {
         addr,
+        http,
+        metrics,
+        budget,
         stop: Some(stop),
         task: Some(task),
     }

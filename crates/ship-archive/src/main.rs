@@ -1,25 +1,32 @@
-//! The server binary: parse the command line, set up logging and the runtime, and serve until
-//! SIGINT or SIGTERM.
+//! The server binary: parse the command line, set up logging, and run one command: `serve`
+//! until SIGINT or SIGTERM, or one of the offline commands `check`, `index` and `abi`.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 
 use clap::Parser;
-use ship_archive::cli::{Cli, Command, LogFormat, ServeArgs};
-use tracing::{error, info};
+use ship_archive::check::{self, Beside};
+use ship_archive::cli::{AbiArgs, CheckArgs, Cli, Command, IndexArgs, LogFormat, ServeArgs};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let Command::Serve(args) = cli.command;
-    init_logging(args.log_format);
-    match serve(&args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            error!("{e:#}");
-            ExitCode::FAILURE
-        }
-    }
+    let format = match &cli.command {
+        Command::Serve(args) => args.log_format,
+        _ => LogFormat::Text,
+    };
+    init_logging(format);
+    let done = match cli.command {
+        Command::Serve(args) => serve(&args).map(|()| ExitCode::SUCCESS),
+        Command::Check(args) => check(&args),
+        Command::Index(args) => index(&args).map(|()| ExitCode::SUCCESS),
+        Command::Abi(args) => abi(&args).map(|()| ExitCode::SUCCESS),
+    };
+    done.unwrap_or_else(|e| {
+        error!("{e:#}");
+        ExitCode::FAILURE
+    })
 }
 
 fn serve(args: &ServeArgs) -> anyhow::Result<()> {
@@ -31,6 +38,68 @@ fn serve(args: &ServeArgs) -> anyhow::Result<()> {
     }
     let runtime = runtime.build()?;
     runtime.block_on(ship_archive::serve(args.config(), shutdown_signal()))
+}
+
+/// The report goes to standard output, as text or JSON; the exit code says how it went.
+fn check(args: &CheckArgs) -> anyhow::Result<ExitCode> {
+    let report = check::check(&args.config());
+    let mut out = std::io::stdout().lock();
+    if args.json {
+        writeln!(out, "{:#}", report.json())?;
+    } else {
+        write!(out, "{}", report.text())?;
+    }
+    out.flush()?;
+    Ok(ExitCode::from(report.exit_code(args.strict)))
+}
+
+/// One line per log on standard output, then what was written.
+fn index(args: &IndexArgs) -> anyhow::Result<()> {
+    let done = check::index(&args.config())?;
+    if done.is_empty() {
+        warn!("no state-history log found");
+    }
+    let mut out = std::io::stdout().lock();
+    for indexed in &done {
+        writeln!(out, "{}", indexed.line())?;
+    }
+    let written = done.iter().filter(|i| i.written.is_some()).count();
+    writeln!(
+        out,
+        "{written} of {} indexes written to {}",
+        done.len(),
+        args.out.display()
+    )?;
+    out.flush()?;
+    if done.iter().any(|i| i.beside == Beside::Wrong) {
+        warn!(
+            "some logs have a wrong index beside them, left as it is: serve them with \
+             --index-dir {}",
+            args.out.display()
+        );
+    }
+    Ok(())
+}
+
+/// The ABI text goes to `--out`, or to standard output.
+fn abi(args: &AbiArgs) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let text = runtime.block_on(ship_archive::node_abi(&args.from))?;
+    match &args.out {
+        Some(path) => {
+            std::fs::write(path, &text)
+                .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+            info!("wrote the ABI of {} to {}", args.from, path.display());
+        }
+        None => {
+            let mut out = std::io::stdout().lock();
+            out.write_all(text.as_bytes())?;
+            out.flush()?;
+        }
+    }
+    Ok(())
 }
 
 /// Logs go to stderr, filtered by RUST_LOG (default `info`), colored only on a terminal.

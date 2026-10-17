@@ -11,40 +11,54 @@
 //!     and the status, and builds each block result.
 //!   * [`session`] is the Spring session replica: credit, cursor, `have_positions`, status
 //!     queue, and the reader and writer over one connection.
-//!   * [`fetch`] holds a result ready to send and builds the next one ahead of the writer.
+//!   * [`fetch`] holds a result ready to send, builds the next ones ahead of the writer
+//!     within the global memory budget, and runs every file read on the io threads.
 //!   * [`frames`] writes a result as Spring frames it, streaming payloads above
 //!     `--stream-threshold`.
+//!   * [`metrics`] counts what the sessions do; `http` serves `/health`, `/ready` and
+//!     `/metrics` (`--http`).
+//!   * [`check`] holds the offline commands: `check` validates the logs without serving them,
+//!     `index` rebuilds state-history indexes into a sidecar directory.
 //!   * [`cli`] is the command line.
 //!
-//! Memory is bounded per session: a session holds the result it is sending and at most one
-//! built ahead, each at most three payloads of up to `--stream-threshold` bytes and one block
-//! (at most 20 MiB), plus 2 MiB of streaming buffers. Larger payloads are inflated chunk by
-//! chunk as they are sent.
+//! Memory is bounded: results built ahead of the writers share `--memory-budget`, and each
+//! session holds besides them the result it is sending, at most three payloads of up to
+//! `--stream-threshold` bytes and one block (at most 20 MiB), plus its streaming and write
+//! buffers ([`fetch::SESSION_BUFFERS`]). Larger payloads are inflated chunk by chunk as they are
+//! sent. [`fetch::worst_case_bytes`] is the bound.
 
+pub mod check;
 pub mod cli;
 pub mod fetch;
 pub mod frames;
+mod http;
+pub mod metrics;
 pub mod session;
 pub mod store;
 
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
+use futures::StreamExt;
 use hyperion_ship::catalog::Finding;
+use hyperion_ship::protocol::MAX_BLOCK_BYTES;
 use hyperion_ship::shiplog::LogKind;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::{error, info, warn};
 
-use crate::fetch::FetchLimits;
+use crate::fetch::{FetchCtx, FetchLimits, Io, MemoryBudget};
+use crate::metrics::Metrics;
 use crate::session::Ctx;
-use crate::store::{BlocksMode, Store, StoreConfig};
+use crate::store::{Store, StoreConfig};
 
 /// The `Server` header of every upgrade response: informational, as Spring's
 /// `state_history/<version>`.
@@ -68,6 +82,14 @@ pub struct ServeConfig {
     pub max_request_bytes: usize,
     /// Payloads inflating to more bytes are streamed rather than held in memory.
     pub stream_threshold: u64,
+    /// File reads and inflation running at once, at most.
+    pub io_threads: usize,
+    /// Results each session builds ahead of its writer, at most.
+    pub prefetch: usize,
+    /// Bytes all results built ahead may hold together.
+    pub memory_budget: u64,
+    /// Where to serve `/health`, `/ready` and `/metrics`; nowhere when `None`.
+    pub http: Option<SocketAddr>,
 }
 
 impl Default for ServeConfig {
@@ -78,15 +100,28 @@ impl Default for ServeConfig {
             max_sessions: 256,
             max_request_bytes: 1 << 20,
             stream_threshold: 4 << 20,
+            io_threads: default_io_threads(),
+            prefetch: 8,
+            memory_budget: 1 << 30,
+            http: None,
         }
     }
+}
+
+/// Twice the available parallelism, at most 16: reads mostly wait on the disk.
+pub fn default_io_threads() -> usize {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (2 * cores).min(16)
 }
 
 /// An open store bound to its listening socket, ready to [`run`](Self::run).
 pub struct Server {
     store: Arc<Store>,
-    findings: Vec<Finding>,
+    findings: Arc<[Finding]>,
     listener: TcpListener,
+    http: Option<http::Http>,
+    metrics: Arc<Metrics>,
+    budget: Arc<MemoryBudget>,
     cfg: ServeConfig,
 }
 
@@ -98,6 +133,7 @@ impl Server {
             cfg.max_request_bytes >= 64,
             "--max-request-bytes must be at least 64"
         );
+        ensure!(cfg.io_threads > 0, "--io-threads must be at least 1");
         let store_cfg = cfg.store.clone();
         let (store, findings) = tokio::task::spawn_blocking(move || Store::open(&store_cfg))
             .await
@@ -111,10 +147,36 @@ impl Server {
             listener.local_addr()?,
             cfg.max_sessions
         );
+        let http = cfg.http.map(http::Http::bind).transpose()?;
+        if let Some(http) = &http {
+            info!(
+                "serving /health, /ready and /metrics on http://{}",
+                http.addr()
+            );
+        }
+        let limits = FetchLimits {
+            stream_threshold: cfg.stream_threshold,
+        };
+        info!(
+            "{} io threads; each session builds up to {} results ahead within a {}-byte memory \
+             budget; at most {} bytes of results in all",
+            cfg.io_threads,
+            cfg.prefetch,
+            cfg.memory_budget,
+            fetch::worst_case_bytes(
+                cfg.memory_budget,
+                cfg.max_sessions,
+                &limits,
+                MAX_BLOCK_BYTES as u64
+            )
+        );
         Ok(Self {
             store: Arc::new(store),
-            findings,
+            findings: findings.into(),
             listener,
+            http,
+            metrics: Arc::new(Metrics::default()),
+            budget: MemoryBudget::new(cfg.memory_budget),
             cfg,
         })
     }
@@ -135,27 +197,59 @@ impl Server {
         &self.findings
     }
 
+    /// The bound address of the HTTP endpoints, when `--http` is given.
+    pub fn http_addr(&self) -> Option<SocketAddr> {
+        self.http.as_ref().map(http::Http::addr)
+    }
+
+    /// The counters the sessions update.
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
+    }
+
+    /// The memory budget results built ahead share.
+    pub fn budget(&self) -> &Arc<MemoryBudget> {
+        &self.budget
+    }
+
     /// Accept sessions until `shutdown` completes, then send Close 1001 to every session, give
     /// them five seconds to finish the message they are writing, and drop the rest.
     pub async fn run(self, shutdown: impl Future<Output = ()>) -> Result<()> {
         let Self {
             store,
+            findings,
             listener,
+            http,
+            metrics,
+            budget,
             cfg,
-            ..
         } = self;
         let ws = WebSocketConfig::default()
             .read_buffer_size(READ_BUFFER)
             .max_message_size(Some(cfg.max_request_bytes))
             .max_frame_size(Some(cfg.max_request_bytes));
         let ctx = Arc::new(Ctx {
-            store,
-            limits: FetchLimits {
-                stream_threshold: cfg.stream_threshold,
+            fetch: FetchCtx {
+                store: Arc::clone(&store),
+                limits: FetchLimits {
+                    stream_threshold: cfg.stream_threshold,
+                },
+                io: Io::new(cfg.io_threads, Arc::clone(&metrics)),
+                budget: Arc::clone(&budget),
+                depth: cfg.prefetch,
             },
             ws,
             server: HeaderValue::from_static(SERVER_HEADER),
+            metrics: Arc::clone(&metrics),
         });
+        let state = Arc::new(http::State {
+            store,
+            findings,
+            metrics,
+            budget,
+            ready: true.into(),
+        });
+        let serving = http.map(|h| h.spawn(Arc::clone(&state))).transpose()?;
         let permits = Arc::new(Semaphore::new(cfg.max_sessions));
         let (stop_tx, stop_rx) = watch::channel(false);
         let mut sessions = JoinSet::new();
@@ -183,6 +277,7 @@ impl Server {
             }
         }
         drop(listener);
+        state.ready.store(false, Ordering::Relaxed);
         info!("shutting down: closing {} sessions", sessions.len());
         stop_tx.send_replace(true);
         let drain = async { while sessions.join_next().await.is_some() {} };
@@ -193,6 +288,7 @@ impl Server {
             );
             sessions.shutdown().await;
         }
+        drop(serving);
         Ok(())
     }
 }
@@ -200,6 +296,47 @@ impl Server {
 /// Open the store, bind, and serve until `shutdown` completes.
 pub async fn serve(cfg: ServeConfig, shutdown: impl Future<Output = ()>) -> Result<()> {
     Server::bind(cfg).await?.run(shutdown).await
+}
+
+/// How long [`node_abi`] waits for the connection, and then for the ABI.
+pub const ABI_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The ABI text the SHiP node (or any SHiP server) at `url` (`ws://host:port`) sends first, to
+/// serve with `--abi` when it differs from the vendored Spring one. It must be JSON.
+pub async fn node_abi(url: &str) -> Result<String> {
+    let connect = tokio_tungstenite::connect_async(url);
+    let (mut ws, _) = tokio::time::timeout(ABI_TIMEOUT, connect)
+        .await
+        .with_context(|| format!("no connection to {url} within {ABI_TIMEOUT:?}"))?
+        .with_context(|| format!("connect to {url}"))?;
+    let first = tokio::time::timeout(ABI_TIMEOUT, ws.next())
+        .await
+        .with_context(|| format!("no message from {url} within {ABI_TIMEOUT:?}"))?;
+    let text = match first {
+        Some(Ok(Message::Text(text))) => text,
+        Some(Ok(other)) => bail!(
+            "the first message from {url} is not the ABI text but a {} message",
+            message_kind(&other)
+        ),
+        Some(Err(e)) => return Err(e).with_context(|| format!("read from {url}")),
+        None => bail!("{url} closed the connection before sending its ABI"),
+    };
+    serde_json::from_str::<serde_json::Value>(&text)
+        .with_context(|| format!("the ABI text from {url} is not JSON"))?;
+    // A polite close; the ABI is what counts.
+    let _ = tokio::time::timeout(Duration::from_secs(2), ws.close(None)).await;
+    Ok(text.as_str().to_owned())
+}
+
+fn message_kind(m: &Message) -> &'static str {
+    match m {
+        Message::Text(_) => "text",
+        Message::Binary(_) => "binary",
+        Message::Ping(_) => "ping",
+        Message::Pong(_) => "pong",
+        Message::Close(_) => "close",
+        Message::Frame(_) => "raw frame",
+    }
 }
 
 /// The startup table: every file of every catalog, what is served of it, and the findings.
@@ -245,22 +382,8 @@ fn log_store(store: &Store, findings: &[Finding], cfg: &ServeConfig) {
              from another source or not at all"
         ),
     }
-    if cfg.store.blocks == BlocksMode::Required {
-        for kind in LogKind::ALL {
-            if let Some(catalog) = store.catalog(kind) {
-                let (held, served) = (catalog.range(), store.served.ship(kind));
-                if held != served && cfg.store.range.is_none() {
-                    warn!(
-                        "the {} logs hold {}..{} but only {} is served: the block logs do not \
-                         cover the rest",
-                        kind.label(),
-                        held.0,
-                        held.1,
-                        show(served)
-                    );
-                }
-            }
-        }
+    for warning in store.uncovered(&cfg.store) {
+        warn!("{warning}");
     }
     for finding in findings {
         if finding.is_warning() {

@@ -136,6 +136,7 @@ dependencies = [
  "hyperion-ship",
  "serde_json",
  "tempfile",
+ "tiny_http",
  "tokio",
  "tokio-tungstenite",
  "tracing",

@@ -17,7 +17,9 @@
 //! * The writer answers every queued status first (no credit), then sends at most one block
 //!   while `credit > 0 && cursor <= L* && cursor < end`, advancing the cursor and spending a
 //!   credit for it, id-less results included. Nothing is ever sent unasked: at the end of a
-//!   request the session idles, open, until the next request.
+//!   request the session idles, open, until the next request. While it writes one block, the
+//!   blocks the send rule would allow next (the credit window) are built ahead of it, within
+//!   `--prefetch` and the memory budget ([`crate::fetch::Prefetcher`]).
 //!
 //! A request that does not decode, a full status queue, and a read or integrity error drop the
 //! TCP connection without a Close frame, as Spring does on any error. A result is validated
@@ -48,8 +50,9 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::{debug, info, warn};
 
-use crate::fetch::{FetchLimits, Flags, Job, Prefetcher};
+use crate::fetch::{FetchCtx, Flags, Io, Job, Prefetcher, Window};
 use crate::frames::{self, SendError};
+use crate::metrics::Metrics;
 use crate::store::Store;
 
 /// Status requests queued beyond this many drop the connection.
@@ -61,11 +64,17 @@ const CLOSE_WAIT: Duration = Duration::from_secs(2);
 
 /// What every session of a server shares.
 pub(crate) struct Ctx {
-    pub store: Arc<Store>,
-    pub limits: FetchLimits,
+    pub fetch: FetchCtx,
     pub ws: WebSocketConfig,
     /// The `Server` header of every upgrade response.
     pub server: HeaderValue,
+    pub metrics: Arc<Metrics>,
+}
+
+impl Ctx {
+    fn store(&self) -> &Arc<Store> {
+        &self.fetch.store
+    }
 }
 
 /// Spring's per-connection state. The credit is `req.max_in_flight` and the cursor is
@@ -114,18 +123,30 @@ impl SpringState {
         })
     }
 
-    /// One writer iteration: the status requests to answer, the block to send (its credit
-    /// spent and the cursor advanced), and the block after it if it could be sent next, for
-    /// building ahead.
-    fn take(&mut self, last: u32) -> (Vec<bool>, Option<Job>, Option<Job>) {
+    /// One writer iteration: the status requests to answer, and the block to send (its credit
+    /// spent and the cursor advanced).
+    fn take(&mut self, last: u32) -> (Vec<bool>, Option<Job>) {
         let statuses = self.status_q.drain(..).collect();
         let job = self.sendable(last);
         if job.is_some() {
             self.req.start += 1;
             self.req.max_in_flight -= 1;
         }
-        let next = job.and_then(|_| self.sendable(last));
-        (statuses, job, next)
+        (statuses, job)
+    }
+
+    /// The jobs the send rule allows from the cursor if nothing changes, to build ahead: as
+    /// many as the credit covers, up to the end of the request or `L*`.
+    fn window(&self, last: u32) -> Window {
+        let Some(first) = self.sendable(last) else {
+            return Window::default();
+        };
+        let r = &self.req;
+        let left = r.end.min(last.saturating_add(1)) - r.start;
+        Window {
+            first: Some(first),
+            count: left.min(r.max_in_flight),
+        }
     }
 }
 
@@ -223,6 +244,7 @@ pub(crate) async fn run(
     let ws = match tokio::time::timeout(HANDSHAKE_TIMEOUT, upgrade).await {
         Ok(Ok(ws)) => ws,
         Ok(Err(WsError::Http(_))) if full => {
+            ctx.metrics.rejected();
             info!(%peer, "upgrade refused with 503: at --max-sessions");
             return;
         }
@@ -236,17 +258,18 @@ pub(crate) async fn run(
         }
     };
     let _permit = permit;
+    let _open = ctx.metrics.session_opened();
     let started = Instant::now();
     debug!(%peer, "session open");
 
     let (mut tx, mut rx) = ws.split();
-    if let Err(e) = tx.send(Message::Text(ctx.store.abi_message())).await {
+    if let Err(e) = tx.send(Message::Text(ctx.store().abi_message())).await {
         debug!(%peer, "sending the ABI failed: {e}");
         return;
     }
     let shared = Shared::default();
     let end = {
-        let reader = read_loop(&mut rx, &shared, &ctx.store, peer);
+        let reader = read_loop(&mut rx, &shared, &ctx, peer);
         let writer = write_loop(&mut tx, &shared, &ctx, &mut stop, peer);
         tokio::pin!(reader, writer);
         tokio::select! {
@@ -290,7 +313,7 @@ fn busy(server: HeaderValue) -> ErrorResponse {
 }
 
 /// Read and apply client messages in order until the connection ends or must be dropped.
-async fn read_loop<S>(rx: &mut S, shared: &Shared, store: &Arc<Store>, peer: SocketAddr) -> End
+async fn read_loop<S>(rx: &mut S, shared: &Shared, ctx: &Ctx, peer: SocketAddr) -> End
 where
     S: Stream<Item = Result<Message, WsError>> + Unpin,
 {
@@ -323,13 +346,16 @@ where
         match request {
             Request::Status { v1 } => {
                 bump(&stats.status_requests, 1);
+                ctx.metrics.status_request(v1);
                 if !shared.lock().status(v1) {
                     return End::StatusFlood;
                 }
             }
             Request::Blocks(mut req) => {
                 bump(&stats.block_requests, 1);
-                if let Err(e) = apply_positions(store, &mut req).await {
+                ctx.metrics.blocks_request(req.v1);
+                if let Err(e) = apply_positions(ctx.store(), &ctx.fetch.io, &mut req).await {
+                    ctx.metrics.read_error(&e);
                     warn!(
                         %peer,
                         start = req.start,
@@ -350,25 +376,26 @@ where
 
 /// Spring's `have_positions` rule: every position below the (possibly already lowered) start
 /// whose id this server does not know, or knows differently, moves the start back to it. The
-/// positions are then dropped. Ids are read on the blocking pool.
-async fn apply_positions(store: &Arc<Store>, req: &mut BlocksReq) -> anyhow::Result<()> {
+/// positions are then dropped. Ids are read on the io threads.
+async fn apply_positions(store: &Arc<Store>, io: &Io, req: &mut BlocksReq) -> anyhow::Result<()> {
     let positions = std::mem::take(&mut req.have_positions);
     let start = req.start;
     if positions.iter().all(|p| p.num >= start) {
         return Ok(());
     }
     let store = Arc::clone(store);
-    req.start = tokio::task::spawn_blocking(move || -> anyhow::Result<u32> {
-        let mut start = start;
-        for p in &positions {
-            if p.num < start && store.id(p.num)? != Some(p.id) {
-                start = p.num;
+    req.start = io
+        .run(move || -> anyhow::Result<u32> {
+            let mut start = start;
+            for p in &positions {
+                if p.num < start && store.id(p.num)? != Some(p.id) {
+                    start = p.num;
+                }
             }
-        }
-        Ok(start)
-    })
-    .await
-    .context("have_positions task")??;
+            Ok(start)
+        })
+        .await
+        .context("have_positions task")??;
     Ok(())
 }
 
@@ -384,15 +411,19 @@ async fn write_loop<S>(
 where
     S: Sink<Message, Error = WsError> + Unpin,
 {
-    let store = &ctx.store;
+    let store = ctx.store();
     let last = store.last.num;
     let stats = &shared.stats;
-    let mut prefetch = Prefetcher::new(Arc::clone(store), ctx.limits);
+    let mut prefetch = Prefetcher::new(ctx.fetch.clone());
     loop {
         if *stop.borrow() {
             return close_away(tx).await;
         }
-        let (statuses, job, next) = shared.lock().take(last);
+        let (statuses, job, window) = {
+            let mut state = shared.lock();
+            let (statuses, job) = state.take(last);
+            (statuses, job, state.window(last))
+        };
         if statuses.is_empty() && job.is_none() {
             prefetch.clear();
             tokio::select! {
@@ -406,6 +437,7 @@ where
             for v1 in statuses {
                 let status = store.status_bytes(v1);
                 bump(&stats.bytes, status.len() as u64);
+                ctx.metrics.status_sent(status.len() as u64);
                 if let Err(e) = tx.feed(Message::Binary(status)).await {
                     return End::SendFailed(e);
                 }
@@ -421,19 +453,22 @@ where
             Ok(package) => package,
             Err(e) => {
                 // Nothing of this message was sent.
+                ctx.metrics.read_error(&e);
                 warn!(%peer, block = job.n, "dropping the connection: {e:#}");
                 return End::DataError;
             }
         };
-        // The next block is read while this one is written.
-        prefetch.schedule(next);
-        match frames::send_result(tx, package).await {
+        // The next blocks are read while this one is written.
+        prefetch.schedule(window);
+        match frames::send_result(tx, &ctx.fetch.io, package).await {
             Ok(bytes) => {
                 bump(&stats.results, 1);
                 bump(&stats.bytes, bytes);
+                ctx.metrics.result_sent(bytes);
             }
             Err(SendError::Ws(e)) => return End::SendFailed(e),
             Err(SendError::Read(e)) => {
+                ctx.metrics.read_error(&e);
                 warn!(
                     %peer,
                     block = job.n,
@@ -475,7 +510,7 @@ mod tests {
     /// Every job a state hands out until it stops, with the block numbers only.
     fn drain(s: &mut SpringState, last: u32) -> Vec<u32> {
         let mut sent = Vec::new();
-        while let (_, Some(job), _) = s.take(last) {
+        while let (_, Some(job)) = s.take(last) {
             sent.push(job.n);
         }
         sent
@@ -485,7 +520,7 @@ mod tests {
     fn nothing_is_sent_before_the_first_request() {
         let mut s = SpringState::default();
         s.ack(10);
-        assert_eq!(s.take(100), (vec![], None, None));
+        assert_eq!(s.take(100), (vec![], None));
     }
 
     #[test]
@@ -540,32 +575,62 @@ mod tests {
         v1.v1 = true;
         v1.fetch_finality_data = true;
         s.blocks(v1);
-        let (_, job, next) = s.take(1000);
+        let (_, job) = s.take(1000);
         let job = job.unwrap();
         assert_eq!((job.generation, job.n, job.v1), (1, 10, true));
         assert!(job.flags.traces && job.flags.finality && !job.flags.block);
+        // The job after it, to build ahead, is of the same request.
+        assert_eq!(s.window(1000).first, Some(Job { n: 11, ..job }));
+        let (_, next) = s.take(1000);
         assert_eq!(next.map(|j| j.n), Some(11));
-        let (_, job, next) = s.take(1000);
-        assert_eq!(job.map(|j| j.n), Some(11));
         // No credit left for a block after it.
-        assert_eq!(next, None);
+        assert_eq!(s.window(1000).first, None);
 
         // A v0 request never asks for finality data.
         let mut v0 = request(10, 100, 1);
         v0.fetch_finality_data = true;
         s.blocks(v0);
-        let (_, job, _) = s.take(1000);
+        let (_, job) = s.take(1000);
         let job = job.unwrap();
         assert_eq!(job.generation, 2);
         assert!(!job.v1 && !job.flags.finality);
     }
 
     #[test]
+    fn the_window_is_what_the_credit_and_the_range_still_allow() {
+        let window = |s: &SpringState, last: u32| {
+            let w = s.window(last);
+            (w.first.map(|j| (j.generation, j.n)), w.count)
+        };
+        let mut s = SpringState::default();
+        assert_eq!(s.window(1000), Window::default());
+        // After block 10 is taken: the credit left.
+        s.blocks(request(10, 100, 5));
+        s.take(1000);
+        assert_eq!(window(&s, 1000), (Some((1, 11)), 4));
+        // The end of the request.
+        s.blocks(request(10, 13, 100));
+        s.take(1000);
+        assert_eq!(window(&s, 1000), (Some((2, 11)), 2));
+        // `L*`.
+        s.blocks(request(10, 100, 100));
+        s.take(12);
+        assert_eq!(window(&s, 12), (Some((3, 11)), 2));
+        // No credit, nothing left, or nothing yet.
+        s.blocks(request(10, 100, 1));
+        s.take(1000);
+        assert_eq!(window(&s, 1000), (None, 0));
+        s.ack(3);
+        assert_eq!(window(&s, 1000), (Some((4, 11)), 3));
+        s.blocks(request(20, 20, 100));
+        assert_eq!(window(&s, 1000), (None, 0));
+    }
+
+    #[test]
     fn status_requests_are_answered_without_credit_and_bounded() {
         let mut s = SpringState::default();
         assert!(s.status(false) && s.status(true));
-        let (statuses, job, _) = s.take(1000);
-        assert_eq!((statuses, job), (vec![false, true], None));
+        assert_eq!(s.take(1000), (vec![false, true], None));
         for _ in 0..MAX_QUEUED_STATUS {
             assert!(s.status(false));
         }
