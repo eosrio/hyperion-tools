@@ -1159,9 +1159,11 @@ name = "hyperion-ship"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bs58",
  "flate2",
  "futures",
  "hex",
+ "ripemd",
  "rs_abieos",
  "serde_json",
  "sha2 0.10.9",
