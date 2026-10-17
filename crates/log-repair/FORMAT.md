@@ -13,8 +13,8 @@ Reviewed against these primary sources on 2026-10-15:
 - [Spring state_history/log.hpp](https://github.com/AntelopeIO/spring/blob/main/libraries/state_history/include/eosio/state_history/log.hpp):
   `ship` name magic, version 0, pruning feature, 48-byte entry header, zlib payload,
   three payload-size preambles, absolute position trailer. The Leap 4+ preamble
-  includes the uncompressed size. The zlib payload is compressed by older releases and
-  stored by Spring (see [payload encodings](#ship-payload-encodings-across-nodeos-versions)).
+  includes the uncompressed size. The zlib payload is compressed by every release before
+  Spring and stored by Spring (see [payload encodings](#ship-payload-encodings-across-nodeos-versions)).
 - [Spring state_history/abi.cpp](https://github.com/AntelopeIO/spring/blob/main/libraries/state_history/abi.cpp):
   SHIP v0 request/result variant ordering and optional result fields.
 - [Hyperion Tools SHIP client](https://github.com/eosrio/hyperion-tools/blob/main/crates/core/src/ship.rs):
@@ -153,34 +153,63 @@ for SHIP targets (neither for `blocks.log`).
   positions, and irreversibility must agree with the parsed packed block header.
 - With several endpoints, every block and payload byte must be identical across them.
 
-Payloads are re-encoded with the anchors' marker format as stored zlib, written as
-per-region donor logs, and checked against the target before the command succeeds.
-The stored deflate blocks are 32 KiB, with the last one shorter and marked final, as
-Spring writes them (measured on 1.2.2 and 1.2.3 logs); a generic zlib encoder at
-level 0 splits differently, and any payload over one block would then never match.
+The fetched payloads are written as per-region donor logs in Spring's stored encoding.
+`build` then re-encodes them the way the target was written (below), and the fetch
+checks the result against the target before it succeeds.
 
 ### SHIP payload encodings across nodeos versions
 
 A SHIP log keeps the encoding each entry was written with; upgrading nodeos never
-rewrites old entries. A long-lived log therefore holds several encodings. Measured on
-an EOS mainnet full-history log (from genesis):
+rewrites old entries. Every writer since EOSIO 1.8 uses boost::iostreams'
+`zlib_compressor`, which calls `deflate` only with `Z_NO_FLUSH` and then `Z_FINISH`, with
+window bits 15, memLevel 8, and the default strategy. Official releases link the host's
+`libz.so.1`. From the release sources:
 
-| Blocks | Preamble | zlib payload |
-|---|---|---|
-| up to about 380,000,000 | marker 1 | compressed (`78 9c`, fixed and dynamic Huffman blocks) |
-| from about 420,000,000 | marker 1 | stored (`78 01`, 32 KiB blocks), as Spring 1.2.x writes |
+| Writer | Magic version | Preamble | Level | Fork handling |
+|---|---|---|---|---|
+| nodeos 1.5 to 1.7 | no `ship` magic | other header | | refused |
+| EOSIO 1.8, 2.0 | 0 | u32 compressed length | default (6) | truncates the log |
+| EOSIO 2.1, 2.2-rc1 | 1 | u32 compressed length; traces split prunable data | default (6) | truncates; refused |
+| Leap 3.x | 0 | u32 compressed length | default (6) | truncates |
+| Leap 4.0 to 5.0.x | 0 | `1`, u64 uncompressed size | default (6) | truncates |
+| Spring 1.0.0-rc1 and later | 0 | `1`, u64 uncompressed size | 0 (stored) | append-only: orphaned entries |
 
-WAX's Leap 5 build still writes compressed payloads. Which release made the switch to
-stored was not established.
+Stored output comes from Spring's change "disable state history log file compression"
+(merged 2024-04-16), and orphaned fork entries from its mutex-free, append-only log
+rewrite (merged 2024-06-12). Both shipped first in v1.0.0-rc1. Chain forks keep their base's writer:
+WAX's and UX's Leap builds, FIO (EOSIO 1.8 based), and Spring CE and Wire (Spring
+based).
 
-- **Reading** (`scan`, `verify`, anchors, donors) handles every encoding: the payload
-  is decompressed and its Adler-32 checked.
-- **SHIP endpoints** serve decompressed payloads, which the tool can re-encode only as
-  stored zlib. Entries that were written compressed never match, and the fetch is
-  refused (`entry N length … differs from target`).
-- For a compressed stretch, use a donor log whose entries for that range are
-  byte-identical, from a node whose log was written by the same release, or a replay
-  with that release (`--nodeos`).
+**What determines the bytes.**
+
+- **Compressed entries:** stock zlib from 1.2.8 to 1.3.x produces identical level-6
+  output for these parameters, however the input is fed. Every Ubuntu amd64 `zlib1g` from
+  16.04 to 24.04 does too. zlib-ng, Chromium's, Intel's and Cloudflare's forks, and
+  s390x hardware compression produce different bytes.
+- **Stored entries:** the output depends on the zlib version and its buffers. zlib
+  1.2.11 and later, fed by boost's 128-byte chunks, cut 32,768-byte blocks. Earlier zlib
+  cut at 32,506. A payload that fills its last block exactly may be followed by an empty
+  final block.
+
+**Calibration.** The tool encodes with stock zlib compiled into it (via `libz-sys`,
+never the system library). Its candidates are levels 1 to 9, and stored output at either
+block size, with or without the empty final block. For each region it keeps the
+candidates that reproduce both readable anchors byte for byte, under the preamble the
+anchors use; anchors too large to read whole are skipped. Then:
+
+- A source whose own entries fit the target is used as it is. Otherwise each candidate
+  re-encodes the source payloads, and its result must pass the same checks: exact index
+  positions, orphan gaps, and every readable byte.
+- Exactly one distinct fitting result is accepted. Several distinct fitting results are
+  refused, because the damaged bytes cannot tell them apart. So are anchors that agree
+  on no candidate, and anchors whose preambles differ: both mean the writer changed
+  inside the region.
+- The chosen encoding is recorded in the evidence digest and printed per region.
+
+Measured on real logs: an EOS mainnet full-history log is compressed (`78 9c`) up to
+block 389,997,244 and stored (`78 01`) from block 389,997,245, with marker 1
+throughout. Its compressed entries from genesis, and WAX's Leap 5 entries, are
+reproduced exactly by level 6.
 
 ## Replay blocklog slice
 

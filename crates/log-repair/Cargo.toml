@@ -17,6 +17,8 @@ flate2 = { workspace = true }
 fs2 = "0.4"
 futures-util = { version = "0.3", features = ["sink"] }
 hex = { workspace = true }
+# Stock zlib built from source, to reproduce the deflate output nodeos wrote (never zlib-ng).
+libz-sys = { version = "1.1", default-features = false, features = ["static", "stock-zlib"] }
 same-file = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { workspace = true }

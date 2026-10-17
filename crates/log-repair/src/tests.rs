@@ -6,7 +6,11 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use format::{Blocks, Kind, Log, block_header, encode_container, encode_ship, ship_payload};
+use codec::Codec;
+use format::{
+    Blocks, Kind, Log, block_header, encode_container, encode_ship, encode_ship_with, ship_marker,
+    ship_payload,
+};
 use repair::{LogFile, Sources, State};
 use serde_json::{Value, json};
 use target::{Extent, Selection, Target};
@@ -1232,7 +1236,7 @@ fn replay_refuses_a_snapshot_at_or_after_first_affected_minus_one() {
             nodeos: Path::new("missing-nodeos"),
             snapshot: Path::new("missing-snapshot"),
             snapshot_block: t.first_block() - 1,
-            blocks_dir: f.dir.path(),
+            blocks_dirs: &[f.dir.path().to_path_buf()],
             out: &f.dir.path().join("replay"),
             debug_traces: false,
             state_db_size_mb: 1024,
@@ -1248,7 +1252,8 @@ fn replay_slice_is_a_rebased_v3_blocklog_with_the_source_chain_id() {
     let log = f.open(false);
     let dir = f.dir.path().join("slice");
     fs::create_dir(&dir).unwrap();
-    replay::write_slice(&log, 1010, 1020, &dir).unwrap();
+    let set = replay::BlockSet::from_logs(vec![log]).unwrap();
+    replay::write_slice(&set, 1010, 1020, &dir).unwrap();
     let s = Log::open(&dir.join("blocks.log"), None, false).unwrap();
     assert_eq!((s.first, s.last), (1010, 1020));
     assert_eq!(s.log.read(8, 32).unwrap(), [34; 32]);
@@ -1257,8 +1262,8 @@ fn replay_slice_is_a_rebased_v3_blocklog_with_the_source_chain_id() {
     }
     let outside = f.dir.path().join("outside");
     fs::create_dir(&outside).unwrap();
-    assert!(replay::write_slice(&log, 999, 1001, &outside).is_err());
-    assert!(replay::write_slice(&log, 1030, 1040, &outside).is_err());
+    assert!(replay::write_slice(&set, 999, 1001, &outside).is_err());
+    assert!(replay::write_slice(&set, 1030, 1040, &outside).is_err());
 }
 
 #[test]
@@ -1658,4 +1663,355 @@ fn verify_accepts_orphaned_fork_entries_in_ship_logs() {
             "{found:?}"
         );
     }
+}
+
+/// Real entries and the encoder that must reproduce each byte for byte.
+const REAL_ENTRIES: [(&str, &[u8], Codec); 7] = [
+    (
+        "eos trace, Leap deflate",
+        include_bytes!("../testdata/ship/eos-trace-deflate-50000085.bin"),
+        Codec::Deflate(6),
+    ),
+    (
+        "eos trace, Leap deflate, 30 KB",
+        include_bytes!("../testdata/ship/eos-trace-deflate-large-100000002.bin"),
+        Codec::Deflate(6),
+    ),
+    (
+        "eos chain state, Leap deflate",
+        include_bytes!("../testdata/ship/eos-state-deflate-300000054.bin"),
+        Codec::Deflate(6),
+    ),
+    (
+        "eos trace, Spring stored, three blocks",
+        include_bytes!("../testdata/ship/eos-trace-stored-480000070.bin"),
+        codec::SPRING,
+    ),
+    (
+        "eos chain state, Spring stored",
+        include_bytes!("../testdata/ship/eos-state-stored-525000000.bin"),
+        codec::SPRING,
+    ),
+    (
+        "wax trace, WAX Leap 5 deflate",
+        include_bytes!("../testdata/ship/wax-trace-deflate-432000128.bin"),
+        Codec::Deflate(6),
+    ),
+    (
+        "wax chain state, WAX Leap 5 deflate",
+        include_bytes!("../testdata/ship/wax-state-deflate-432001551.bin"),
+        Codec::Deflate(6),
+    ),
+];
+
+#[test]
+fn real_ship_entries_are_reproduced_byte_for_byte() {
+    for (name, body, expected) in REAL_ENTRIES {
+        let (id, raw) = ship_payload(body).unwrap();
+        let marker = ship_marker(body);
+        assert_eq!(marker, 1, "{name}");
+        let rebuilt = encode_ship_with(&id, &raw, marker, &expected).unwrap();
+        assert!(rebuilt == body, "{name}: {} reproduces it", expected.name());
+        let fits: Vec<Codec> = Codec::candidates()
+            .into_iter()
+            .filter(|c| encode_ship_with(&id, &raw, marker, c).unwrap() == body)
+            .collect();
+        assert!(fits.contains(&expected), "{name}: calibration finds it");
+        let levels: Vec<i32> = fits
+            .iter()
+            .filter_map(|c| match c {
+                Codec::Deflate(l) => Some(*l),
+                Codec::Stored { .. } => None,
+            })
+            .collect();
+        if let Codec::Deflate(_) = expected {
+            assert_eq!(levels, [6], "{name}: only level 6 reproduces it");
+        } else {
+            assert!(levels.is_empty(), "{name}");
+        }
+    }
+    assert!(
+        !codec::zlib_version().contains("ng"),
+        "stock zlib is linked"
+    );
+}
+
+/// The stored blocks of a zlib stream, as (length, final) pairs.
+fn stored_blocks(z: &[u8]) -> Vec<(u16, bool)> {
+    let (mut at, mut out) = (2, Vec::new());
+    loop {
+        let size = u16::from_le_bytes([z[at + 1], z[at + 2]]);
+        let last = z[at] == 1;
+        out.push((size, last));
+        at += 5 + usize::from(size);
+        if last {
+            return out;
+        }
+    }
+}
+
+fn inflate(z: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(z), &mut out).unwrap();
+    out
+}
+
+#[test]
+fn stored_codec_edge_cases_match_the_zlib_stream_layout() {
+    let exact = vec![7u8; 65536];
+    let plain = Codec::Stored {
+        block: 32768,
+        empty_final: false,
+    };
+    let empty_final = Codec::Stored {
+        block: 32768,
+        empty_final: true,
+    };
+    let older = Codec::Stored {
+        block: 32506,
+        empty_final: false,
+    };
+    assert_eq!(plain, codec::SPRING);
+    assert_eq!(
+        stored_blocks(&plain.encode(&exact).unwrap()),
+        [(32768, false), (32768, true)]
+    );
+    assert_eq!(
+        stored_blocks(&empty_final.encode(&exact).unwrap()),
+        [(32768, false), (32768, false), (0, true)]
+    );
+    assert_eq!(
+        stored_blocks(&empty_final.encode(&[7; 100]).unwrap()),
+        [(100, true)]
+    );
+    assert_eq!(
+        stored_blocks(&older.encode(&exact).unwrap()),
+        [(32506, false), (32506, false), (524, true)]
+    );
+    for codec in [
+        plain,
+        empty_final,
+        older,
+        Codec::Deflate(6),
+        Codec::Deflate(1),
+    ] {
+        assert_eq!(
+            inflate(&codec.encode(&exact).unwrap()),
+            exact,
+            "{}",
+            codec.name()
+        );
+        assert!(
+            inflate(&codec.encode(&[]).unwrap()).is_empty(),
+            "{}",
+            codec.name()
+        );
+    }
+}
+
+/// Rewrite the fixture's SHIP target with every payload re-encoded by `codec(block)`. The
+/// donor keeps the fixture's Spring encoding.
+fn reencode_target(f: &mut Fixture, codec: impl Fn(u32) -> Codec) {
+    let log = f.open(false);
+    let (mut bytes, mut index) = (Vec::new(), Vec::new());
+    for n in log.first..=log.last {
+        let (id, raw) = ship_payload(&log.body(n).unwrap()).unwrap();
+        let p = bytes.len() as u64;
+        index.extend_from_slice(&p.to_le_bytes());
+        bytes.extend_from_slice(&encode_ship_with(&id, &raw, 1, &codec(n)).unwrap());
+        bytes.extend_from_slice(&p.to_le_bytes());
+    }
+    drop(log);
+    fs::write(&f.path, &bytes).unwrap();
+    fs::write(f.path.with_extension("index"), index).unwrap();
+    f.log_bytes = bytes;
+}
+
+/// One record holding block `n`'s entry start, well inside the log.
+fn record_at(log: &Log, n: u32) -> Target {
+    let record = log.pos(n).unwrap() / RS;
+    Target::new(log, RS, &[ext(record, record)]).unwrap()
+}
+
+#[test]
+fn rebuild_translates_sources_into_the_targets_own_encoding() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        // A compressed (Leap) target, repaired from a stored (Spring) donor.
+        let mut f = Fixture::new(kind);
+        reencode_target(&mut f, |_| Codec::Deflate(6));
+        let log = f.open(false);
+        let t = record_at(&log, 1020);
+        let r = f.rebuild(&log, &t).unwrap();
+        assert_eq!(r.replacement, f.expected(&t), "{kind:?}");
+        assert_eq!(r.encodings, ["re-encoded as zlib level 6"]);
+        let b = repair::build(&log, &t, &f.source, &f.bundle()).unwrap();
+        assert_eq!(b.json["encodings"], json!(["re-encoded as zlib level 6"]));
+
+        // A stored target from a compressed donor.
+        let mut f = Fixture::new(kind);
+        let mut d = Fixture::new(kind);
+        reencode_target(&mut d, |_| Codec::Deflate(6));
+        let donor = f.source.donors[0].log.clone();
+        fs::copy(&d.path, &donor).unwrap();
+        fs::copy(
+            d.path.with_extension("index"),
+            donor.with_extension("index"),
+        )
+        .unwrap();
+        reencode_target(&mut f, |_| codec::SPRING);
+        let log = f.open(false);
+        let t = record_at(&log, 1020);
+        let r = f.rebuild(&log, &t).unwrap();
+        assert_eq!(r.replacement, f.expected(&t), "{kind:?}");
+        assert!(
+            r.encodings[0].starts_with("re-encoded as stored zlib"),
+            "{:?}",
+            r.encodings
+        );
+
+        // A donor in the target's own encoding is used as it is.
+        let f = Fixture::new(kind);
+        let log = f.open(false);
+        let t = f.target(&log);
+        assert_eq!(
+            f.rebuild(&log, &t).unwrap().encodings,
+            ["source bytes as they are"]
+        );
+    }
+}
+
+#[test]
+fn rebuild_refuses_upgrades_inside_a_region_and_unknown_encodings() {
+    // Compressed up to block 1019, stored from 1020 on: the anchors disagree.
+    let mut f = Fixture::new(Kind::Trace);
+    reencode_target(&mut f, |n| {
+        if n < 1020 {
+            Codec::Deflate(6)
+        } else {
+            codec::SPRING
+        }
+    });
+    let log = f.open(false);
+    let t = record_at(&log, 1020);
+    let r = &t.regions[0];
+    assert!(r.first_block < 1020 && r.last_block >= 1020, "{r:?}");
+    let error = f.rebuild(&log, &t).unwrap_err_string();
+    assert!(error.contains("different encodings"), "{error}");
+
+    // An encoding no candidate reproduces, as from a zlib-ng host.
+    let mut f = Fixture::new(Kind::Trace);
+    reencode_target(&mut f, |_| Codec::Stored {
+        block: 100,
+        empty_final: false,
+    });
+    let log = f.open(false);
+    let t = record_at(&log, 1020);
+    let error = f.rebuild(&log, &t).unwrap_err_string();
+    assert!(
+        error.contains("no known encoding reproduces anchor"),
+        "{error}"
+    );
+    assert!(error.contains("zlib-ng"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn media_repair_heals_a_compressed_log_from_a_stored_donor() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        let mut f = Fixture::new(kind);
+        reencode_target(&mut f, |_| Codec::Deflate(6));
+        let mut log = f.open(true);
+        let t = record_at(&log, 1020);
+        let fault = f.damage(&mut log, &t);
+        let b = repair::build(&log, &t, &f.source, &f.bundle()).unwrap();
+        assert_eq!(b.json["extent_states"], json!(["unreadable"]));
+        let (plan, replacement) = repair::read_plan(&f.bundle(), &approval(&b)).unwrap();
+        let report = repair::apply_open(&log, &plan, &replacement, &f.bundle()).unwrap();
+        assert_eq!(report.json["applied"], true, "{kind:?}");
+        assert_eq!(fault.writes(), 1);
+        assert_eq!(fs::read(&f.path).unwrap(), f.log_bytes);
+    }
+}
+
+#[test]
+fn unsupported_ship_logs_are_named_by_their_writer() {
+    use format::unsupported_ship_magic as why;
+    assert_eq!(why(format::SHIP_MAGIC), None);
+    assert!(
+        why(format::SHIP_MAGIC | 1)
+            .unwrap()
+            .contains("EOSIO 2.1 or 2.2")
+    );
+    assert!(
+        why(format::SHIP_MAGIC | 1 << 16)
+            .unwrap()
+            .contains("pruned")
+    );
+    assert!(why(format::SHIP_MAGIC | 2).unwrap().contains("version 2"));
+    // A 1.5-1.7 header starts with a u32 block number, not the `ship` magic.
+    assert!(why(1_000_000).unwrap().contains("before nodeos 1.8"));
+
+    for (magic, expected) in [
+        (format::SHIP_MAGIC | 1, "EOSIO 2.1 or 2.2"),
+        (12_345, "before nodeos 1.8"),
+    ] {
+        let f = Fixture::new(Kind::Trace);
+        let mut bytes = f.log_bytes.clone();
+        bytes[..8].copy_from_slice(&u64::to_le_bytes(magic));
+        fs::write(&f.path, bytes).unwrap();
+        let error = Log::open(&f.path, None, false).unwrap_err_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn replay_slices_across_retained_block_files() {
+    let f = Fixture::new(Kind::Blocks);
+    let whole = replay::BlockSet::from_logs(vec![f.open(false)]).unwrap();
+    // Split the fixture into two retained range files, as blocks-retained-dir holds them.
+    let retained = f.dir.path().join("retained");
+    fs::create_dir(&retained).unwrap();
+    for (a, b) in [(1000, 1019), (1020, 1039)] {
+        let tmp = f.dir.path().join(format!("tmp-{a}"));
+        fs::create_dir(&tmp).unwrap();
+        replay::write_slice(&whole, a, b, &tmp).unwrap();
+        for ext in ["log", "index"] {
+            fs::rename(
+                tmp.join(format!("blocks.{ext}")),
+                retained.join(format!("blocks-{a}-{b}.{ext}")),
+            )
+            .unwrap();
+        }
+    }
+    fs::write(retained.join("notes.txt"), b"ignored").unwrap();
+    let set = replay::BlockSet::open(std::slice::from_ref(&retained)).unwrap();
+    assert_eq!(set.first(), 1000);
+    let out = f.dir.path().join("slice");
+    fs::create_dir(&out).unwrap();
+    replay::write_slice(&set, 1015, 1025, &out).unwrap();
+    let s = Log::open(&out.join("blocks.log"), None, false).unwrap();
+    assert_eq!((s.first, s.last), (1015, 1025));
+    assert_eq!(s.log.read(8, 32).unwrap(), [34; 32]);
+    for n in 1015..=1025 {
+        assert_eq!(s.body(n).unwrap(), f.blocks[&n]);
+    }
+
+    // A gap between the files is refused, naming the missing block.
+    for ext in ["log", "index"] {
+        fs::remove_file(retained.join(format!("blocks-1020-1039.{ext}"))).unwrap();
+    }
+    let partial = replay::BlockSet::open(std::slice::from_ref(&retained)).unwrap();
+    let error = partial.check_covers(1015, 1025).unwrap_err_string();
+    assert!(error.contains("block 1020"), "{error}");
+
+    // Files from another chain are refused.
+    let other = f.dir.path().join("other");
+    fs::create_dir(&other).unwrap();
+    let mut bytes = fs::read(retained.join("blocks-1000-1019.log")).unwrap();
+    let index = fs::read(retained.join("blocks-1000-1019.index")).unwrap();
+    bytes[8] ^= 1;
+    fs::write(other.join("blocks-1000-1019.log"), bytes).unwrap();
+    fs::write(other.join("blocks-1000-1019.index"), index).unwrap();
+    let error = replay::BlockSet::open(&[retained, other]).unwrap_err_string();
+    assert!(error.contains("another chain"), "{error}");
 }
