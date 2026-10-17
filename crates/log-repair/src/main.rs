@@ -7,6 +7,7 @@ mod ship;
 mod target;
 #[cfg(test)]
 mod tests;
+mod verify;
 
 // Offsets and lengths are u64 throughout and are sliced as usize after explicit bounds checks.
 #[cfg(not(target_pointer_width = "64"))]
@@ -33,7 +34,10 @@ use target::Selection;
         Typical use:\n  \
         antelope-log-repair scan --log LOG\n  \
         antelope-log-repair prepare --log LOG --damaged-block N --ship ws://HOST:PORT --out DIR\n  \
-        antelope-log-repair apply --bundle DIR/bundle --approve PLAN_SHA256 --node-stopped"
+        antelope-log-repair apply --bundle DIR/bundle --approve PLAN_SHA256 --node-stopped\n\n\
+        Silent corruption (bytes that read back wrong, e.g. on ext4/xfs) is not repairable, \
+        but `verify` finds it:\n  \
+        antelope-log-repair verify --log LOG [--block-range A-B] [--against OTHER/blocks.log]"
 )]
 struct Cli {
     /// Print one JSON document on stdout instead of a human summary.
@@ -226,6 +230,27 @@ enum Command {
         #[command(flatten)]
         target: TargetArgs,
     },
+    /// Find entries that read back but are wrong (silent corruption, e.g. on ext4/xfs):
+    /// index trailers, the blocks.log ID chain, SHIP zlib checksums, and optionally a
+    /// byte-for-byte comparison with another node's blocks.log. Read-only.
+    Verify {
+        /// blocks.log, trace_history.log, chain_state_history.log, or a retained range log.
+        #[arg(long)]
+        log: PathBuf,
+        /// Index file (default: LOG with the .index extension).
+        #[arg(long)]
+        index: Option<PathBuf>,
+        /// Verify only blocks A through B (default: the whole log).
+        #[arg(long, value_name = "A-B", value_parser = parse_block_range)]
+        block_range: Option<(u32, u32)>,
+        /// Intact blocks.log from another node, with blocks.index alongside: compares packed
+        /// blocks byte for byte (blocks.log) or entry block IDs (SHIP logs). Repeatable.
+        #[arg(long)]
+        against: Vec<PathBuf>,
+        /// Stop after this many problems.
+        #[arg(long, default_value_t = 1000)]
+        max_findings: usize,
+    },
     /// Locate damage, acquire sources, and build a review bundle in one step. Choose one
     /// source: --ship endpoints, replay options, or local files. Never writes the target.
     Prepare {
@@ -356,6 +381,26 @@ async fn run(cli: Cli) -> Result<Out> {
         Command::Scan { target } => {
             let (log, located) = target.locate()?;
             repair::scan_report(&log, &located)
+        }
+        Command::Verify {
+            log,
+            index,
+            block_range,
+            against,
+            max_findings,
+        } => {
+            ensure!(max_findings > 0, "--max-findings must be at least 1");
+            let log = format::Log::open(&log, index.as_deref(), false)?;
+            if block_range.is_none() {
+                eprintln!(
+                    "Verifying all {} of {} (no --block-range given). On a live node this is a \
+                     long sequential read competing with nodeos: prefer a range, a quiet node or \
+                     copy, or off-peak hours. Nothing is written; Ctrl-C stops it safely.",
+                    report::bytes(log.size),
+                    log.log.path.display()
+                );
+            }
+            verify::verify(&log, block_range, &against, max_findings)
         }
         Command::Prepare {
             target,

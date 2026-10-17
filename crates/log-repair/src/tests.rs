@@ -1483,3 +1483,179 @@ fn media_repair_next_to_orphaned_fork_entries_heals_byte_exactly() {
         assert_eq!(fs::read(&f.path).unwrap(), f.log_bytes);
     }
 }
+
+/// Problems `verify` reports, as (block, problem) pairs.
+fn verify_findings(
+    log: &Log,
+    range: Option<(u32, u32)>,
+    against: &[PathBuf],
+) -> Vec<(u32, String)> {
+    let out = verify::verify(log, range, against, 100).unwrap();
+    out.json["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["block"].as_u64().unwrap() as u32,
+                f["problem"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Invert one byte of a file in place: silent corruption, the read still succeeds.
+fn flip(path: &Path, offset: u64) {
+    let mut bytes = fs::read(path).unwrap();
+    bytes[offset as usize] ^= 0xFF;
+    fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn verify_reports_nothing_on_intact_logs() {
+    for kind in [Kind::Blocks, Kind::Trace, Kind::ChainState] {
+        let f = Fixture::new(kind);
+        let reference = Fixture::new(Kind::Blocks);
+        let log = f.open(false);
+        assert!(verify_findings(&log, None, &[]).is_empty(), "{kind:?}");
+        assert!(
+            verify_findings(&log, None, std::slice::from_ref(&reference.path)).is_empty(),
+            "{kind:?} against a reference"
+        );
+        assert!(
+            verify_findings(&log, Some((1010, 1020)), &[]).is_empty(),
+            "{kind:?} range"
+        );
+    }
+}
+
+#[test]
+fn verify_finds_silent_corruption_in_blocks_log() {
+    // A byte inside a header breaks the ID chain at the next block.
+    let f = Fixture::new(Kind::Blocks);
+    let header_byte = f.open(false).pos(1010).unwrap() + 50;
+    flip(&f.path, header_byte);
+    let found = verify_findings(&f.open(false), None, &[]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, 1011);
+    assert!(
+        found[0].1.contains("does not match block 1010's ID"),
+        "{found:?}"
+    );
+    // A range starting after the damaged block still checks the chain into it.
+    let found = verify_findings(&f.open(false), Some((1011, 1020)), &[]);
+    assert_eq!(found.iter().map(|x| x.0).collect::<Vec<_>>(), [1011]);
+    // A range ending at the damaged block checks it against its successor.
+    let found = verify_findings(&f.open(false), Some((1000, 1010)), &[]);
+    assert_eq!(found.iter().map(|x| x.0).collect::<Vec<_>>(), [1010]);
+
+    // A byte in the transaction area is invisible without a reference, and pinned with one.
+    let f = Fixture::new(Kind::Blocks);
+    let reference = Fixture::new(Kind::Blocks);
+    let (s, e) = f.open(false).bounds(1020).unwrap();
+    flip(&f.path, e - 8 - 20);
+    assert!(verify_findings(&f.open(false), None, &[]).is_empty());
+    let found = verify_findings(&f.open(false), None, std::slice::from_ref(&reference.path));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, 1020);
+    assert!(
+        found[0].1.contains(&format!("file offset {}", e - 8 - 20)),
+        "{found:?}"
+    );
+    assert!(s < e);
+
+    // A position trailer that disagrees with the index.
+    let f = Fixture::new(Kind::Blocks);
+    let (_, e) = f.open(false).bounds(1005).unwrap();
+    flip(&f.path, e - 3);
+    let found = verify_findings(&f.open(false), None, &[]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].1.contains("trailer"), "{found:?}");
+}
+
+#[test]
+fn verify_finds_silent_corruption_in_ship_logs() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        // Any payload byte fails zlib framing or the Adler-32 checksum.
+        let f = Fixture::new(kind);
+        let (s, e) = f.open(false).bounds(1015).unwrap();
+        for offset in [s + 48 + 12 + 7, (s + e) / 2, e - 8 - 1] {
+            let f = Fixture::new(kind);
+            flip(&f.path, offset);
+            let found = verify_findings(&f.open(false), None, &[]);
+            assert_eq!(found.len(), 1, "{kind:?} at {offset}: {found:?}");
+            assert_eq!(found[0].0, 1015);
+            assert!(found[0].1.starts_with("payload:"), "{found:?}");
+        }
+        // The entry ID beyond its block number needs a reference blocks.log.
+        let f = Fixture::new(kind);
+        let reference = Fixture::new(Kind::Blocks);
+        flip(&f.path, s + 8 + 20);
+        assert!(
+            verify_findings(&f.open(false), None, &[]).is_empty(),
+            "{kind:?}"
+        );
+        let found = verify_findings(&f.open(false), None, std::slice::from_ref(&reference.path));
+        assert_eq!(found.len(), 1, "{kind:?}: {found:?}");
+        assert!(found[0].1.contains("block ID differs"), "{found:?}");
+    }
+}
+
+#[test]
+fn verify_refuses_bad_references() {
+    let f = Fixture::new(Kind::Blocks);
+    let log = f.open(false);
+    let own = verify::verify(&log, None, std::slice::from_ref(&f.path), 10);
+    assert!(own.is_err(), "the target is not its own reference");
+    let ship = Fixture::new(Kind::Trace);
+    assert!(verify::verify(&log, None, std::slice::from_ref(&ship.path), 10).is_err());
+    assert!(verify::verify(&log, Some((5000, 6000)), &[], 10).is_err());
+}
+
+/// Rewrite a SHIP fixture the way nodeos leaves it after a fork: an abandoned copy of block
+/// 1011 sits between block 1010's entry and the index position of the real block 1011.
+fn ship_with_orphan(f: &Fixture, break_orphan: bool) {
+    let log = f.open(false);
+    let (mut bytes, mut index) = (Vec::new(), Vec::new());
+    for n in log.first..=log.last {
+        let body = log.body(n).unwrap();
+        let p = bytes.len() as u64;
+        index.extend_from_slice(&p.to_le_bytes());
+        bytes.extend_from_slice(&body);
+        bytes.extend_from_slice(&p.to_le_bytes());
+        if n == 1010 {
+            let orphan = log.body(1011).unwrap();
+            let p = bytes.len() as u64;
+            bytes.extend_from_slice(&orphan);
+            bytes.extend_from_slice(&(p + u64::from(break_orphan)).to_le_bytes());
+        }
+    }
+    drop(log);
+    fs::write(&f.path, bytes).unwrap();
+    fs::write(f.path.with_extension("index"), index).unwrap();
+}
+
+#[test]
+fn verify_accepts_orphaned_fork_entries_in_ship_logs() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        let f = Fixture::new(kind);
+        ship_with_orphan(&f, false);
+        let out = verify::verify(&f.open(false), None, &[], 10).unwrap();
+        assert_eq!(
+            out.json["findings"].as_array().unwrap().len(),
+            0,
+            "{kind:?}"
+        );
+        assert_eq!(out.json["orphaned_fork_entries"], 1, "{kind:?}");
+
+        let f = Fixture::new(kind);
+        ship_with_orphan(&f, true);
+        let found = verify_findings(&f.open(false), None, &[]);
+        assert_eq!(found.len(), 1, "{kind:?}: {found:?}");
+        assert_eq!(found[0].0, 1010);
+        assert!(
+            found[0].1.contains("not orphaned fork entries"),
+            "{found:?}"
+        );
+    }
+}

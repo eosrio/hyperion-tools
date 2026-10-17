@@ -24,6 +24,7 @@ logs before relying on it in production (see [Validation](#validation)).
 [4. Apply](#4-apply) ·
 [5. After the repair](#5-after-the-repair) ·
 [Multiple damaged records](#multiple-damaged-records) ·
+[Check for silent corruption](#check-for-silent-corruption) ·
 [Troubleshooting](#troubleshooting) ·
 [Command reference](#command-reference) ·
 [Limits](#limits) ·
@@ -108,7 +109,7 @@ The tool repairs bytes the operating system **refuses to read**: reads that fail
 | ZFS permanent data error (checksum/IO) on a log file | Yes: the design target. Healed real on-disk damage (see [Validation](#validation)) |
 | btrfs checksum error on a log file | Yes, with 4 KiB records. Healed real checksum damage; see [After the repair](#5-after-the-repair) for scrub |
 | ext4/xfs on a disk with unreadable sectors | Yes, with 4 KiB records, the filesystem default. Healed real sector errors on dm-integrity (see [Validation](#validation)) |
-| Silent corruption: the bytes read back, but wrong | **No.** Nothing tells the tool which bytes are bad, and it never overwrites readable data |
+| Silent corruption: the bytes read back, but wrong | **No.** It never overwrites readable data. [`verify`](#check-for-silent-corruption) detects it |
 | Damage in the first entry, the head (last) entry, or the file header | No: a readable neighbor entry is needed on both sides |
 | Damaged or missing `.index` | No: the index defines entry boundaries |
 | SHIP damage inside orphaned fork entries (abandoned entries nodeos leaves after a fork) | No: no other node, endpoint, or replay holds those bytes. Damage next to them is repaired, and they are kept as they are (see [FORMAT.md](FORMAT.md#target-logs)) |
@@ -415,6 +416,44 @@ If a region's anchors or readable gaps turn out to be unreadable too, the refusa
 so: scan a wider range (or the whole file), so the neighboring damage is included in
 the plan.
 
+## Check for silent corruption
+
+`scan` finds bytes the system **refuses** to read. On ZFS and btrfs that covers rotten
+data too, because their checksums turn it into a read error. On ext4 and xfs, which
+have no data checksums, rotten bytes read back without any error, and `scan` cannot
+see them. `verify` checks what the logs prove about themselves. It is read-only and
+can run while nodeos is running: it checks only entries that exist when it starts.
+
+```sh
+antelope-log-repair verify --log /data/blocks/blocks.log --block-range 1200000-1300000
+antelope-log-repair verify --log /data/blocks/blocks.log --against /mnt/other-node/blocks/blocks.log
+antelope-log-repair verify --log /data/state-history/trace_history.log --against /data/blocks/blocks.log
+```
+
+| Log | Checked from the file alone | Added by `--against BLOCKS_LOG` |
+|---|---|---|
+| `blocks.log` | each entry's position trailer; header block numbers; the ID chain, so a changed header byte breaks the link to the next block | every packed block, byte for byte, with the first differing file offset |
+| SHIP logs | trailers and block numbers; every payload's zlib framing, sizes, and Adler-32 checksum, so any changed payload byte fails | each entry's block ID |
+
+- **Not covered without a reference:** `blocks.log` transaction bodies and signatures,
+  because nothing in the file checks them. Pass `--against` with another node's
+  `blocks.log` (its `blocks.index` alongside). For a SHIP log, the node's own
+  `blocks.log` is a useful reference for the entry IDs. The report lists what was and
+  was not checked.
+- **Orphaned fork entries** in SHIP logs are counted and their framing checked; they are
+  not problems (see [FORMAT.md](FORMAT.md#target-logs)).
+- **Cost:** without `--block-range` it reads the whole file, as a whole-file scan does,
+  and drops the pages only it read from the cache. Expect up to about 1 GB/s on
+  `blocks.log`, and less for SHIP logs with `--against`.
+- **Output:** each problem names the block, its byte range, and the reason. `--json`
+  sets `corrupt` and lists `findings`. The exit status is 0 when the check completes,
+  as with `scan`. It stops after `--max-findings` (default 1000).
+
+`verify` writes nothing and does not repair. The bytes it flags read back without an
+error, so `apply` will not overwrite them. Restore those entries from another node or a
+backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
+`unreadable`.
+
 ## Troubleshooting
 
 | Message | Meaning | What to do |
@@ -444,6 +483,7 @@ the plan.
 | Command | Purpose | Writes |
 |---|---|---|
 | `scan` (alias `inspect`) | Find and classify damage | Nothing |
+| `verify` | Find entries that read back but are wrong | Nothing |
 | `prepare` | Locate, acquire (`--ship`, replay options, or local files), and build | A new `--out` directory |
 | `fetch-ship` | Acquire from SHIP endpoints | A new `--out` directory |
 | `replay-ship` | Regenerate SHIP history in a sandbox | A new `--out` directory |
