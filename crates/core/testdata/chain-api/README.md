@@ -10,10 +10,12 @@ server's HTTP layer (`antelope-ship-archive --api`), are checked against nodeos 
 - `crates/ship-archive/tests/chain_api_nodeos.rs` sends every request of `dev-chain/http`, and
   every request of `dev-chain/requests` that nodeos refused, to a server over a synthetic chain
   and compares the whole answer, status line and headers in their order included, but for the
-  value of `Server`.
+  value of `Server`. A request without a `Host` is the exception: nodeos refuses it, and the
+  server, which checks no `Host`, must answer it as it answers the same request with one.
 
-All of it was captured with `scripts/capture_chain_api_goldens.sh`. No file names a host, an
-address other than 127.0.0.1, or a path.
+All of it was captured with `scripts/capture_chain_api_goldens.sh`. No file names a host or a
+path. The only addresses are 127.0.0.1 and, in `http/ub-origin` and `http/ub-other-host`, the
+RFC 1918 example 10.0.0.1.
 
 ## `dev-chain/`: a Spring 1.2.2 dev chain
 
@@ -23,7 +25,7 @@ synthetic: dev keys, test accounts and memos. Captured in raw mode (`--url`, wit
 of a clean stop as `--blocks-dir`):
 
 - `requests/<case>.req` and `.resp`: a raw HTTP/1.1 request and nodeos's raw answer.
-  - The error matrix (G-ERR), every error body once per endpoint and mode, as their source lines
+  - The error matrix, every error body once per endpoint and mode, as their source lines
     differ: `*-body-*` (the empty-body rule), `*-len-*` (the multi-line length assert, whose
     `line_number` is the line the assert's call closes on), `*-id-*`, `*-ub-*`, `*-parse`.
   - `raw-v-*`: `block_num_or_id` values as fc converts and resolves them (numbers, signs, 32-bit
@@ -49,6 +51,11 @@ of a clean stop as `--blocks-dir`):
 - `http/<case>.req` and `.resp`: what the HTTP layer answers whatever the chain holds (block
   4294967295 is never served): headers for each `Connection` and HTTP/1.0 case, any method, a
   chunked body, the 404s, `OPTIONS`, illegal request-targets and a missing or empty `Host`.
+
+The bootstrap and workload that built this chain are not part of the repository. Re-pinning these
+goldens for another Spring release takes a chain with the same features, captured into an empty
+directory (the script refuses one that is not) with a `--block` for a block of each kind above;
+`--image` alone starts a bare chain whose first blocks hold none of them.
 
 Requests nodeos reads differently from strict JSON (fractions, exponents and bare words, which
 fc reads as doubles or strings) are not captured: a server of archived ranges answers them as

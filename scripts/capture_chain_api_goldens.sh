@@ -11,10 +11,10 @@
 # Raw mode (--url, or --image) sends each request over a plain TCP connection (bash's
 # /dev/tcp) and keeps the answer exactly as it arrived: status line, headers in their order,
 # body. It writes
-#   DIR/requests/<case>.req, .resp   block endpoint requests: the error matrix (G-ERR: every
-#                                    error body and the request forms nodeos reads), and for
-#                                    each --block N get_block_info, get_block_header in both
-#                                    modes and get_raw_block by number, and the last two by id
+#   DIR/requests/<case>.req, .resp   block endpoint requests: the error matrix (every error
+#                                    body, and the request forms nodeos reads), and for each
+#                                    --block N get_block_info, get_block_header in both modes
+#                                    and get_raw_block by number, and the last two by id
 #   DIR/http/<case>.req, .resp       what the HTTP layer answers whatever the chain holds:
 #                                    404s, OPTIONS, illegal targets, a missing Host, methods,
 #                                    and the Connection and HTTP/1.0 variants of an Unknown Block
@@ -24,9 +24,13 @@
 #   DIR/PROVENANCE                   the node's server_version_string and chain_id, the date
 #
 #   --url URL      A Spring 1.1+ node you run, with chain_api_plugin, over plain HTTP, started
-#                  with `http-validate-host = false`: every request says `Host: 127.0.0.1`, so
-#                  the files hold no address. Point it only at a node you run: raw answers keep
-#                  whatever headers the server, or a proxy in front of it, adds.
+#                  with `http-validate-host = false`: every request says `Host: 127.0.0.1`, but
+#                  for the cases that send another (the RFC 1918 example 10.0.0.1) or none, so
+#                  the files hold no address of the node. Point it only at a node you run: raw
+#                  answers keep whatever headers the server, or a proxy in front of it, adds. The
+#                  node need not hold block 2 (one started from a snapshot does not): the error
+#                  matrix's by-id cases take block 2's id, or else the first --block's, and are
+#                  left out when the node holds neither.
 #   --image IMAGE  Start a throwaway dev chain from IMAGE, any image with Spring's nodeos on its
 #                  PATH (for example ubuntu:22.04 with the antelope-spring .deb installed), on a
 #                  loopback port; capture once its block log holds every --block (default 1, 2
@@ -37,8 +41,9 @@
 #   DIR/<N>/get_block_info.json, get_block_header.json, get_block_header-extensions.json,
 #   get_raw_block.json, and DIR/PROVENANCE.
 #
-# No output file names the address asked, the image, or any local path. Requirements: bash 4,
-# coreutils (od, head, tail, timeout), sed; curl for --bodies; docker for --image.
+# DIR must be new or empty, so that a capture never mixes with an earlier one. No output file
+# names the address asked, the image, or any local path. Requirements: bash 4, coreutils (od,
+# head, tail, timeout), sed; curl for --bodies; docker for --image.
 #
 # Bodies nodeos reads differently from strict JSON parsers are left out: fractions and exponents,
 # which fc turns into doubles or strings, and bare words, which it reads as strings (`tru` is
@@ -70,8 +75,26 @@ done
 [ -n "$URL" ] || [ -n "$IMAGE" ] || die "one of --url and --image is required"
 [ -z "$URL" ] || [ -z "$IMAGE" ] || die "--url and --image exclude each other"
 for n in ${BLOCKS[@]+"${BLOCKS[@]}"}; do
-  case $n in ''|*[!0-9]*) die "--block takes a block number, not '$n'" ;; esac
+  # No leading zero: bash arithmetic would read the number as octal.
+  case $n in
+    ''|*[!0-9]*|0?*) die "--block takes a block number without leading zeros, not '$n'" ;;
+  esac
 done
+if [ -e "$OUT" ]; then
+  { [ -d "$OUT" ] && [ -z "$(ls -A "$OUT")" ]; } \
+    || die "--out must be a new or empty directory, so that captures never mix"
+fi
+
+# The temporary files and the dev chain, removed however the script ends: a failed capture
+# leaves no raw answer of the node behind as a hidden file.
+CONTAINER=""
+cleanup() {
+  rm -f "$OUT/.body" "$OUT/.info.json" "$OUT/requests/.id.req" "$OUT/requests/.id.resp" \
+    "$OUT/requests/.info.req" "$OUT/requests/.info.resp"
+  rm -rf "$OUT/.blocks-from-dev-chain"
+  [ -z "$CONTAINER" ] || docker rm -f "$CONTAINER" > /dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 json_field() { # FILE KEY: a string or number member of a flat JSON object
   sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}[,}].*/\1/p" "$1" | head -n 1
@@ -224,9 +247,10 @@ request() {
 
 RAW=/v1/chain/get_raw_block HDR=/v1/chain/get_block_header INFO=/v1/chain/get_block_info
 
-# The error matrix. A value is the printf format of a JSON value.
-error_matrix() {
-  local id2=$1 name v
+# The error matrix, its by-id cases with block K's id ID (none when ID is empty). A value is
+# the printf format of a JSON value.
+error_matrix() { # K ID
+  local k=$1 id=$2 name v
   # nodeos's empty-body rule: spaces only are trimmed; `{}` with spaces and TABs is empty.
   for v in empty:'' spaces:'   ' braces:'{}' braces-ws:'{ \t }' braces-lf:'{}\n' \
            tab-braces:'\t{}' lf:'\n' braces-sp:' {} '; do
@@ -248,7 +272,6 @@ error_matrix() {
   request requests info-parse POST $INFO '{"block_num":"x"}'
 
   # block_num_or_id as fc converts it and get_raw_block resolves it.
-  local wrong2=${id2:0:62}$([ "${id2:62:2}" = 00 ] && echo 01 || echo 00)
   for v in num-1:1 str-1:'"1"' plus-1:'"+1"' lead0:'"0001"' wrap:'"4294967297"' \
            minus-1-str:'"-1"' minus-1:-1 minus-0:-0 zero:'"0"' 2p32:'"4294967296"' \
            u64max:'"18446744073709551615"' u64over:'"18446744073709551616"' \
@@ -257,11 +280,18 @@ error_matrix() {
            esc-quote:'"a\\"b"' esc-backslash:'"a\\\\b"' raw-01:'"a\001b"' raw-7f:'"a\177b"' \
            raw-tab:'"a\tb"' invalid-utf8:'"\377\3761"' utf8:'"\303\2511"' odd-hex:'"abc"' \
            hex-0x:'"0x10"' dash:'"-"' plus:'"+"' len65-hex:"\"$(printf 'a%.0s' {1..65})\"" \
-           zeros-64:"\"$(printf '%064d' 0)\"" id-2:"\"$id2\"" id-2-upper:"\"${id2^^}\"" \
-           id-2-wrong:"\"$wrong2\"" short-id-1:'"00000001"' short-id-2:"\"${id2:0:20}\"" \
-           obj:'{}' arr:'[1]' exp-str:'"1e5"'; do
+           zeros-64:"\"$(printf '%064d' 0)\"" short-id-1:'"00000001"' obj:'{}' arr:'[1]' \
+           exp-str:'"1e5"'; do
     request requests "raw-v-${v%%:*}" POST $RAW "{\"block_num_or_id\":${v#*:}}"
   done
+  # By id: block K's, in upper case, with its last byte changed, and its first ten bytes.
+  if [ -n "$id" ]; then
+    local wrong=${id:0:62}$([ "${id:62:2}" = 00 ] && echo 01 || echo 00)
+    for v in "id-$k:\"$id\"" "id-$k-upper:\"${id^^}\"" "id-$k-wrong:\"$wrong\"" \
+             "short-id-$k:\"${id:0:20}\""; do
+      request requests "raw-v-${v%%:*}" POST $RAW "{\"block_num_or_id\":${v#*:}}"
+    done
+  fi
 
   # block_num as fc converts it: a 32-bit number.
   for v in num-1:1 str-1:'"1"' plus-1:'"+1"' minus-1:-1 minus-1-str:'"-1"' wrap:4294967297 \
@@ -336,11 +366,12 @@ http_matrix() {
 # Each --block by number in every mode, and by id where the id is the key.
 block_cases() { # N
   local n=$1 id
+  id=$(block_id "$n")
+  [ ${#id} = 64 ] || die "the node does not hold block $n (get_block_info gave no id)"
   request requests "block-$n-info" POST $INFO "{\"block_num\":$n}"
   request requests "block-$n-header" POST $HDR "{\"block_num_or_id\":$n,\"include_extensions\":false}"
   request requests "block-$n-header-ext" POST $HDR "{\"block_num_or_id\":$n,\"include_extensions\":true}"
   request requests "block-$n-raw" POST $RAW "{\"block_num_or_id\":$n}"
-  id=$(block_id "$n")
   request requests "block-$n-header-ext-id" POST $HDR "{\"block_num_or_id\":\"$id\",\"include_extensions\":true}"
   request requests "block-$n-raw-id" POST $RAW "{\"block_num_or_id\":\"$id\"}"
 }
@@ -363,10 +394,17 @@ capture() {
   get_info "$OUT/.info.json"
   grep -q '"chain_id"' "$OUT/.info.json" \
     || die "get_info failed (is http-validate-host false?): $(head -c 300 "$OUT/.info.json")"
-  local id2
-  id2=$(block_id 2)
-  [ ${#id2} = 64 ] || die "no id for block 2"
-  error_matrix "$id2"
+  # The by-id cases take block 2's id, or the first --block's when the node does not hold
+  # block 2 (one started from a snapshot).
+  local k id=""
+  for k in 2 ${BLOCKS[0]+"${BLOCKS[0]}"}; do
+    id=$(block_id "$k")
+    [ ${#id} = 64 ] && break
+    id=""
+  done
+  [ -n "$id" ] || echo "capture_chain_api_goldens: the node holds neither block 2 nor the" \
+    "first --block: the by-id cases of the error matrix are left out" >&2
+  error_matrix "$k" "$id"
   http_matrix
   for n in ${BLOCKS[@]+"${BLOCKS[@]}"}; do block_cases "$n"; done
   rm -f "$OUT/requests/.id.req" "$OUT/requests/.id.resp" \
@@ -392,15 +430,13 @@ if [ -n "$URL" ]; then
 else
   command -v docker > /dev/null || die "--image needs docker"
   [ ${#BLOCKS[@]} -gt 0 ] || BLOCKS=(1 2 3)
-  name=chain-api-goldens-$$
+  CONTAINER=chain-api-goldens-$$
   logs=$OUT/.blocks-from-dev-chain
-  cleanup() { docker rm -f "$name" > /dev/null 2>&1 || true; rm -rf "$logs"; }
-  trap cleanup EXIT
-  docker run -d --name "$name" -p 127.0.0.1::8888 --entrypoint nodeos "$IMAGE" \
+  docker run -d --name "$CONTAINER" -p 127.0.0.1::8888 --entrypoint nodeos "$IMAGE" \
     --data-dir /goldens/data --config-dir /goldens/config -e -p eosio \
     --plugin eosio::producer_plugin --plugin eosio::chain_api_plugin \
     --http-server-address 0.0.0.0:8888 --http-validate-host false > /dev/null
-  published=$(docker port "$name" 8888/tcp | head -n 1)
+  published=$(docker port "$CONTAINER" 8888/tcp | head -n 1)
   set_address "http://127.0.0.1:${published##*:}"
   max=0
   for n in "${BLOCKS[@]}"; do (( n > max )) && max=$n; done
@@ -418,12 +454,12 @@ else
   capture
   provenance "$OUT/.info.json" dev-chain
   # A clean stop writes the block log out; then read the blocks from it.
-  docker stop -t 60 "$name" > /dev/null
+  docker stop -t 60 "$CONTAINER" > /dev/null
   rm -rf "$logs"
   mkdir -p "$logs"
   hostpath=$logs
   command -v cygpath > /dev/null && hostpath=$(cygpath -w "$logs")
-  docker cp "$name:/goldens/data/blocks/." "$hostpath" > /dev/null
+  docker cp "$CONTAINER:/goldens/data/blocks/." "$hostpath" > /dev/null
   save_blocks "$logs"
 fi
 rm -f "$OUT/.info.json"

@@ -20,15 +20,15 @@
 //! handler (a query string is another target), any method reaches it, `OPTIONS` is `200 {}`,
 //! responses are `Content-Type: application/json` with a `Content-Length`, title-case header
 //! names in nodeos's order and no `Date`, and connections are kept alive as the client asks. A
-//! request with no `Host`, or an empty one, is refused as nodeos refuses it. A request body is
-//! at most `--api-max-body-bytes`: a larger one gets `413` and the connection is closed. The
-//! headers of a request must arrive within [`REQUEST_TIMEOUT`], and then its body within as
-//! long, or the connection is closed unanswered; a keep-alive connection idle that long is
-//! closed too, and so is one whose client takes none of its answer for that long ([`Socket`]).
+//! request body is at most `--api-max-body-bytes`: a larger one gets `413` and the connection is
+//! closed. The headers of a request must arrive within [`REQUEST_TIMEOUT`], and then its body
+//! within as long, or the connection is closed unanswered; a keep-alive connection idle that
+//! long is closed too, and so is one whose client takes none of its answer for that long
+//! ([`Socket`]).
 //! At most `--api-max-connections` connections are open at once: one more is answered
 //! `503 Busy` at once, without its request being read, and closed. There is no TLS,
-//! authentication, CORS or check of the host a request names: bind the listener to a private
-//! address.
+//! authentication, CORS or `Host` check (a request without a `Host`, which nodeos refuses, is
+//! answered too): bind the listener to a private address.
 //!
 //! **Requests and memory.** A request for a block number outside the served range is answered
 //! at once. Any other block request takes one of `--api-max-in-flight` slots, waiting at most

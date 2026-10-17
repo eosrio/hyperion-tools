@@ -7,14 +7,19 @@
 //!     the connection is closed.
 //!  2. The request-target must be origin-form and hold no `..`, Beast's check: anything else
 //!     (`OPTIONS *`, an absolute or authority form) is `400 Illegal request-target`.
-//!  3. The request must name a host: one with no `Host` header, or an empty one, is
-//!     `400 Disallowed HTTP HOST header`, as nodeos answers it even when it validates no host
-//!     names. Any other `Host` is accepted.
-//!  4. `OPTIONS`, on any path, is `200 {}`.
-//!  5. The handler is the one whose path is the whole target, query string included:
+//!  3. `OPTIONS`, on any path, is `200 {}`.
+//!  4. The handler is the one whose path is the whole target, query string included:
 //!     a block endpoint, `describe` or `get_supported_apis`; anything else is nodeos's 404.
 //!
-//! Every answer carries nodeos's headers in nodeos's order ([`Headers`]).
+//! `Host` is not checked: a request with any `Host`, an empty one or none is answered. nodeos
+//! refuses one without a `Host` (`400 Disallowed HTTP HOST header`, even with
+//! `http-validate-host = false`), which would turn away an HTTP/1.0 health check that sends none.
+//!
+//! Every answer this module writes carries nodeos's headers in nodeos's order ([`Headers`]).
+//! hyper answers two kinds of target before this module sees them, unlike Beast: one holding a
+//! byte that is not a URI character (such as `<`, `>`, or bytes that are not UTF-8) gets
+//! hyper's bare `400 Bad Request`, and a `#fragment` is dropped, so `/v1/chain/get_raw_block#x`
+//! is `get_raw_block` here and nodeos's 404 there. HTTP clients send neither.
 //!
 //! A block request is then parsed as nodeos parses it (`hyperion_ship::chainapi::parse`); a
 //! block number outside the served block-log range is `Unknown Block` at once. Otherwise the
@@ -35,9 +40,9 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body as _, Bytes, Incoming};
-use hyper::header::{CONNECTION, CONTENT_TYPE, HOST, HeaderValue, SERVER};
+use hyper::header::{CONNECTION, CONTENT_TYPE, HeaderValue, SERVER};
 use hyper::http::request::Parts;
-use hyper::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
+use hyper::{Method, Request, Response, StatusCode, Uri, Version};
 use hyperion_ship::blocklog::{BlockLog, block_header};
 use hyperion_ship::chainapi::{self, ApiError, Endpoint, parse_signed_block, render};
 use hyperion_ship::protocol::MAX_BLOCK_BYTES;
@@ -138,9 +143,8 @@ pub(super) async fn handle(
     let started = Instant::now();
     let (head, body) = req.into_parts();
     let target = origin_form(&head.uri);
-    let host = names_host(&head.headers);
     let route = match target {
-        Some(t) if host && head.method != Method::OPTIONS => route(t),
+        Some(t) if head.method != Method::OPTIONS => route(t),
         _ => ApiRoute::Other,
     };
     let headers = Headers::new(&head, route);
@@ -180,7 +184,6 @@ pub(super) async fn handle(
     };
     let (reply, block) = match target {
         None => (Reply::error(&ApiError::IllegalTarget), None),
-        Some(_) if !host => (Reply::error(&ApiError::DisallowedHost), None),
         Some(_) if head.method == Method::OPTIONS => (Reply::ok(b"{}".to_vec()), None),
         Some(target) => answer(&ctx, peer, target, body).await,
     };
@@ -212,19 +215,12 @@ fn origin_form(uri: &Uri) -> Option<&str> {
     (target.starts_with('/') && !target.contains("..")).then_some(target)
 }
 
-/// Whether a request names a host, as nodeos requires of every request: its first `Host`
-/// header is there and not empty. nodeos refuses an empty host before it looks at the names it
-/// may validate (`allow_host`); with `http-validate-host = false` that is all it checks.
-fn names_host(headers: &HeaderMap) -> bool {
-    headers.get(HOST).is_some_and(|host| !host.is_empty())
-}
-
 /// The headers of an answer, laid out as nodeos lays them out (Spring `beast_http_session.hpp`
 /// `handle_request`): it sets `Content-Type`, then the connection header the request calls for,
 /// then `Server`; a handler then sets `Content-Type` once more, which moves it after `Server`.
-/// `Content-Length` comes last, from hyper. So an answer no handler writes (an illegal target, a
-/// missing host, `OPTIONS`, `get_supported_apis`, the 404) starts with `Content-Type`, and a
-/// handler's (the block endpoints, `describe`) with the connection header or `Server`.
+/// `Content-Length` comes last, from hyper. So an answer no handler writes (an illegal target,
+/// `OPTIONS`, `get_supported_apis`, the 404) starts with `Content-Type`, and a handler's (the
+/// block endpoints, `describe`) with the connection header or `Server`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Headers {
     /// The request's HTTP version, which the answer takes (as Beast's `res.version`).
@@ -238,17 +234,26 @@ struct Headers {
 
 impl Headers {
     fn new(head: &Parts, route: ApiRoute) -> Self {
-        let asks = |token: &str| {
-            head.headers
-                .get_all(CONNECTION)
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .flat_map(|v| v.split(','))
-                .any(|t| t.trim().eq_ignore_ascii_case(token))
+        let says = |value: &HeaderValue, token: &str| {
+            value
+                .to_str()
+                .is_ok_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case(token)))
         };
+        let lines = head.headers.get_all(CONNECTION);
         let connection = match head.version {
-            Version::HTTP_10 => asks("keep-alive").then_some("keep-alive"),
-            _ => asks("close").then_some("close"),
+            // Beast reads the first `Connection` line alone. hyper keeps an HTTP/1.0
+            // connection alive when the answer says `keep-alive` and no line of the request says
+            // `close`; one whose first line keeps alive and a later one closes gets nodeos's
+            // answer, then the connection is closed.
+            Version::HTTP_10 => lines
+                .iter()
+                .next()
+                .is_some_and(|v| says(v, "keep-alive"))
+                .then_some("keep-alive"),
+            // hyper closes an HTTP/1.1 connection once any line says `close` (nodeos, reading
+            // the first alone, may keep it) and would then add its own `Connection: close`
+            // after `Server`: the answer says it where nodeos would.
+            _ => lines.iter().any(|v| says(v, "close")).then_some("close"),
         };
         let handler = matches!(
             route,
@@ -703,18 +708,6 @@ mod tests {
     }
 
     #[test]
-    fn a_request_names_a_host_with_a_first_host_header_that_is_not_empty() {
-        let mut headers = HeaderMap::new();
-        assert!(!names_host(&headers));
-        headers.insert(HOST, HeaderValue::from_static(""));
-        assert!(!names_host(&headers));
-        headers.append(HOST, HeaderValue::from_static("127.0.0.1"));
-        assert!(!names_host(&headers), "the first Host counts");
-        headers.insert(HOST, HeaderValue::from_static("10.0.0.1:1"));
-        assert!(names_host(&headers));
-    }
-
-    #[test]
     fn answers_lay_out_their_headers_as_nodeos_does() {
         let server = format!("server: {SERVER_HEADER}");
         let s = server.as_str();
@@ -723,10 +716,10 @@ mod tests {
             "connection: close",
             "connection: keep-alive",
         );
-        let layout = |version, connection: Option<&str>, route, closing| {
+        let layout = |version, connection: &[&str], route, closing| {
             let mut req = Request::builder().version(version).uri("/");
-            if let Some(c) = connection {
-                req = req.header(CONNECTION, c);
+            for c in connection {
+                req = req.header(CONNECTION, *c);
             }
             let (head, ()) = req.body(()).unwrap().into_parts();
             let mut response = Response::new(Full::new(Bytes::new()));
@@ -740,35 +733,40 @@ mod tests {
         };
         let (v10, v11) = (Version::HTTP_10, Version::HTTP_11);
         use ApiRoute::*;
+        let (none, close_keep, keep_close) = (
+            &[][..],
+            &["close", "keep-alive"][..],
+            &["keep-alive", "close"][..],
+        );
         let cases = [
             // A handler sets Content-Type last; the HTTP layer's own answers first.
-            (v11, None, GetRawBlock, false, vec![s, ct]),
-            (v11, None, Describe, false, vec![s, ct]),
-            (v11, None, Other, false, vec![ct, s]),
-            (v11, None, GetSupportedApis, false, vec![ct, s]),
-            (v11, None, GetBlock, false, vec![ct, s]),
+            (v11, none, GetRawBlock, false, vec![s, ct]),
+            (v11, none, Describe, false, vec![s, ct]),
+            (v11, none, Other, false, vec![ct, s]),
+            (v11, none, GetSupportedApis, false, vec![ct, s]),
+            (v11, none, GetBlock, false, vec![ct, s]),
             // The connection header the request asks for comes before Server.
             (
                 v11,
-                Some("keep-alive, Close"),
+                &["keep-alive, Close"],
                 GetBlockInfo,
                 false,
                 vec![close, s, ct],
             ),
-            (v11, Some("close"), Other, false, vec![ct, close, s]),
-            (v11, Some("keep-alive"), GetBlockHeader, false, vec![s, ct]),
-            (v10, None, GetRawBlock, false, vec![s, ct]),
-            (
-                v10,
-                Some("Keep-Alive"),
-                GetRawBlock,
-                false,
-                vec![keep, s, ct],
-            ),
-            (v10, Some("keep-alive"), Other, false, vec![ct, keep, s]),
+            (v11, &["close"], Other, false, vec![ct, close, s]),
+            (v11, &["keep-alive"], GetBlockHeader, false, vec![s, ct]),
+            (v10, none, GetRawBlock, false, vec![s, ct]),
+            (v10, &["Keep-Alive"], GetRawBlock, false, vec![keep, s, ct]),
+            (v10, &["keep-alive"], Other, false, vec![ct, keep, s]),
+            // HTTP/1.0: the first Connection line alone counts, as Beast reads it.
+            (v10, close_keep, GetRawBlock, false, vec![s, ct]),
+            (v10, keep_close, GetRawBlock, false, vec![keep, s, ct]),
+            // HTTP/1.1: any line that closes, as hyper then closes the connection.
+            (v11, keep_close, GetRawBlock, false, vec![close, s, ct]),
+            (v11, close_keep, Other, false, vec![ct, close, s]),
             // An answer that closes the connection says so in the same place.
-            (v11, None, GetRawBlock, true, vec![close, s, ct]),
-            (v10, Some("keep-alive"), Other, true, vec![ct, close, s]),
+            (v11, none, GetRawBlock, true, vec![close, s, ct]),
+            (v10, &["keep-alive"], Other, true, vec![ct, close, s]),
         ];
         for (version, connection, route, closing, want) in cases {
             let (got_version, lines) = layout(version, connection, route, closing);
