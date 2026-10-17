@@ -15,8 +15,10 @@
 //!     within the global memory budget, and runs every file read on the io threads.
 //!   * [`frames`] writes a result as Spring frames it, streaming payloads above
 //!     `--stream-threshold`.
-//!   * [`metrics`] counts what the sessions do; `http` serves `/health`, `/ready` and
-//!     `/metrics` (`--http`).
+//!   * [`api`] serves nodeos's `/v1/chain` block endpoints from the block logs (`--api`), on
+//!     the same io threads and memory budget.
+//!   * [`metrics`] counts what the sessions and the chain API do; `http` serves `/health`,
+//!     `/ready` and `/metrics` (`--http`).
 //!   * [`check`] holds the offline commands: `check` validates the logs without serving them,
 //!     `index` rebuilds state-history indexes into a sidecar directory.
 //!   * [`cli`] is the command line.
@@ -25,8 +27,12 @@
 //! session holds besides them the result it is sending, at most three payloads of up to
 //! `--stream-threshold` bytes and one block (at most 20 MiB), plus its streaming and write
 //! buffers ([`fetch::SESSION_BUFFERS`]). Larger payloads are inflated chunk by chunk as they are
-//! sent. [`fetch::worst_case_bytes`] is the bound.
+//! sent. [`fetch::worst_case_bytes`] is the bound. Chain API requests reserve what they hold
+//! from the same budget, never waiting for it, and keep it until their body is written out or
+//! the client has taken none of it for the request timeout; besides the budget each of at most
+//! `--api-max-connections` connections holds only its buffers and up to 16 KiB of request.
 
+pub mod api;
 pub mod check;
 pub mod cli;
 pub mod fetch;
@@ -55,10 +61,11 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::{error, info, warn};
 
+use crate::api::ApiConfig;
 use crate::fetch::{FetchCtx, FetchLimits, Io, MemoryBudget};
 use crate::metrics::Metrics;
 use crate::session::Ctx;
-use crate::store::{Store, StoreConfig};
+use crate::store::{BlocksMode, Store, StoreConfig};
 
 /// The `Server` header of every upgrade response: informational, as Spring's
 /// `state_history/<version>`.
@@ -90,6 +97,8 @@ pub struct ServeConfig {
     pub memory_budget: u64,
     /// Where to serve `/health`, `/ready` and `/metrics`; nowhere when `None`.
     pub http: Option<SocketAddr>,
+    /// Where and how to serve the chain API; nowhere when `None`.
+    pub api: Option<ApiConfig>,
 }
 
 impl Default for ServeConfig {
@@ -104,6 +113,7 @@ impl Default for ServeConfig {
             prefetch: 8,
             memory_budget: 1 << 30,
             http: None,
+            api: None,
         }
     }
 }
@@ -120,13 +130,14 @@ pub struct Server {
     findings: Arc<[Finding]>,
     listener: TcpListener,
     http: Option<http::Http>,
+    api: Option<api::Listener>,
     metrics: Arc<Metrics>,
     budget: Arc<MemoryBudget>,
     cfg: ServeConfig,
 }
 
 impl Server {
-    /// Open and validate the store, log what is served, and bind the listener.
+    /// Open and validate the store, log what is served, and bind the listeners.
     pub async fn bind(cfg: ServeConfig) -> Result<Self> {
         ensure!(cfg.max_sessions > 0, "--max-sessions must be at least 1");
         ensure!(
@@ -134,6 +145,24 @@ impl Server {
             "--max-request-bytes must be at least 64"
         );
         ensure!(cfg.io_threads > 0, "--io-threads must be at least 1");
+        if let Some(api) = &cfg.api {
+            ensure!(
+                cfg.store.blocks == BlocksMode::Required,
+                "--api answers from the block logs, so it cannot run with --blocks none"
+            );
+            ensure!(
+                !same_listener(api.listen, cfg.listen),
+                "--api {} is the --listen address: the chain API needs a listener of its own",
+                api.listen
+            );
+            if let Some(http) = cfg.http {
+                ensure!(
+                    !same_listener(api.listen, http),
+                    "--api {} is the --http address: the chain API needs a listener of its own",
+                    api.listen
+                );
+            }
+        }
         let store_cfg = cfg.store.clone();
         let (store, findings) = tokio::task::spawn_blocking(move || Store::open(&store_cfg))
             .await
@@ -152,6 +181,24 @@ impl Server {
             info!(
                 "serving /health, /ready and /metrics on http://{}",
                 http.addr()
+            );
+        }
+        let api = match cfg.api.clone() {
+            Some(api) => Some(api::Listener::bind(api).await?),
+            None => None,
+        };
+        if let Some(api) = &api {
+            let (begin, end) = store.served.blocks;
+            let c = api.config();
+            info!(
+                "serving the chain API on http://{} for blocks {begin}..{end}: at most {} \
+                 connections and {} requests at once, each waiting up to {:?} for its turn; \
+                 bodies up to {} bytes",
+                api.local_addr(),
+                c.max_connections,
+                c.max_in_flight,
+                c.queue,
+                c.max_body_bytes
             );
         }
         let limits = FetchLimits {
@@ -175,6 +222,7 @@ impl Server {
             findings: findings.into(),
             listener,
             http,
+            api,
             metrics: Arc::new(Metrics::default()),
             budget: MemoryBudget::new(cfg.memory_budget),
             cfg,
@@ -202,6 +250,11 @@ impl Server {
         self.http.as_ref().map(http::Http::addr)
     }
 
+    /// The bound address of the chain API, when `--api` is given.
+    pub fn api_addr(&self) -> Option<SocketAddr> {
+        self.api.as_ref().map(api::Listener::local_addr)
+    }
+
     /// The counters the sessions update.
     pub fn metrics(&self) -> &Arc<Metrics> {
         &self.metrics
@@ -212,14 +265,16 @@ impl Server {
         &self.budget
     }
 
-    /// Accept sessions until `shutdown` completes, then send Close 1001 to every session, give
-    /// them five seconds to finish the message they are writing, and drop the rest.
+    /// Accept sessions and chain API requests until `shutdown` completes. Then stop accepting,
+    /// send Close 1001 to every session, let every API connection finish the request it is
+    /// answering, give both five seconds to finish, and drop the rest.
     pub async fn run(self, shutdown: impl Future<Output = ()>) -> Result<()> {
         let Self {
             store,
             findings,
             listener,
             http,
+            api,
             metrics,
             budget,
             cfg,
@@ -228,13 +283,15 @@ impl Server {
             .read_buffer_size(READ_BUFFER)
             .max_message_size(Some(cfg.max_request_bytes))
             .max_frame_size(Some(cfg.max_request_bytes));
+        // Sessions and API requests share the io threads.
+        let io = Io::new(cfg.io_threads, Arc::clone(&metrics));
         let ctx = Arc::new(Ctx {
             fetch: FetchCtx {
                 store: Arc::clone(&store),
                 limits: FetchLimits {
                     stream_threshold: cfg.stream_threshold,
                 },
-                io: Io::new(cfg.io_threads, Arc::clone(&metrics)),
+                io: io.clone(),
                 budget: Arc::clone(&budget),
                 depth: cfg.prefetch,
             },
@@ -242,16 +299,30 @@ impl Server {
             server: HeaderValue::from_static(SERVER_HEADER),
             metrics: Arc::clone(&metrics),
         });
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let api_health = api.as_ref().map(|a| http::ApiHealth {
+            listen: a.local_addr(),
+            max_in_flight: a.config().max_in_flight,
+        });
+        let mut api = api.map(|a| {
+            tokio::spawn(a.run(
+                Arc::clone(&store),
+                io,
+                Arc::clone(&budget),
+                Arc::clone(&metrics),
+                stop_rx.clone(),
+            ))
+        });
         let state = Arc::new(http::State {
             store,
             findings,
             metrics,
             budget,
+            api: api_health,
             ready: true.into(),
         });
         let serving = http.map(|h| h.spawn(Arc::clone(&state))).transpose()?;
         let permits = Arc::new(Semaphore::new(cfg.max_sessions));
-        let (stop_tx, stop_rx) = watch::channel(false);
         let mut sessions = JoinSet::new();
         tokio::pin!(shutdown);
         loop {
@@ -280,17 +351,40 @@ impl Server {
         state.ready.store(false, Ordering::Relaxed);
         info!("shutting down: closing {} sessions", sessions.len());
         stop_tx.send_replace(true);
-        let drain = async { while sessions.join_next().await.is_some() {} };
+        let drain = async {
+            while sessions.join_next().await.is_some() {}
+            if let Some(api) = &mut api
+                && let Err(e) = api.await
+            {
+                error!("the chain API task failed: {e}");
+            }
+        };
         if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {
-            warn!(
-                "{} sessions still open after {SHUTDOWN_GRACE:?}; dropping them",
-                sessions.len()
-            );
-            sessions.shutdown().await;
+            if !sessions.is_empty() {
+                warn!(
+                    "{} sessions still open after {SHUTDOWN_GRACE:?}; dropping them",
+                    sessions.len()
+                );
+                sessions.shutdown().await;
+            }
+            if let Some(api) = api.take()
+                && !api.is_finished()
+            {
+                warn!("chain API requests still open after {SHUTDOWN_GRACE:?}; dropping them");
+                api.abort();
+            }
         }
         drop(serving);
         Ok(())
     }
+}
+
+/// Whether listening on `a` and on `b` takes the same port: the same nonzero port on the same
+/// address, or on any address when either is the unspecified one.
+fn same_listener(a: SocketAddr, b: SocketAddr) -> bool {
+    a.port() != 0
+        && a.port() == b.port()
+        && (a.ip() == b.ip() || a.ip().is_unspecified() || b.ip().is_unspecified())
 }
 
 /// Open the store, bind, and serve until `shutdown` completes.

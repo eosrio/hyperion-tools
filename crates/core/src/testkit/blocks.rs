@@ -1,10 +1,10 @@
 //! Block-log writers for synthetic fixtures.
 //!
-//! Bodies are real packed `signed_block`s (a header, a K1 producer signature, no transactions,
-//! optional block extensions), so [`block_header`] derives their ids and each block links to
-//! its predecessor through `previous`. Files are laid out as Spring writes them: the preamble,
-//! then each block followed by its own position, and an index of those positions. Tests that
-//! need a damaged log start from [`encode`] and change the bytes.
+//! Bodies are real packed `signed_block`s (a header, a producer signature, optional
+//! transaction receipts and block extensions), so [`block_header`] derives their ids and each
+//! block links to its predecessor through `previous`. Files are laid out as Spring writes
+//! them: the preamble, then each block followed by its own position, and an index of those
+//! positions. Tests that need a damaged log start from [`encode`] and change the bytes.
 
 use std::path::{Path, PathBuf};
 
@@ -54,6 +54,108 @@ impl Key {
             }
         }
     }
+}
+
+/// A `signature` variant. The default is a K1 signature of zeros, what [`BlockSpec`] has
+/// always written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Signature {
+    K1([u8; 65]),
+    R1([u8; 65]),
+    /// The compact signature, the authenticator data and the client data JSON.
+    WebAuthn {
+        compact: [u8; 65],
+        auth_data: Vec<u8>,
+        client_json: String,
+    },
+}
+
+impl Signature {
+    /// Append the packed signature: the variant index, then the signature.
+    pub fn pack_into(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::K1(sig) => {
+                out.push(0);
+                out.extend_from_slice(sig);
+            }
+            Self::R1(sig) => {
+                out.push(1);
+                out.extend_from_slice(sig);
+            }
+            Self::WebAuthn {
+                compact,
+                auth_data,
+                client_json,
+            } => {
+                out.push(2);
+                out.extend_from_slice(compact);
+                bytes_into(out, auth_data);
+                bytes_into(out, client_json.as_bytes());
+            }
+        }
+    }
+}
+
+impl Default for Signature {
+    fn default() -> Self {
+        Self::K1([0; 65])
+    }
+}
+
+/// A `transaction_receipt`. `status` and the packed transaction's `compression` are raw bytes,
+/// so a test can write values a node never would.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Receipt {
+    /// 0 `executed`, 1 `soft_fail`, 2 `hard_fail`, 3 `delayed`, 4 `expired`.
+    pub status: u8,
+    pub cpu_usage_us: u32,
+    /// Packed as a varuint32.
+    pub net_usage_words: u32,
+    pub trx: ReceiptTrx,
+}
+
+impl Receipt {
+    /// Append the packed receipt.
+    pub fn pack_into(&self, out: &mut Vec<u8>) {
+        out.push(self.status);
+        out.extend_from_slice(&self.cpu_usage_us.to_le_bytes());
+        varuint32_into(out, self.net_usage_words as usize);
+        match &self.trx {
+            ReceiptTrx::Id(id) => {
+                out.push(0);
+                out.extend_from_slice(id);
+            }
+            ReceiptTrx::Packed {
+                signatures,
+                compression,
+                packed_context_free_data,
+                packed_trx,
+            } => {
+                out.push(1);
+                varuint32_into(out, signatures.len());
+                for sig in signatures {
+                    sig.pack_into(out);
+                }
+                out.push(*compression);
+                bytes_into(out, packed_context_free_data);
+                bytes_into(out, packed_trx);
+            }
+        }
+    }
+}
+
+/// A receipt's `trx`: a transaction id (deferred transactions) or a `packed_transaction`, whose
+/// byte fields are stored as given (zlib-compressed or not, they are never unpacked here).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReceiptTrx {
+    Id([u8; 32]),
+    Packed {
+        signatures: Vec<Signature>,
+        /// 0 `none`, 1 `zlib`.
+        compression: u8,
+        packed_context_free_data: Vec<u8>,
+        packed_trx: Vec<u8>,
+    },
 }
 
 /// `chain_config_v0`, the configuration a genesis state carries.
@@ -200,6 +302,9 @@ pub struct BlockSpec {
     pub header_extensions: Vec<(u16, Vec<u8>)>,
     /// `(type, data)` pairs after the transactions, outside the id.
     pub block_extensions: Vec<(u16, Vec<u8>)>,
+    /// Outside the id, like everything after the header.
+    pub producer_signature: Signature,
+    pub transactions: Vec<Receipt>,
 }
 
 impl BlockSpec {
@@ -239,13 +344,16 @@ impl BlockSpec {
         out
     }
 
-    /// The packed `signed_block`: the header, a K1 `producer_signature` of zeros, no
-    /// transactions, then the block extensions.
+    /// The packed `signed_block`: the header, the `producer_signature` (by default a K1
+    /// signature of zeros), the transaction receipts (by default none), then the block
+    /// extensions.
     pub fn signed_block(&self, previous: &[u8; 32]) -> Vec<u8> {
         let mut out = self.header(previous);
-        out.push(0);
-        out.extend_from_slice(&[0; 65]);
-        out.push(0);
+        self.producer_signature.pack_into(&mut out);
+        varuint32_into(&mut out, self.transactions.len());
+        for receipt in &self.transactions {
+            receipt.pack_into(&mut out);
+        }
         extensions_into(&mut out, &self.block_extensions);
         out
     }

@@ -28,7 +28,8 @@
 //! reader), `shiplog` and `blocklog` (index-addressed log readers), `catalog` (file discovery
 //! and contiguous per-kind catalogs) and `protocol` (request decoding, status and result
 //! encoding, the vendored Spring SHiP ABI). Feature `testkit` adds `testkit`, synthetic
-//! fixture writers for tests.
+//! fixture writers for tests. Feature `chain-api` adds `chainapi`, the nodeos-compatible
+//! `/v1/chain` block endpoint bodies rendered from stored blocks.
 
 pub mod abi;
 #[cfg(feature = "archive")]
@@ -38,6 +39,8 @@ pub mod blocklog;
 pub mod blocks;
 #[cfg(feature = "archive")]
 pub mod catalog;
+#[cfg(feature = "chain-api")]
+pub mod chainapi;
 pub mod delta;
 pub mod disk;
 #[cfg(feature = "archive")]
