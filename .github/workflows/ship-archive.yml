@@ -28,3 +28,7 @@ jobs:
       # The core's archive readers, protocol codec and fixture writers (off by default).
       - run: cargo clippy --locked --package hyperion-ship --features archive,testkit --all-targets -- -D warnings
       - run: cargo test --locked --package hyperion-ship --features archive,testkit
+      # The server, with its in-process conformance tests.
+      - run: cargo clippy --locked --package antelope-ship-archive --all-targets -- -D warnings
+      - run: cargo test --locked --package antelope-ship-archive
+      - run: cargo build --release --locked --package antelope-ship-archive
