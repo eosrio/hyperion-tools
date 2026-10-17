@@ -1,0 +1,6 @@
+HTTP/1.0 400 Bad Request
+Content-Type: application/json
+Server: nodeos/v1.2.2
+Content-Length: 119
+
+{"code":400,"message":"Disallowed HTTP HOST header in the request","error":{"code":0,"name":"","what":"","details":[]}}

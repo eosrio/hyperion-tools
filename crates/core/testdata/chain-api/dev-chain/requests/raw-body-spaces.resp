@@ -1,0 +1,6 @@
+HTTP/1.1 400 Bad Request
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 245
+
+{"code":400,"message":"Invalid Request","error":{"code":3200006,"name":"invalid_http_request","what":"invalid http request","details":[{"message":"A Request body is required","file":"http_plugin.hpp","line_number":257,"method":"parse_params"}]}}

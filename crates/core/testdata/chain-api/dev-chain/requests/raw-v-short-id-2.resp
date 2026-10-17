@@ -1,0 +1,6 @@
+HTTP/1.1 400 Bad Request
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 258
+
+{"code":400,"message":"Unknown Block","error":{"code":3100002,"name":"unknown_block_exception","what":"Unknown block","details":[{"message":"Could not find block: 000000028c612a444cce","file":"chain_plugin.cpp","line_number":1966,"method":"get_raw_block"}]}}

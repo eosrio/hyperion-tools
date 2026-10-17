@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 998
+
+{"id":"00000026e73fc80743ad0a15a2eab29e3ebc194498d3967d70bf344f4f25430e","signed_block_header":{"timestamp":"2026-10-17T13:38:40.000","producer":"eosio","confirmed":0,"previous":"000000250b8e44794e4227903a312ad38a8d184cd1e82d1f91d8a534a49dc280","transaction_mroot":"989370dcabde86b34d460553daf71d70da3d61cdec7cc4aa27a67c92d14a019a","action_mroot":"7e68e1f07cdff7024cb13314f9be5c7e00ebf3be02fb032701615d857325fca6","schedule_version":0,"header_extensions":[[0,"06fce57d2331667353a0eac6b4209b67b843a7262a848af0a49a6e2fa9f6584eb41a99a59d87e06e09ec5b028a9cbb7749b4a5ad8819004365d02dc4379a8b72412652f5f96006294109b3dd0bbde63693f55324af452b799ee137a81a905eed25299dcb6af692324b899b39f16d5a530a33062804e41f09dc97e9f156b447670735c2186cc36f7bb4aeaf4487b36e57039ccf45a9136aa856a5d569ecca55ef2bef43112c6543b88db2283a2e077278c315ae2c84719a8b25f25cc88565fbea99"]],"producer_signature":"SIG_K1_KZdAvc6ACAwSaUHYpeNVrHjgTwUS9TPJUfLam91WjpVEzuh2sunbLQJHj3sZaxwyCoKMj1NNPfW8CtvxN33NThbANn2vj3"},"block_extensions":[]}

@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 951
+
+{"timestamp":"2026-10-17T13:38:44.000","producer":"eosio","confirmed":0,"previous":"0000002df69e8331e39f2d597076bdd1f5afa442529d542df4bbd0b6aab7f181","transaction_mroot":"2d1dec50506311e628e44ca96a1d1c7d22e277826d7f40966176f7f1596cd94a","action_mroot":"edfe7d8760c3ef0b9835e0ccb974b9c4d478e692dd590b318237d9c80b5505be","schedule_version":0,"header_extensions":[],"producer_signature":"SIG_K1_K14ruRA6Mw7A2TMccfdutz85dfhSUZ3P4GqR73NsvLYh4RtKXtiSyTho3xAudXTLzN4G4Hu2UT1pPWtEMTsUNahRyG8ByV","transactions":[{"status":"executed","cpu_usage_us":140,"net_usage_words":16,"trx":[1,{"signatures":["SIG_K1_KYhkEGEcK5ry4Jtmeq7K78uH7tXspVeu2PMeXS3eqWgyNH8k63Dt4oEoAqnCEzrrScz11SMBdTtiJ89irYKPxUiiudrBR9"],"compression":"none","packed_context_free_data":"","packed_trx":"817ad36a2c009fffcf4200000000010000000000ea30550000002a9bed3232010000000000ea305500000000a8ed323220cbe0fafc8fcc6cc998395e9b6de6ebd94644467b1b4a97ec126005df07013c5200"}]}],"block_extensions":[]}

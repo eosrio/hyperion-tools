@@ -1,0 +1,5 @@
+POST /v1/chain/get_block_header HTTP/1.1
+Host: 127.0.0.1
+Content-Length: 112
+
+{"block_num_or_id":"000000028c612a444cce643e33018ba150837634c28d5bf7938899bdb4ca8620","include_extensions":true}

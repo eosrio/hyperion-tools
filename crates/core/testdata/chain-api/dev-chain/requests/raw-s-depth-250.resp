@@ -1,0 +1,6 @@
+HTTP/1.1 400 Bad Request
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 261
+
+{"code":400,"message":"Invalid Request","error":{"code":3200006,"name":"invalid_http_request","what":"invalid http request","details":[{"message":"Unable to parse valid input from POST body","file":"http_plugin.hpp","line_number":278,"method":"parse_params"}]}}
