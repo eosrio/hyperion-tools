@@ -1145,6 +1145,7 @@ dependencies = [
  "hex",
  "rs_abieos",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tokio-tungstenite",
 ]

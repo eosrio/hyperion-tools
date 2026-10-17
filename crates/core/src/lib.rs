@@ -22,11 +22,30 @@
 //!     (tags malformed on-chain ABIs with `abi_decode_error`).
 //!   * [`disk`]  — the parallel direct-from-disk reader.
 //!   * [`ship`]  — the SHiP websocket scanner.
+//!
+//! Feature `archive` adds the strict, fail-closed pieces for serving frozen logs over the
+//! SHiP protocol: `binio` (positional reads, the open-file LRU, the fc-compatible byte
+//! reader), `shiplog` and `blocklog` (index-addressed log readers), `catalog` (file discovery
+//! and contiguous per-kind catalogs) and `protocol` (request decoding, status and result
+//! encoding, the vendored Spring SHiP ABI). Feature `testkit` adds `testkit`, synthetic
+//! fixture writers for tests.
 
 pub mod abi;
+#[cfg(feature = "archive")]
+pub mod binio;
+#[cfg(feature = "archive")]
+pub mod blocklog;
 pub mod blocks;
+#[cfg(feature = "archive")]
+pub mod catalog;
 pub mod delta;
 pub mod disk;
+#[cfg(feature = "archive")]
+pub mod protocol;
 #[cfg(feature = "ship")]
 pub mod ship;
+#[cfg(feature = "archive")]
+pub mod shiplog;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 pub mod trace;

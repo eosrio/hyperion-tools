@@ -26,6 +26,8 @@ mongodb = "3.7"
 # TOML config parsing for the light-api server.
 toml = "0.8"
 flate2 = "1"
+# Block-log chain ids (sha256 of the genesis state) in the core `archive` feature. Pure Rust.
+sha2 = "0.10"
 minreq = { version = "2", default-features = false }
 tiny_http = "0.12"
 # Streaming HTTP GET (blocking, rustls — no OpenSSL/C toolchain, matches ruzstd's pure-Rust stance).
