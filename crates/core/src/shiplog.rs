@@ -335,9 +335,16 @@ impl ShipLog {
         let mut step = match h.uncompressed() {
             Some(size) => {
                 self.check_limit(h, size, limit)?;
-                let size = usize::try_from(size)?;
-                out.reserve_exact(size);
-                size
+                // A corrupt size the limit lets through must fail, not abort the process.
+                usize::try_from(size)
+                    .ok()
+                    .filter(|&size| out.try_reserve_exact(size).is_ok())
+                    .with_context(|| {
+                        format!(
+                            "{}: no room for the {size} bytes its header declares",
+                            self.entry(h)
+                        )
+                    })?
             }
             None => usize::try_from(h.data_len().saturating_mul(4))
                 .unwrap_or(usize::MAX)
@@ -367,9 +374,11 @@ impl ShipLog {
         let mut scratch_len = COUNT_SCRATCH as u64;
         if let Some(size) = h.uncompressed() {
             self.check_limit(h, size, limit)?;
-            scratch_len = scratch_len.min(size + 1);
+            // Saturating: a corrupt size of u64::MAX must not wrap the scratch to nothing.
+            scratch_len = scratch_len.min(size.saturating_add(1));
         }
-        let mut scratch = vec![0; scratch_len.min(limit.saturating_add(1)) as usize];
+        // Never empty: inflating into an empty buffer makes no progress (and is refused).
+        let mut scratch = vec![0; scratch_len.min(limit.saturating_add(1)).max(1) as usize];
         let mut s = self.stream(h)?;
         while !s.done {
             s.inflate(&mut scratch)?;
@@ -603,11 +612,13 @@ impl InflateStream {
             Some(e) => max.min(usize::try_from(e.saturating_sub(self.produced())).unwrap_or(max)),
             None => max,
         };
-        let start = out.len();
-        out.resize(start + room, 0);
-        let r = self.inflate(&mut out[start..]);
-        out.truncate(start + r.as_ref().map_or(0, |&n| n));
-        r?;
+        if room > 0 {
+            let start = out.len();
+            out.resize(start + room, 0);
+            let r = self.inflate(&mut out[start..]);
+            out.truncate(start + r.as_ref().map_or(0, |&n| n));
+            r?;
+        }
         if !self.done && self.expected == Some(self.produced()) {
             // Every declared byte is out, so the stream must end without another one.
             self.inflate(&mut [0])?;
@@ -615,11 +626,18 @@ impl InflateStream {
         Ok(!self.done)
     }
 
-    /// Inflate into `buf` until it is full or the stream ends; returns the bytes written.
+    /// Inflate into `buf` until it is full or the stream ends; returns the bytes written. Until
+    /// the stream ends `buf` must not be empty: such a call could make no progress, and a
+    /// caller looping until the end would spin forever.
     fn inflate(&mut self, buf: &mut [u8]) -> Result<usize> {
         ensure!(
             !self.failed,
             "{}: an earlier read of this entry failed",
+            self.what()
+        );
+        ensure!(
+            self.done || !buf.is_empty(),
+            "{}: no room to inflate the payload into",
             self.what()
         );
         let r = self.pump(buf);
@@ -1255,6 +1273,77 @@ mod tests {
                     "{e}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_declared_size_of_u64_max_fails_closed() {
+        // A size field reading u64::MAX over an otherwise valid stream, stored and deflated.
+        let dir = TestDir::new("shiplog-max-size");
+        let raw = synthetic_payload(3, 1000);
+        let mut b = LogBuilder::new(Encoding::SizedStored);
+        b.push_encoded(
+            synthetic_id(2, 0),
+            &kit::sized_payload(u64::MAX, &kit::zlib_stored(&raw)),
+        );
+        b.push_encoded(
+            synthetic_id(3, 0),
+            &kit::sized_payload(u64::MAX, &kit::zlib_deflate(&raw)),
+        );
+        let log = Arc::new(open(&dir, &b));
+        let want = "inflates to 1000 bytes, its header declares 18446744073709551615";
+        for n in [2, 3] {
+            let h = log.header(n).unwrap();
+            assert_eq!(h.uncompressed(), Some(u64::MAX));
+            // Counting with the declared size as the limit (a payload to stream) and with no
+            // limit (a deep check) must end, not spin: on a thread, so a regression fails
+            // here instead of hanging the run.
+            for limit in [u64::MAX, u64::MAX - 1] {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let counting = Arc::clone(&log);
+                std::thread::spawn(move || {
+                    let _ = tx.send(
+                        counting
+                            .verify_count(&h, limit)
+                            .map_err(|e| format!("{e:#}")),
+                    );
+                });
+                let r = rx
+                    .recv_timeout(std::time::Duration::from_secs(20))
+                    .unwrap_or_else(|_| panic!("block {n}: verify_count spins"));
+                let e = r.expect_err("a size the stream does not have");
+                if limit == u64::MAX {
+                    assert!(e.contains(want) && e.contains(&format!("block {n}")), "{e}");
+                } else {
+                    assert!(
+                        e.contains("over the 18446744073709551614-byte limit"),
+                        "{e}"
+                    );
+                }
+            }
+            let e = err(log.read_inline(&h, u64::MAX, &mut Vec::new()));
+            assert!(e.contains(&format!("block {n} at offset")), "{e}");
+            assert!(err(log.read_inline(&h, 1 << 20, &mut Vec::new())).contains("over the"));
+            assert!(stream_error(&log, &h, 1 << 16).0.contains(want));
+        }
+    }
+
+    #[test]
+    fn a_stream_never_inflates_into_an_empty_buffer() {
+        let dir = TestDir::new("shiplog-empty-buffer");
+        let log = open(&dir, &chain(Encoding::SizedStored, 2..4, 1000));
+        let mut s = log.stream(&log.header(2).unwrap()).unwrap();
+        let e = format!("{:#}", s.inflate(&mut []).unwrap_err());
+        assert!(e.contains("no room to inflate"), "{e}");
+        // An empty payload still ends, with nothing to write: a Type A one even when asked for
+        // no bytes at all, as every declared byte is already out.
+        let dir = TestDir::new("shiplog-empty-payload");
+        for encoding in Encoding::ALL {
+            let log = open(&dir, &chain(encoding, 2..3, 0));
+            let h = log.header(2).unwrap();
+            let max = usize::from(h.uncompressed().is_none());
+            assert_eq!(chunks(&log, &h, max), [Vec::<u8>::new()]);
+            assert_eq!(log.verify_count(&h, 0).unwrap(), 0);
         }
     }
 

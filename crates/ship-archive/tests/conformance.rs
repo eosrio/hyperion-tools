@@ -5,6 +5,7 @@
 
 mod common;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::*;
@@ -14,6 +15,8 @@ use hyperion_ship::shiplog::LogKind;
 use hyperion_ship::testkit::ship::{Encoding, LogBuilder, synthetic_id};
 use hyperion_ship::testkit::{FileName, SyntheticChain};
 use ship_archive::SERVER_HEADER;
+use ship_archive::check::{self, CheckConfig, WARN_ENTRY_BYTES};
+use ship_archive::fetch::{FetchLimits, Flags, Job};
 use ship_archive::store::{BlocksMode, Store, StoreConfig};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -627,6 +630,70 @@ async fn t13_a_corrupt_streamed_entry_is_caught_before_its_first_frame() {
         let frames = raw.message().await.expect("a result");
         assert_eq!(joined(&frames), model.result(n, &req), "block {n}");
     }
+}
+
+/// Block `n`'s v0 result with traces and, if `block`, the block.
+fn job(n: u32, block: bool) -> Job {
+    Job {
+        generation: 1,
+        n,
+        v1: false,
+        flags: Flags {
+            block,
+            traces: true,
+            deltas: false,
+            finality: false,
+        },
+    }
+}
+
+/// `f` on a thread of its own, which must return within [`WAIT`]: a regression that spins
+/// fails the test instead of hanging the run.
+fn within<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(WAIT).expect("returned in time")
+}
+
+#[test]
+fn t13_a_size_field_of_u64_max_fails_the_read_instead_of_spinning() {
+    // Block 5's trace entry declares u64::MAX bytes over an intact stream.
+    let fx = Fixture::new(SyntheticChain::new(2, 10));
+    let dir = fx.dir("node");
+    let mut trace = fx
+        .chain
+        .ship_log(LogKind::Trace, 2..12, Encoding::SizedStored);
+    let at = trace.position(5) as usize + 52;
+    trace.log_mut()[at..at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+    trace.write(&dir, "trace_history").unwrap();
+    fx.chain.write_blocks(&dir, 2..12, FileName::Head).unwrap();
+    let declared = format!("its header declares {}", u64::MAX);
+
+    let store = Arc::new(Store::open(&fx.store()).unwrap().0);
+    let limits = FetchLimits {
+        stream_threshold: 4 << 20,
+    };
+    for (n, block) in [(4, true), (5, true), (5, false)] {
+        let (s, l) = (Arc::clone(&store), limits);
+        let built = within(move || s.build(&job(n, block), &l).map(|_| ()));
+        if n == 4 {
+            built.expect("block 4");
+        } else {
+            let msg = format!("{:#}", built.expect_err("refused"));
+            assert!(msg.contains(&declared) && msg.contains("block 5"), "{msg}");
+        }
+    }
+    let cfg = CheckConfig {
+        store: fx.store(),
+        deep: true,
+        hash: false,
+        warn_entry_bytes: WARN_ENTRY_BYTES,
+    };
+    let report = within(move || check::check(&cfg));
+    assert_eq!(report.error_count(), 1, "{}", report.text());
+    assert!(report.errors[0].contains(&declared), "{}", report.text());
 }
 
 // --- T14: capacity ------------------------------------------------------------------------
