@@ -185,7 +185,7 @@ Each connection is a replica of a Spring 1.x SHiP session (`session.hpp`):
 |---|---|---|
 | head, `last_irreversible` | always | `{L*, id(L*)}` |
 | `this_block` | block `n`'s id is known | the entry header of the first served log holding `n` (trace, then chain_state, then finality), else block `n + 1`'s `previous` in the served block log |
-| `prev_block` | block `n − 1`'s id is known | the same, for `n − 1`; for the first served block, the block log's `previous` |
+| `prev_block` | block `n − 1`'s id is known (never for block 1: there is no block 0) | the same, for `n − 1`; for the first served block, the block log's `previous` |
 | `block` | `fetch_block`, `this_block` known, and the block log serves `n` | the stored `signed_block`, as Spring sends it |
 | `traces`, `deltas`, `finality_data` | requested (`finality_data` only for a v1 request with `fetch_finality_data`), and `n` in that log's served range | the inflated entry payload, unchanged |
 
@@ -560,14 +560,22 @@ and empty files):
 - `tests/offline.rs` covers `check` (exit codes, large entries, `--deep`, `--hash`, through
   the binary), `index` (an index pointing at fork leftovers, rebuilt and then served), and
   `abi`.
+- `tests/real_slices.rs` serves the real EOS and WAX entries of `crates/core/testdata/`, each
+  as a one-entry log, inline and streamed, as v0 and v1 results, and the real EOS block under
+  the id its header hashes to, all byte for byte. Its ignored tests read a copy of a node's
+  logs from outside the repository: byte-for-byte runs against the strict readers, a
+  full-speed run, `--range` seams, the full-state first entry and `check --deep`, plus a
+  differential test that requires every result to equal a running node's but for head and
+  LIB. [testdata/README.md](testdata/README.md) says how to run them.
 
 The core's strict readers are tested on their own with fault injection (torn tails, wrong
 indexes, bad checksums, pruned and unsupported formats) and on real EOS and WAX entries and a
 real EOS block from `crates/core/testdata/`.
 
-**Not covered yet:** end-to-end runs over real Spring logs and a byte-for-byte comparison with
-a running node. Until then, run `check --deep` on your copies and compare some results with a
-node holding the same blocks.
+The ignored tests need logs and a node that CI does not have. The differential test has been
+run against a Spring 1.2 node over a copy of its logs (v0 and v1, the full range, a `--range`
+slice, and `--blocks none`). Before relying on a server, run `check --deep` on your copies and,
+where you can, the differential test against a node holding the same blocks.
 
 ## Development
 

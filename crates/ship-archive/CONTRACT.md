@@ -21,7 +21,8 @@ For one server:
 - `id(n)` is block `n`'s id, when the server knows it: from the entry header of the first
   served state-history log holding `n` (trace, then chain_state, then finality), else as
   block `n + 1`'s `previous` in the served block log. Every id read from an entry header has
-  `num(id) == n`.
+  `num(id) == n`. There is no block 0: `id(0)` is never known, so block 1 never has a
+  `prev_block`, as on a Spring node.
 
 None of these change while the server runs.
 
