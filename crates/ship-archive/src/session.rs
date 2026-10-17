@@ -412,8 +412,10 @@ where
 }
 
 /// Spring's `have_positions` rule: every position below the (possibly already lowered) start
-/// whose id this server does not know, or knows differently, moves the start back to it. The
-/// positions are then dropped. Ids are read on the io threads.
+/// whose id this server does not know, or knows differently, moves the start back to it. Known
+/// ids include the block just below a served range, which its first block names as its
+/// `prev_block` ([`Store::named_id`]). The positions are then dropped. Ids are read on the io
+/// threads.
 async fn apply_positions(store: &Arc<Store>, io: &Io, req: &mut BlocksReq) -> anyhow::Result<()> {
     let positions = std::mem::take(&mut req.have_positions);
     let start = req.start;
@@ -425,7 +427,7 @@ async fn apply_positions(store: &Arc<Store>, io: &Io, req: &mut BlocksReq) -> an
         .run(move || -> anyhow::Result<u32> {
             let mut start = start;
             for p in &positions {
-                if p.num < start && store.id(p.num)? != Some(p.id) {
+                if p.num < start && store.named_id(p.num)? != Some(p.id) {
                     start = p.num;
                 }
             }

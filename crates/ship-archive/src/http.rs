@@ -175,7 +175,8 @@ pub(crate) fn health(state: &State) -> Value {
 }
 
 /// The first served block as JSON: `{num, prev_block}`, `prev_block` being `{num, id}` or
-/// `null` (block 1, or no open log names the block before it: [`Store::unlinked`]).
+/// `null` (block 1, or no open log names the block before it, or one that does cannot be read:
+/// [`Store::unlinked`]).
 pub(crate) fn first_json(first: First) -> Value {
     let prev = first
         .prev

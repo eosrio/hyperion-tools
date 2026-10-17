@@ -6,12 +6,15 @@
 //! with every file ending at the seam) or each holds a copy of its own range with its block log.
 //! A copy without block logs has no file naming the block before its first: startup warns,
 //! `check` and `/health` say so, and that one result lacks its `prev_block`. Where several files
-//! name that block, they must agree.
+//! name that block, they must agree; with `--verify-ids off` only the one giving its id is
+//! read, and one that cannot be read is skipped with a warning. A `have_positions` entry naming
+//! that block is one the server knows.
 
 mod common;
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use common::*;
@@ -416,4 +419,189 @@ fn files_below_the_range_that_do_not_line_up_are_set_aside() {
         let msg = format!("{:#}", Store::open(&cfg).err().expect("refused"));
         assert!(msg.contains("overlaps"), "{msg}");
     }
+}
+
+/// Point block `n`'s slot in `index`, of a file whose first block is `first`, at the entry of
+/// that first block: damage only a read of block `n` finds, as a strict open checks the last
+/// slot alone.
+fn misdirect(index: &Path, first: u32, n: u32) {
+    let mut slots = std::fs::read(index).unwrap();
+    let at = ((n - first) * 8) as usize;
+    let to: [u8; 8] = slots[..8].try_into().unwrap();
+    slots[at..at + 8].copy_from_slice(&to);
+    std::fs::write(index, slots).unwrap();
+}
+
+#[test]
+fn verify_ids_off_reads_below_the_range_only_what_gives_the_prev_block() {
+    // Block 69 cannot be read from the trace log nor from the block log; chain_state is whole.
+    let fx = Fixture::new(chain());
+    let dir = fx.dir("node");
+    fx.ship(&dir, LogKind::Trace, 2..END, Encoding::SizedStored);
+    fx.ship(&dir, LogKind::ChainState, 2..END, Encoding::SizedDeflate);
+    let block_log = fx.chain.write_blocks(&dir, 2..END, FileName::Head).unwrap();
+    misdirect(&dir.join("trace_history.index"), 2, 69);
+    misdirect(&block_log.index, 2, 69);
+    let config = |blocks: bool, verify_ids| {
+        let mut cfg = mode(fx.store(), blocks, &fx.chain);
+        cfg.range = Some((70, END));
+        cfg.verify_ids = verify_ids;
+        cfg
+    };
+    let open = |blocks, verify_ids| Store::open(&config(blocks, verify_ids)).map(|(s, _)| s);
+    // Checked, every file naming block 69 is read, and one that cannot be refuses startup.
+    for blocks in [true, false] {
+        let msg = format!(
+            "{:#}",
+            open(blocks, VerifyIds::Seams).err().expect("refused")
+        );
+        assert!(
+            msg.contains("trace_history") && msg.contains("block 69"),
+            "{msg}"
+        );
+    }
+    // Unchecked, the served block log names block 69 as block 70's `previous`: nothing below
+    // the range is read.
+    let store = open(true, VerifyIds::Off).expect("the store opens");
+    assert_eq!(store.first, linked(&fx.chain, 70));
+    assert_eq!(store.unlinked(), Vec::<String>::new());
+    // Without block logs, the trace entry is skipped with a warning and chain_state names it.
+    let skipped = "--verify-ids off: a file naming block 69, the prev_block of block 70, cannot \
+                   be read and is skipped: ";
+    let store = open(false, VerifyIds::Off).expect("the store opens");
+    assert_eq!(store.first, linked(&fx.chain, 70));
+    let warnings = store.unlinked();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with(skipped) && warnings[0].contains("trace_history"),
+        "{warnings:?}"
+    );
+
+    // When the damaged file alone names block 69, block 70 gets no prev_block: startup and
+    // `check` warn, and nothing is refused.
+    std::fs::remove_file(dir.join("chain_state_history.log")).unwrap();
+    std::fs::remove_file(dir.join("chain_state_history.index")).unwrap();
+    let store = open(false, VerifyIds::Off).expect("the store opens");
+    assert_eq!(
+        store.first,
+        First {
+            num: 70,
+            prev: None
+        }
+    );
+    let warnings = store.unlinked();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[0].starts_with(skipped), "{warnings:?}");
+    assert!(
+        warnings[1].starts_with(
+            "block 70, the first served, gets no prev_block: a file naming block 69 cannot be \
+             read"
+        ),
+        "{warnings:?}"
+    );
+    let report = check::check(&CheckConfig {
+        store: config(false, VerifyIds::Off),
+        deep: false,
+        hash: false,
+        warn_entry_bytes: WARN_ENTRY_BYTES,
+    });
+    assert_eq!(report.error_count(), 0, "{}", report.text());
+    assert_eq!(report.warnings, warnings);
+
+    // A served block log whose `previous` of block 70 cannot be read is skipped the same way;
+    // only serving block 70 fails then.
+    let fx = Fixture::new(chain());
+    let dir = fx.dir("node");
+    fx.ship(&dir, LogKind::Trace, 2..END, Encoding::SizedStored);
+    let block_log = fx.chain.write_blocks(&dir, 2..END, FileName::Head).unwrap();
+    misdirect(&block_log.index, 2, 70);
+    let mut cfg = fx.store();
+    cfg.range = Some((70, END));
+    let msg = format!("{:#}", Store::open(&cfg).err().expect("refused"));
+    assert!(msg.contains("block 70"), "{msg}");
+    cfg.verify_ids = VerifyIds::Off;
+    let store = Store::open(&cfg).expect("the store opens").0;
+    assert_eq!(store.first.prev, None);
+    let warnings = store.unlinked();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with(skipped) && warnings[0].contains("blocks.log"),
+        "{warnings:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_position_at_the_block_before_the_range_is_one_the_server_knows() {
+    // The split server names block 69 as block 70's prev_block, so a client resuming with
+    // that position starts at 70, as on one server over all the logs and on a node.
+    let fx = Fixture::new(chain());
+    let dir = fx.dir("node");
+    fx.ship(&dir, LogKind::Trace, 2..END, Encoding::SizedStored);
+    fx.ship(&dir, LogKind::ChainState, 2..END, Encoding::SizedDeflate);
+    let whole = start(serve_config(mode(fx.store(), false, &fx.chain))).await;
+    let mut cfg = mode(fx.store(), false, &fx.chain);
+    cfg.range = Some((70, END));
+    let split = start(serve_config(cfg)).await;
+    let request = |id| {
+        let mut req = fetch_all(blocks(70, 72, 2));
+        req.have_positions = vec![BlockPos { num: 69, id }];
+        Request::Blocks(req)
+    };
+    let (mut a, mut b) = (connect(&split).await, connect(&whole).await);
+    send(&mut a, &request(fx.chain.id(69))).await;
+    send(&mut b, &request(fx.chain.id(69))).await;
+    for n in 70..72 {
+        let (got, want) = (recv_binary(&mut a).await, recv_binary(&mut b).await);
+        assert_eq!(this_block(&got), Some(n));
+        same_but_head(&format!("block {n}"), &got, &want);
+    }
+    quiet(&mut a).await;
+    // Another id for block 69 still moves the start back to it.
+    send(&mut a, &request(synthetic_id(69, 3))).await;
+    let got = recv_binary(&mut a).await;
+    assert_eq!(this_block(&got), None, "block 69 is not served");
+    assert_eq!(this_block(&recv_binary(&mut a).await), Some(70));
+    quiet(&mut a).await;
+}
+
+#[test]
+fn a_history_from_block_2_needs_no_prev_block_for_it() {
+    // Block 1, the genesis block, is in no state-history log, and no server sends it: without
+    // block logs, block 2 has no prev_block, and that is no warning.
+    let fx = Fixture::new(chain());
+    let dir = fx.dir("node");
+    fx.ship(&dir, LogKind::Trace, 2..END, Encoding::SizedStored);
+    fx.ship(&dir, LogKind::ChainState, 2..END, Encoding::SizedDeflate);
+    let store = mode(fx.store(), false, &fx.chain);
+    assert_eq!(first(&store), First { num: 2, prev: None });
+    let report = check::check(&CheckConfig {
+        store,
+        deep: false,
+        hash: false,
+        warn_entry_bytes: WARN_ENTRY_BYTES,
+    });
+    assert_eq!(report.warning_count(), 0, "{}", report.text());
+    assert_eq!(report.exit_code(true), 0);
+    assert!(
+        report.text().contains("first block   2, no prev_block"),
+        "{}",
+        report.text()
+    );
+}
+
+#[test]
+fn a_range_past_the_logs_is_refused_naming_no_file_kept_below_it() {
+    // Every log ends at block 120, so the files holding it are kept for --range 121-200: they
+    // hold no block of the range, and the refusal says so rather than naming them.
+    let fx = shared(false);
+    let mut cfg = mode(fx.store(), false, &fx.chain);
+    cfg.range = Some((END, 200));
+    let msg = format!("{:#}", Store::open(&cfg).err().expect("refused"));
+    assert!(
+        msg.starts_with(
+            "no state-history log (trace_history, chain_state_history or finality_data_history) \
+             holds a block of --range in "
+        ),
+        "{msg}"
+    );
 }

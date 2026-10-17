@@ -479,7 +479,7 @@ fn log_store(store: &Store, findings: &[Finding], cfg: &ServeConfig) {
     for warning in store.uncovered(&cfg.store) {
         warn!("{warning}");
     }
-    if let Some(warning) = store.unlinked() {
+    for warning in store.unlinked() {
         warn!("{warning}");
     }
     for finding in findings {

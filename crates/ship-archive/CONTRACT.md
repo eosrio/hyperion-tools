@@ -62,6 +62,8 @@ None of these change while the server runs.
      `start_block_num`.
    - `have_positions`: in the order given, each position below the current start whose id is
      unknown or different lowers the start to that position. The positions are then dropped.
+     Known ids are `id(n)` and the ids `prev_block` names (rule 6), as Spring checks the
+     positions with the ids it fills `prev_block` from.
    - An ack does `credit = credit.wrapping_add(n)`.
    - Send while `credit > 0 && cursor <= L* && cursor < end`; each result costs one credit and
      advances the cursor by one. `irreversible_only` changes nothing, as head = LIB.
@@ -78,9 +80,13 @@ None of these change while the server runs.
      the block log's `previous` of `n`, or the hash of block `n − 1`'s header in the block
      log. With `--blocks required` the block log always names it. With
      `--verify-ids seams` every such file must give the same id, or the server refuses to
-     start. When no file names it (`--blocks none` over files that begin at `n`), that one
-     result lacks its `prev_block`: startup logs a warning, and `check` and `/health`
-     (`first.prev_block: null`) report it.
+     start. With `--verify-ids off` only what gives the id is read: nothing below the range
+     when the served block log names it, else the files in Spring's order up to the first
+     that can be read, one that cannot being skipped with a startup warning. When no file
+     names it (`--blocks none` over files that begin at `n`), that one result lacks its
+     `prev_block`: startup logs a warning, and `check` and `/health`
+     (`first.prev_block: null`) report it. Nothing warns for block 2: block 1, the genesis
+     block, is in no state-history log, so no server sends it before block 2.
    - `block` iff `fetch_block`, `this_block` is present and `n ∈ B`: the stored
      `signed_block`, with a varuint32 length. Its `previous` is `prev_block`'s id, and its
      header hashes to `this_block`'s id.
@@ -153,8 +159,9 @@ for as long as the server runs.
 - `max_messages_in_flight` may be 0, and acks may come later. A new request on an idle
   connection reuses it.
 - `have_positions` is evaluated against this server's ids only. A position for a block it
-  does not know (outside `I` and `B`) moves the start back to that block, as on a node that
-  lacks it, so send `[]` unless the positions are about blocks the server holds.
+  does not know (outside `I` and `B`, but for the block before a served range that its first
+  block names as `prev_block`) moves the start back to that block, as on a node that lacks
+  it, so send `[]` unless the positions are about blocks the server holds.
 - Close a finished or abandoned connection with Close 1000.
 - Several servers over copies of the same blocks, with the same `--abi`, send identical bytes:
   they are replicas.
@@ -180,7 +187,7 @@ for as long as the server runs.
   else), where a node holding the same block log would send no id.
 - **Without block logs** (`--blocks none`), the first served block has no `prev_block` when
   no state-history file holds the block before it, where a node would name it from its
-  block log. Startup warns.
+  block log. Startup warns, unless that block is block 2.
 - **Limits:** at most 1024 queued status requests, requests up to `--max-request-bytes`, and
   10 s for the upgrade. Each drops the connection without a Close frame.
 - **Close 1001 at shutdown**, after the message each session is writing.

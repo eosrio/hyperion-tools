@@ -62,7 +62,8 @@ What they check:
     of at most 1 MiB, and `--range` leaves it out.
 - `real_logs_pass_a_deep_check`: `check --deep` (with `--hash` when block logs are there) finds
   nothing, reads every served entry and block, and reports its rate. Without block logs the
-  warning that the first served block gets no `prev_block` is expected.
+  warning that the first served block gets no `prev_block` is expected, unless the logs begin
+  at block 2.
 
 ## Differential test against a node
 

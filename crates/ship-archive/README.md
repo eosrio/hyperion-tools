@@ -149,7 +149,9 @@ a message naming the file and what to do.
    entry headers, and the block log (block `n + 1`'s `previous`, or at the end of what it
    serves, the hash of block `n`'s header). The block just below each served range, which
    the range's first block names as its `prev_block`, must have one id in every open file
-   holding it, served or not.
+   holding it, served or not. With `--verify-ids off` none of this is checked, and that block
+   is read only where its id comes from: a file that cannot be read there is skipped with a
+   warning instead of refusing startup.
 6. **Status.** head and LIB are both `{L*, id(L*)}`, the ranges are the served ones, and the
    chain id comes from the block logs (or `--chain-id`). Both status replies are encoded once.
 
@@ -162,6 +164,8 @@ Each connection is a replica of a Spring 1.x SHiP session (`session.hpp`):
 - Requests are decoded with fc's leniency. A `get_blocks` request replaces the current one,
   credit and cursor included, after Spring's `have_positions` rule moves its start back to
   the lowest listed block below it whose id this server does not know or knows differently.
+  The block before the first served one counts as known when a file names it, as the first
+  result names it as `prev_block`.
   An ack adds to the credit and wraps at 32 bits, as Spring's plain addition does.
 - Status requests are answered first and cost no credit. Then one block is sent while
   `credit > 0 && cursor <= L* && cursor < end`. Each block costs a credit and advances the
@@ -233,7 +237,9 @@ served block its `prev_block`, and it is what startup checks the state-history i
 Without it, only a state-history file holding the block before the first served one names
 that block: startup warns when none does, and `/health` reports `first.prev_block` as `null`,
 since a SHiP-aware router or proxy stitching this server to the one before it then cannot
-check the seam.
+check the seam. A history from genesis is the exception: its first block, 2, follows the
+genesis block, which is in no state-history log and which no server sends, so there is no
+seam to check and no warning.
 
 **Plan disk space so that each archive server holds the block log for its whole range**,
 lined up with its state-history files.
@@ -575,7 +581,9 @@ and empty files):
   without block logs, and requires every result of each server to equal one server's over
   all the logs but for head and LIB, the first block's `prev_block` included. It also covers
   the copy without block logs whose first block nothing names (the startup warning, `check`
-  and `/health`), and files that disagree on the block before a range.
+  and `/health`), files that disagree on the block before a range, `--verify-ids off` over
+  files that cannot be read there, a `have_positions` entry naming that block, and a history
+  from block 2.
 - `tests/real_slices.rs` serves the real EOS and WAX entries of `crates/core/testdata/`, each
   as a one-entry log, inline and streamed, as v0 and v1 results, and the real EOS block under
   the id its header hashes to, all byte for byte. Its ignored tests read a copy of a node's
