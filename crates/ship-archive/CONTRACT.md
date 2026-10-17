@@ -211,8 +211,9 @@ so `L* ∈ B`. `B` can begin below and end above the state-history ranges.
 ### The server MUST
 
 1. **A listener of its own.** Serve the chain API only on the `--api` address, never on
-   `--listen` or `--http`. Refuse to start when `--api` is the `--listen` or the `--http`
-   address, or with `--blocks none`.
+   `--listen` or `--http`. Refuse to start when `--api` takes the port of `--listen` or
+   `--http` (the same port on the same address, or on any address when either is
+   unspecified), or with `--blocks none`.
 2. **Block endpoints.** For every `n ∈ B`, answer `/v1/chain/get_block_info` (by number),
    `/v1/chain/get_block_header` (`include_extensions` false and true) and
    `/v1/chain/get_raw_block` (both by number or by the block's id) byte for byte as nodeos

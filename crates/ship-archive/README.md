@@ -547,17 +547,17 @@ action data with the contracts' ABIs and is left to live nodes.
 
 A block is found when its number is in the served block-log range (cut to `--range`:
 `served.blocks` in `/health`, `blocks` in `describe`), and, asked by id (`get_block_header`
-and `get_raw_block`), when the stored block hashes to that id. Any other block gets nodeos's `400 Unknown Block`. The block-log range can
-be wider than the state-history ranges: a block log from block 1 answers for block 1, which no
-state-history log holds.
+and `get_raw_block`), when the stored block hashes to that id. Any other block gets nodeos's
+`400 Unknown Block`. The block-log range can be wider than the state-history ranges: a block
+log from block 1 answers for block 1, which no state-history log holds.
 
 Requests are read as nodeos reads them: its empty-body rule, fc's legacy JSON parser (missing
 and repeated commas, `\X` escapes, the first of duplicate keys, bytes after the object
 ignored) and its conversions. A block number is cut to 32 bits (`"4294967297"` is block 1),
 and `block_num_or_id` is a number, or an id of an even number of hex digits, at most 64,
-whose first four bytes give the block number. A fraction converts as Spring's x86-64 release build converts it. The block
-bodies, and the errors nodeos gives for these endpoints, are byte for byte what a Spring 1.1.0
-to 1.2.2 node answers with `verbose-http-errors` off.
+whose first four bytes give the block number. A fraction converts as Spring's x86-64 release
+build converts it. The block bodies, and the errors nodeos gives for these endpoints, are byte
+for byte what a Spring 1.1.0 to 1.2.2 node answers with `verbose-http-errors` off.
 
 ### HTTP
 
