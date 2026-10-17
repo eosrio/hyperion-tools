@@ -24,7 +24,8 @@
 //! reading a payload: that is enough to bound the memory the result will hold, which is what a
 //! prefetch reserves. [`Store::read`] then reads the block and the payloads and validates all
 //! of it before the writer sends a frame: the inflated payloads (zlib framing, adler32, sizes),
-//! that every log names the same block id, and that the block follows `prev_block`.
+//! that every log names the same block id, and that the block follows `prev_block` and hashes
+//! to `this_block`.
 //! [`Store::build`] does both. A session reads entry offsets through its [`PageCache`], one
 //! 1024-slot index page per log kind, so consecutive blocks cost one index read per page.
 //!
@@ -39,7 +40,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, Result, bail, ensure};
 use hyperion_ship::binio::FileCache;
-use hyperion_ship::blocklog::BlockLog;
+use hyperion_ship::blocklog::{BlockLog, block_header};
 use hyperion_ship::catalog::{self, Catalog, Finding};
 use hyperion_ship::protocol::{self, BlockPos, MAX_BLOCK_BYTES, SPRING_SHIP_ABI, Status};
 use hyperion_ship::shiplog::{EntryHeader, INPUT_WINDOW, LogKind, ShipLog};
@@ -839,7 +840,10 @@ fn put_varuint32(out: &mut Vec<u8>, mut v: u32) {
     }
 }
 
-/// Block `this`'s stored `signed_block`, which must fit a SHiP result and follow `prev`.
+/// Block `this`'s stored `signed_block`, which must fit a SHiP result, follow `prev` and be
+/// block `this` itself: its header must hash to `this.id`. Spring attaches a block only when
+/// its id is the result's `this_block`; here coverage honesty promises the block, so a block
+/// of another fork fails the read instead, before the first frame.
 fn block_body(log: &BlockLog, this: BlockPos, prev: Option<BlockPos>) -> Result<Vec<u8>> {
     let n = this.num;
     let mut body = Vec::new();
@@ -862,6 +866,18 @@ fn block_body(log: &BlockLog, this: BlockPos, prev: Option<BlockPos>) -> Result<
             hex::encode(prev.id)
         );
     }
+    // A sha256 of the header bytes already read: no more I/O.
+    let id = block_header(&body)
+        .with_context(|| format!("{}: block {n}", log.log_path().display()))?
+        .id;
+    ensure!(
+        id == this.id,
+        "{}: block {n}'s header hashes to {}, but the logs give block {n} the id {}: the logs \
+         must come from one chain and hold only irreversible blocks",
+        log.log_path().display(),
+        hex::encode(id),
+        hex::encode(this.id)
+    );
     Ok(body)
 }
 

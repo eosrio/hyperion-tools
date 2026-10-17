@@ -17,7 +17,7 @@ use hyperion_ship::testkit::{FileName, SyntheticChain};
 use ship_archive::SERVER_HEADER;
 use ship_archive::check::{self, CheckConfig, WARN_ENTRY_BYTES};
 use ship_archive::fetch::{FetchLimits, Flags, Job};
-use ship_archive::store::{BlocksMode, Store, StoreConfig};
+use ship_archive::store::{BlocksMode, Store, StoreConfig, VerifyIds};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -670,6 +670,76 @@ fn within<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
         let _ = tx.send(f());
     });
     rx.recv_timeout(WAIT).expect("returned in time")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t12_a_block_that_does_not_hash_to_this_block_drops_the_connection() {
+    // Trace entries naming another fork's blocks 15 to 20, away from every seam, over the
+    // canonical block log: the ids agree at the edges, so the store opens.
+    let fx = Fixture::new(SyntheticChain::new(2, 39));
+    forked_trace(&fx, 2..41, 15..21);
+    fx.chain
+        .write_blocks(&fx.dir("node"), 2..41, FileName::Head)
+        .unwrap();
+    let model = Model {
+        chain: &fx.chain,
+        trace: 2..41,
+        chain_state: 0..0,
+        finality: 0..0,
+        blocks: 2..41,
+    };
+    let server = start(fx.serve()).await;
+
+    // Block 15 follows block 14, but it is not the block 15 the trace log names: Spring never
+    // attaches such a block, and coverage promises one, so the result is never started.
+    let mut raw = Raw::connect(server.addr).await;
+    let mut req = blocks(13, 18, 10);
+    req.fetch_block = true;
+    req.fetch_traces = true;
+    raw.send_request(&Request::Blocks(req.clone())).await;
+    for n in 13..15 {
+        let frames = raw.message().await.expect("an intact result");
+        assert_eq!(joined(&frames), model.result(n, &req), "block {n}");
+    }
+    assert_eq!(
+        raw.frame().await,
+        None,
+        "no frame of block 15's result, and no Close"
+    );
+}
+
+#[test]
+fn a_block_goes_out_only_under_its_own_id() {
+    // Only `L*`, 40, from another fork: no block after it names its id.
+    let fx = Fixture::new(SyntheticChain::new(2, 39));
+    forked_trace(&fx, 2..41, 40..41);
+    fx.chain
+        .write_blocks(&fx.dir("node"), 2..41, FileName::Head)
+        .unwrap();
+    // The startup check sees it through block 40's header hash.
+    let msg = format!("{:#}", Store::open(&fx.store()).err().expect("refused"));
+    assert!(
+        msg.contains("block ids disagree at block 40")
+            && msg.contains("the hash of block 40's header"),
+        "{msg}"
+    );
+    // Past it, the read of the block does.
+    let mut cfg = fx.store();
+    cfg.verify_ids = VerifyIds::Off;
+    let (store, _) = Store::open(&cfg).unwrap();
+    assert_eq!(store.last.id, synthetic_id(40, 3));
+    let limits = FetchLimits {
+        stream_threshold: 1 << 20,
+    };
+    store.build(&job(39, true), &limits).expect("block 39");
+    let msg = format!(
+        "{:#}",
+        store.build(&job(40, true), &limits).expect_err("refused")
+    );
+    assert!(msg.contains("block 40's header hashes to"), "{msg}");
+    store
+        .build(&job(40, false), &limits)
+        .expect("without its block, nothing contradicts the trace log");
 }
 
 #[test]
