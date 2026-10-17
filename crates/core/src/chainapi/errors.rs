@@ -1,6 +1,6 @@
 //! The error bodies of the block endpoints, as a Spring 1.1.0 to 1.2.2 node writes them with
-//! `verbose-http-errors` off (one detail), and the bodies for what a server of archived ranges
-//! adds: an illegal request-target, an oversized body and `503 Busy`.
+//! `verbose-http-errors` off (one detail); nodeos's refusal of an illegal request-target; and the
+//! bodies for what a server of archived ranges adds: an oversized body and `503 Busy`.
 //!
 //! nodeos's shape (`http_plugin.hpp` `error_results`) is
 //!
@@ -19,14 +19,14 @@ use std::fmt;
 use super::Endpoint;
 use super::fcjson::{clean, write_i64, write_str, write_u64};
 
-/// `line_number` of `get_raw_block`'s `block_num_or_id` length assert, which spans several
-/// lines. The compiler records one of them; until a capture from a node pins it, this is the
-/// first.
-pub const L_RAW: u32 = 1949;
+/// `line_number` of `get_raw_block`'s `block_num_or_id` length assert, which spans lines 1949
+/// to 1952: the compiler records the last, where the macro call closes. Pinned by answers
+/// captured from Spring 1.2.2 (`crates/core/testdata/chain-api`).
+pub const L_RAW: u32 = 1952;
 
-/// `line_number` of `get_block_header`'s length assert (one assert serves both modes), as
-/// [`L_RAW`].
-pub const L_HDR: u32 = 1987;
+/// `line_number` of `get_block_header`'s length assert (lines 1987 to 1990; one assert serves
+/// both modes), as [`L_RAW`].
+pub const L_HDR: u32 = 1990;
 
 /// fc `format_string`'s cap on a minimized message, and on its arguments together.
 const MINIMIZE_MAX_SIZE: usize = 1024;

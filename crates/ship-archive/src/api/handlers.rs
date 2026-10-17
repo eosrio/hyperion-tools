@@ -11,6 +11,16 @@
 //!  4. The handler is the one whose path is the whole target, query string included:
 //!     a block endpoint, `describe` or `get_supported_apis`; anything else is nodeos's 404.
 //!
+//! `Host` is not checked: a request with any `Host`, an empty one or none is answered. nodeos
+//! refuses one without a `Host` (`400 Disallowed HTTP HOST header`, even with
+//! `http-validate-host = false`), which would turn away an HTTP/1.0 health check that sends none.
+//!
+//! Every answer this module writes carries nodeos's headers in nodeos's order ([`Headers`]).
+//! hyper answers two kinds of target before this module sees them, unlike Beast: one holding a
+//! byte that is not a URI character gets hyper's bare `400 Bad Request`, and a `#fragment` is
+//! dropped ("Differences from nodeos" in the module docs of [`super`]). HTTP clients send
+//! neither.
+//!
 //! A block request is then parsed as nodeos parses it (`hyperion_ship::chainapi::parse`); a
 //! block number outside the served block-log range is `Unknown Block` at once. Otherwise the
 //! request takes a slot ([`admit`]) and runs one [`Job`] on an io thread: it reserves what it
@@ -31,7 +41,8 @@ use anyhow::anyhow;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Body as _, Bytes, Incoming};
 use hyper::header::{CONNECTION, CONTENT_TYPE, HeaderValue, SERVER};
-use hyper::{Method, Request, Response, StatusCode, Uri};
+use hyper::http::request::Parts;
+use hyper::{Method, Request, Response, StatusCode, Uri, Version};
 use hyperion_ship::blocklog::{BlockLog, block_header};
 use hyperion_ship::chainapi::{self, ApiError, Endpoint, parse_signed_block, render};
 use hyperion_ship::protocol::MAX_BLOCK_BYTES;
@@ -136,13 +147,14 @@ pub(super) async fn handle(
         Some(t) if head.method != Method::OPTIONS => route(t),
         _ => ApiRoute::Other,
     };
+    let headers = Headers::new(&head, route);
     let (cap, timeout) = (ctx.cfg.max_body_bytes, ctx.cfg.request_timeout);
     let body = match read_body(body, cap, timeout, &ctx.budget).await {
         Ok(body) => body,
         Err(Unread::TooLarge) => {
             ctx.metrics.api_rejected(ApiRejection::BodyTooLarge);
             let reply = Reply::error(&ApiError::TooLarge(ctx.cfg.max_body_bytes));
-            return Ok(respond(&ctx, peer, route, None, reply, started));
+            return Ok(respond(&ctx, peer, route, headers, None, reply, started));
         }
         Err(Unread::Refused(used)) => {
             ctx.metrics.api_rejected(ApiRejection::Memory);
@@ -154,7 +166,7 @@ pub(super) async fn handle(
                     usize::try_from(used).unwrap_or(usize::MAX),
                 ))
             };
-            return Ok(respond(&ctx, peer, route, None, reply, started));
+            return Ok(respond(&ctx, peer, route, headers, None, reply, started));
         }
         Err(Unread::Late) => {
             ctx.metrics.api_rejected(ApiRejection::Timeout);
@@ -175,16 +187,17 @@ pub(super) async fn handle(
         Some(_) if head.method == Method::OPTIONS => (Reply::ok(b"{}".to_vec()), None),
         Some(target) => answer(&ctx, peer, target, body).await,
     };
-    Ok(respond(&ctx, peer, route, block, reply, started))
+    Ok(respond(&ctx, peer, route, headers, block, reply, started))
 }
 
 /// The whole response refusing a connection over `--api-max-connections`, sent before its
-/// request is read: `503 Busy` with the headers [`respond`] gives it, and `Connection: close`.
+/// request is read: `503 Busy` with the headers [`respond`] gives an answer no handler writes,
+/// and `Connection: close`.
 pub(super) fn refusal(max_connections: usize) -> Vec<u8> {
     let body = ApiError::Busy(format!("Too many connections: {max_connections}")).body();
     let mut out = format!(
         "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\
-         Server: {SERVER_HEADER}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+         Connection: close\r\nServer: {SERVER_HEADER}\r\nContent-Length: {}\r\n\r\n",
         body.len()
     )
     .into_bytes();
@@ -201,6 +214,84 @@ fn origin_form(uri: &Uri) -> Option<&str> {
     }
     let target = uri.path_and_query()?.as_str();
     (target.starts_with('/') && !target.contains("..")).then_some(target)
+}
+
+/// The headers of an answer, laid out as nodeos lays them out (Spring `beast_http_session.hpp`
+/// `handle_request`): it sets `Content-Type`, then the connection header the request calls for,
+/// then `Server`; a handler then sets `Content-Type` once more, which moves it after `Server`.
+/// `Content-Length` comes last, from hyper. So an answer no handler writes (an illegal target,
+/// `OPTIONS`, `get_supported_apis`, the 404) starts with `Content-Type`, and a handler's (the
+/// block endpoints, `describe`) with the connection header or `Server`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Headers {
+    /// The request's HTTP version, which the answer takes (as Beast's `res.version`).
+    version: Version,
+    /// The answer comes from a handler.
+    handler: bool,
+    /// Beast's `keep_alive(req.keep_alive())`: `close` when an HTTP/1.1 request asks to close,
+    /// `keep-alive` when an HTTP/1.0 request asks to be kept alive, nothing otherwise.
+    connection: Option<&'static str>,
+}
+
+impl Headers {
+    fn new(head: &Parts, route: ApiRoute) -> Self {
+        let says = |value: &HeaderValue, token: &str| {
+            value
+                .to_str()
+                .is_ok_and(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case(token)))
+        };
+        let lines = head.headers.get_all(CONNECTION);
+        let connection = match head.version {
+            // Beast reads the first `Connection` line alone. hyper keeps an HTTP/1.0
+            // connection alive when the answer says `keep-alive` and no line of the request says
+            // `close`; one whose first line keeps alive and a later one closes gets nodeos's
+            // answer, then the connection is closed.
+            Version::HTTP_10 => lines
+                .iter()
+                .next()
+                .is_some_and(|v| says(v, "keep-alive"))
+                .then_some("keep-alive"),
+            // hyper closes an HTTP/1.1 connection once any line says `close` (nodeos, reading
+            // the first alone, may keep it) and would then add its own `Connection: close`
+            // after `Server`: the answer says it where nodeos would.
+            _ => lines.iter().any(|v| says(v, "close")).then_some("close"),
+        };
+        let handler = matches!(
+            route,
+            ApiRoute::GetBlockInfo
+                | ApiRoute::GetBlockHeader
+                | ApiRoute::GetRawBlock
+                | ApiRoute::Describe
+        );
+        Self {
+            version: head.version,
+            handler,
+            connection,
+        }
+    }
+
+    /// Put the headers on `response`, which closes the connection after it when `close`.
+    fn apply(self, response: &mut Response<Full<Bytes>>, close: bool) {
+        *response.version_mut() = self.version;
+        let connection = if close {
+            Some("close")
+        } else {
+            self.connection
+        };
+        let json = HeaderValue::from_static("application/json");
+        // A header map keeps the order names are first inserted in, and hyper writes it so.
+        let headers = response.headers_mut();
+        if !self.handler {
+            headers.insert(CONTENT_TYPE, json.clone());
+        }
+        if let Some(connection) = connection {
+            headers.insert(CONNECTION, HeaderValue::from_static(connection));
+        }
+        headers.insert(SERVER, HeaderValue::from_static(SERVER_HEADER));
+        if self.handler {
+            headers.insert(CONTENT_TYPE, json);
+        }
+    }
 }
 
 /// The endpoint a legal target is counted under.
@@ -559,6 +650,7 @@ fn respond(
     ctx: &Ctx,
     peer: SocketAddr,
     route: ApiRoute,
+    headers: Headers,
     block: Option<u32>,
     reply: Reply,
     started: Instant,
@@ -573,12 +665,7 @@ fn respond(
     let mut response = Response::new(Full::new(into_bytes(body, held)));
     *response.status_mut() =
         StatusCode::from_u16(status).expect("the chain API answers valid statuses");
-    let headers = response.headers_mut();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert(SERVER, HeaderValue::from_static(SERVER_HEADER));
-    if close {
-        headers.insert(CONNECTION, HeaderValue::from_static("close"));
-    }
+    headers.apply(&mut response, close);
     let elapsed = started.elapsed();
     ctx.metrics.api_request(route, status, bytes, elapsed);
     debug!(
@@ -621,6 +708,77 @@ mod tests {
             "/..",
         ] {
             assert_eq!(target(illegal), None, "{illegal}");
+        }
+    }
+
+    #[test]
+    fn answers_lay_out_their_headers_as_nodeos_does() {
+        let server = format!("server: {SERVER_HEADER}");
+        let s = server.as_str();
+        let (ct, close, keep) = (
+            "content-type: application/json",
+            "connection: close",
+            "connection: keep-alive",
+        );
+        let layout = |version, connection: &[&str], route, closing| {
+            let mut req = Request::builder().version(version).uri("/");
+            for c in connection {
+                req = req.header(CONNECTION, *c);
+            }
+            let (head, ()) = req.body(()).unwrap().into_parts();
+            let mut response = Response::new(Full::new(Bytes::new()));
+            Headers::new(&head, route).apply(&mut response, closing);
+            let lines: Vec<String> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", v.to_str().unwrap()))
+                .collect();
+            (response.version(), lines)
+        };
+        let (v10, v11) = (Version::HTTP_10, Version::HTTP_11);
+        use ApiRoute::*;
+        let (none, close_keep, keep_close) = (
+            &[][..],
+            &["close", "keep-alive"][..],
+            &["keep-alive", "close"][..],
+        );
+        let cases = [
+            // A handler sets Content-Type last; the HTTP layer's own answers first.
+            (v11, none, GetRawBlock, false, vec![s, ct]),
+            (v11, none, Describe, false, vec![s, ct]),
+            (v11, none, Other, false, vec![ct, s]),
+            (v11, none, GetSupportedApis, false, vec![ct, s]),
+            (v11, none, GetBlock, false, vec![ct, s]),
+            // The connection header the request asks for comes before Server.
+            (
+                v11,
+                &["keep-alive, Close"],
+                GetBlockInfo,
+                false,
+                vec![close, s, ct],
+            ),
+            (v11, &["close"], Other, false, vec![ct, close, s]),
+            (v11, &["keep-alive"], GetBlockHeader, false, vec![s, ct]),
+            (v10, none, GetRawBlock, false, vec![s, ct]),
+            (v10, &["Keep-Alive"], GetRawBlock, false, vec![keep, s, ct]),
+            (v10, &["keep-alive"], Other, false, vec![ct, keep, s]),
+            // HTTP/1.0: the first Connection line alone counts, as Beast reads it.
+            (v10, close_keep, GetRawBlock, false, vec![s, ct]),
+            (v10, keep_close, GetRawBlock, false, vec![keep, s, ct]),
+            // HTTP/1.1: any line that closes, as hyper then closes the connection.
+            (v11, keep_close, GetRawBlock, false, vec![close, s, ct]),
+            (v11, close_keep, Other, false, vec![ct, close, s]),
+            // An answer that closes the connection says so in the same place.
+            (v11, none, GetRawBlock, true, vec![close, s, ct]),
+            (v10, &["keep-alive"], Other, true, vec![ct, close, s]),
+        ];
+        for (version, connection, route, closing, want) in cases {
+            let (got_version, lines) = layout(version, connection, route, closing);
+            assert_eq!(got_version, version);
+            assert_eq!(
+                lines, want,
+                "{version:?} {connection:?} {route:?} {closing}"
+            );
         }
     }
 

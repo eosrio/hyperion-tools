@@ -1,0 +1,5 @@
+POST /v1/chain/get_raw_block HTTP/1.1
+Host: 127.0.0.1
+Content-Length: 86
+
+{"block_num_or_id":"0000070d65fcc93f9917e34d66bf882b31790b74794e826ec419981e873ad7c6"}
