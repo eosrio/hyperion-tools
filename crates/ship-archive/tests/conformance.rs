@@ -632,6 +632,21 @@ async fn t13_a_corrupt_streamed_entry_is_caught_before_its_first_frame() {
     }
 }
 
+/// A trace log of blocks `blocks` whose entries for `forked` name another fork's blocks, with
+/// the chain's payloads.
+fn forked_trace(fx: &Fixture, blocks: std::ops::Range<u32>, forked: std::ops::Range<u32>) {
+    let mut trace = LogBuilder::new(Encoding::SizedStored);
+    for n in blocks {
+        let id = if forked.contains(&n) {
+            synthetic_id(n, 3)
+        } else {
+            fx.chain.id(n)
+        };
+        trace.push(id, &fx.chain.payload(LogKind::Trace, n));
+    }
+    trace.write(&fx.dir("node"), "trace_history").unwrap();
+}
+
 /// Block `n`'s v0 result with traces and, if `block`, the block.
 fn job(n: u32, block: bool) -> Job {
     Job {
@@ -925,6 +940,41 @@ fn startup_refuses_ids_that_disagree_at_a_seam() {
     let mut cfg = fx.store();
     cfg.verify_ids = ship_archive::store::VerifyIds::Off;
     Store::open(&cfg).expect("--verify-ids off serves anyway");
+}
+
+#[test]
+fn startup_checks_the_end_of_the_served_range_against_the_block_log() {
+    // A trace log from another fork from block 29 on, over the canonical block log 2..61.
+    let fx = Fixture::new(SyntheticChain::new(2, 59));
+    forked_trace(&fx, 2..61, 29..61);
+    fx.chain
+        .write_blocks(&fx.dir("node"), 2..61, FileName::Head)
+        .unwrap();
+    let open = |range| {
+        let mut cfg = fx.store();
+        cfg.range = range;
+        Store::open(&cfg).map(|(store, _)| store)
+    };
+    // A --range ending inside the fork, or the block log ending with the trace log (as copied
+    // from a node): the block log serves no block after the last one, whose header hash is
+    // the block log's id for it. Blocks past --range are never read.
+    for (range, last) in [(Some((2, 30)), 29), (Some((10, 31)), 30), (None, 60)] {
+        let msg = format!("{:#}", open(range).err().expect("refused"));
+        assert!(
+            msg.contains(&format!("block ids disagree at block {last}"))
+                && msg.contains(&format!("the hash of block {last}'s header")),
+            "{range:?}: {msg}"
+        );
+    }
+    // Ending before the fork, the range is served.
+    let store = open(Some((2, 29))).unwrap();
+    assert_eq!(
+        store.last,
+        BlockPos {
+            num: 28,
+            id: fx.chain.id(28)
+        }
+    );
 }
 
 #[test]

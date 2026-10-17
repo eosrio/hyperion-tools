@@ -16,7 +16,7 @@ use hyperion_ship::testkit::ship::{
 use hyperion_ship::testkit::{FileName, SyntheticChain};
 use serde_json::Value;
 use ship_archive::check::{self, Beside, CheckConfig, IndexConfig, WARN_ENTRY_BYTES};
-use ship_archive::store::{BlocksMode, Store, StoreConfig};
+use ship_archive::store::{BlocksMode, Store, StoreConfig, VerifyIds};
 
 const BIN: &str = env!("CARGO_BIN_EXE_antelope-ship-archive");
 
@@ -289,6 +289,50 @@ fn deep_checks_read_every_entry_and_compare_every_id() {
         "{out}"
     );
     assert!(!out.contains("the hash of its block header has"), "{out}");
+}
+
+#[test]
+fn a_deep_check_compares_the_last_block_with_its_header_hash() {
+    // Only the last block, 30, is from another fork; the block log ends with the trace log, so
+    // no next block names 30's id.
+    let fx = Fixture::new(SyntheticChain::new(2, 29));
+    let dir = fx.dir("node");
+    let mut trace = LogBuilder::new(Encoding::SizedStored);
+    for n in 2..31 {
+        let id = if n == 30 {
+            synthetic_id(30, 3)
+        } else {
+            fx.chain.id(n)
+        };
+        trace.push(id, &fx.chain.payload(LogKind::Trace, n));
+    }
+    trace.write(&dir, "trace_history").unwrap();
+    fx.chain.write_blocks(&dir, 2..31, FileName::Head).unwrap();
+
+    // The startup check refuses it.
+    let report = check::check(&config(fx.store()));
+    assert_eq!(report.error_count(), 1, "{}", report.text());
+    assert!(
+        report.errors[0].contains("block ids disagree at block 30"),
+        "{}",
+        report.text()
+    );
+    // Without it, a deep check still finds it, with --hash or not.
+    for hash in [false, true] {
+        let mut cfg = config(fx.store());
+        cfg.store.verify_ids = VerifyIds::Off;
+        cfg.deep = true;
+        cfg.hash = hash;
+        let report = check::check(&cfg);
+        assert_eq!(report.error_count(), 1, "{}", report.text());
+        assert!(
+            report.errors[0].starts_with("block ids disagree at block 30: the trace entry has ")
+                && report.errors[0].contains("the hash of its block header has"),
+            "{}",
+            report.text()
+        );
+        assert_eq!(report.deep.unwrap().hashed, if hash { 29 } else { 0 });
+    }
 }
 
 #[test]

@@ -12,7 +12,8 @@
 //! The last servable block `L*` is one below the highest served end. Frozen data is
 //! irreversible, so status replies and every result report `L*` as both head and LIB. Before
 //! anything is served, the ids at every file seam and at the edges of the served ranges must
-//! agree across the logs (`--verify-ids seams`).
+//! agree across the logs (`--verify-ids seams`). Where the block log serves no next block to
+//! name a block's id (at its served end), its id there is the hash of the block's header.
 //!
 //! Block ids come, in Spring's order, from the trace, chain_state and finality entry headers,
 //! then from the block log, where block `n + 1`'s `previous` is the id of `n`. That last source
@@ -699,7 +700,10 @@ impl Store {
         Ok(())
     }
 
-    /// Every served log that knows block `n`'s id must give the same one.
+    /// Every served log that knows block `n`'s id must give the same one. The block log gives
+    /// it as block `n + 1`'s `previous` or, where it serves no block `n + 1` (at the end of
+    /// what it serves, which `--range` or the end of the copied log puts at `L*`), as the hash
+    /// of block `n`'s header: the id Spring checks before it attaches a block to a result.
     fn check_ids(&self, n: u32) -> Result<()> {
         let mut views = Vec::new();
         for kind in LogKind::ALL {
@@ -716,6 +720,12 @@ impl Store {
                 log.log_path().display()
             );
             views.push((what, log.previous(next)?));
+        } else if let Some(log) = self.block_log(n) {
+            let what = format!(
+                "the block log {} (the hash of block {n}'s header)",
+                log.log_path().display()
+            );
+            views.push((what, log.id(n)?));
         }
         if let Some(((first, id), rest)) = views.split_first() {
             for (what, other) in rest {

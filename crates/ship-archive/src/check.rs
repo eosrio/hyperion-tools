@@ -9,7 +9,8 @@
 //! error, as no varuint32 decoder reads its length. `--deep` reads every served block instead:
 //! each entry's header, trailer and whole zlib stream (adler32, size), the block log's index,
 //! trailers, sizes and `previous` links, and it checks that every log agrees on every block
-//! id. `--hash` (which implies `--deep`) also recomputes each block's id from its header. The
+//! id (the block log's id of its last served block, which no next block names, is its header's
+//! hash). `--hash` (which implies `--deep`) also recomputes each block's id from its header. The
 //! exit code is 0 when clean, 1 on errors, and with `--strict` 2 on warnings.
 //!
 //! [`index`] walks each state-history log backward from its last entry through the position
@@ -109,7 +110,8 @@ pub struct DeepStats {
     /// State-history entries, each inflated in full.
     pub entries: u64,
     pub inflated_bytes: u64,
-    /// Block ids recomputed from headers.
+    /// Block ids recomputed from headers by `--hash`. Without it only the last block's id is
+    /// recomputed, and not counted here.
     pub hashed: u64,
 }
 
@@ -413,7 +415,13 @@ fn deep(store: &Store, cfg: &CheckConfig, report: &mut Report) {
         }
         if let Some(log) = store.block_log(n) {
             stats.blocks += 1;
-            match deep_block(log, n, cfg.hash) {
+            // Where no served block follows to name this one's id, the block log's id for it
+            // is the hash of its header, as at startup.
+            let last = n
+                .checked_add(1)
+                .and_then(|next| store.block_log(next))
+                .is_none();
+            match deep_block(log, n, cfg.hash || last) {
                 Ok((previous, id)) => {
                     if let Some((m, v)) = &mut prior
                         && *m + 1 == n
@@ -421,7 +429,9 @@ fn deep(store: &Store, cfg: &CheckConfig, report: &mut Report) {
                         v.push((format!("block {n}'s `previous`"), previous));
                     }
                     if let Some(id) = id {
-                        stats.hashed += 1;
+                        if cfg.hash {
+                            stats.hashed += 1;
+                        }
                         views.push(("the hash of its block header".to_owned(), id));
                     }
                 }
