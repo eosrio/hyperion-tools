@@ -6,8 +6,8 @@
 //! Everything here is a pure function over bytes, so an HTTP layer only frames, routes, reads
 //! the block and sends what these return:
 //!
-//!   * [`params`] — nodeos's empty-body rule, a parser for the subset of fc's legacy JSON that
-//!     fc and it read identically, fc's field conversions and the `block_num_or_id` rules.
+//!   * [`params`] — nodeos's empty-body rule, fc's legacy JSON parser (keeping only the fields
+//!     an endpoint reads), fc's field conversions and the `block_num_or_id` rules.
 //!   * [`block`] — a borrowed, fail-closed walk of a packed `signed_block`.
 //!   * [`render`] — the `get_block_info`, `get_block_header` (both modes) and `get_raw_block`
 //!     bodies, and the `get_supported_apis` list.

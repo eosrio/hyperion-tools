@@ -192,8 +192,9 @@ pub(super) fn refusal(max_connections: usize) -> Vec<u8> {
     out
 }
 
-/// The raw request-target, when it is one nodeos serves: origin-form (no scheme, no
-/// authority), starting with `/` and holding no `..`.
+/// The request-target, when it is one nodeos serves: origin-form (no scheme, no authority),
+/// starting with `/` and holding no `..`. hyper has dropped any fragment, so a `..` there goes
+/// unseen ("Differences from nodeos" in the module docs of [`super`]).
 fn origin_form(uri: &Uri) -> Option<&str> {
     if uri.scheme().is_some() || uri.authority().is_some() {
         return None;
@@ -491,15 +492,18 @@ impl Job {
             return Err(Failed::Unknown);
         }
         let b = parse_signed_block(&block).map_err(Failed::Integrity)?;
+        // `render` never grows a body past its limit, so the buffer is never reallocated.
         let mut out = Vec::new();
         let limit = to_usize(first - len);
         out.reserve_exact(limit);
         if render(self.endpoint, &b, ext, limit, &mut out).is_err() {
             // Rare: a block of many id-only receipts renders to almost four times its size.
-            // Once more, with room for any block.
+            // Once more, with room for any block, in a new buffer: the first one is freed
+            // before it is taken, so the two are never held at once.
             let full = len.saturating_mul(MAX_EXPANSION + 1).saturating_add(SLACK);
             reserved.push(self.reserve(full - first)?);
             let limit = to_usize(full - len);
+            out = Vec::new();
             out.reserve_exact(limit);
             render(self.endpoint, &b, ext, limit, &mut out).map_err(Failed::Integrity)?;
         }

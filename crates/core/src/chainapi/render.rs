@@ -29,6 +29,8 @@ use super::text::{block_timestamp, name, public_key, signature};
 /// Append `endpoint`'s body for block `b` to `out`. `include_extensions` is
 /// `get_block_header`'s parameter and is ignored by the other endpoints. The body may take at
 /// most `limit` bytes: past that, rendering stops with an error and `out` is left as it was.
+/// Either way `out` never grows by more than `limit` bytes, so with that much spare capacity
+/// it is never reallocated.
 pub fn render(
     endpoint: Endpoint,
     b: &SignedBlock<'_>,
@@ -37,7 +39,13 @@ pub fn render(
     out: &mut Vec<u8>,
 ) -> Result<()> {
     let start = out.len();
-    let mut w = Writer { out, start, limit };
+    let mut w = Writer {
+        out,
+        start,
+        limit,
+        over: false,
+        staged: Vec::new(),
+    };
     let done = match endpoint {
         Endpoint::GetBlockInfo => block_info(&mut w, b),
         Endpoint::GetBlockHeader => block_header(&mut w, b, include_extensions),
@@ -65,47 +73,75 @@ pub fn supported_apis(endpoints: &[Endpoint], out: &mut Vec<u8>) {
     out.extend_from_slice(b"]}");
 }
 
-/// The output and its budget.
+/// The output and its budget. Each write is measured before it is made, and one that would
+/// take the body past its limit is not made, nor any after it: the body never outgrows its
+/// limit, and the next [`Writer::check`] fails.
 struct Writer<'o> {
     out: &'o mut Vec<u8>,
     start: usize,
     limit: usize,
+    /// A write did not fit.
+    over: bool,
+    /// A short write (a key, a number, a text) is made here first, to be measured.
+    staged: Vec<u8>,
 }
 
 impl Writer<'_> {
+    /// Whether `n` more bytes fit in the limit; once a write does not, none does.
+    fn fits(&mut self, n: usize) -> bool {
+        self.over = self.over || self.out.len() - self.start + n > self.limit;
+        !self.over
+    }
+
     fn raw(&mut self, s: &[u8]) {
-        self.out.extend_from_slice(s);
+        if self.fits(s.len()) {
+            self.out.extend_from_slice(s);
+        }
+    }
+
+    /// What `write` writes, written if it fits.
+    fn staged(&mut self, write: impl FnOnce(&mut Vec<u8>)) {
+        let mut staged = std::mem::take(&mut self.staged);
+        staged.clear();
+        write(&mut staged);
+        self.raw(&staged);
+        self.staged = staged;
     }
 
     /// `"key":`, the first member of an object.
     fn first_key(&mut self, key: &str) {
-        write_str(self.out, key.as_bytes());
-        self.out.push(b':');
+        self.staged(|s| {
+            write_str(s, key.as_bytes());
+            s.push(b':');
+        });
     }
 
     /// `,"key":`, any later member.
     fn key(&mut self, key: &str) {
-        self.out.push(b',');
+        self.raw(b",");
         self.first_key(key);
     }
 
     fn num(&mut self, v: impl Into<u64>) {
-        write_u64(self.out, v.into());
+        let v = v.into();
+        self.staged(|s| write_u64(s, v));
     }
 
-    fn text(&mut self, s: &str) {
-        write_str(self.out, s.as_bytes());
+    fn text(&mut self, t: &str) {
+        self.staged(|s| write_str(s, t.as_bytes()));
     }
 
+    /// Hex is written in place: its length is known, two digits a byte between quotes.
     fn hex(&mut self, b: &[u8]) {
-        write_hex(self.out, b);
+        if self.fits(2 + 2 * b.len()) {
+            write_hex(self.out, b);
+        }
     }
 
     /// Called after each element of an unbounded list, so a body stops near its limit.
     fn check(&self) -> Result<()> {
-        let len = self.out.len() - self.start;
         ensure!(
-            len <= self.limit,
+            !self.over,
             "the rendered body passed its limit of {} bytes",
             self.limit
         );
@@ -533,6 +569,26 @@ mod tests {
             let e = render(ep, &b, true, full.len() - 1, &mut out).unwrap_err();
             assert!(e.to_string().contains("limit"), "{e}");
             assert_eq!(out, b"prefix", "{ep:?} leaves the output as it was");
+        }
+    }
+
+    #[test]
+    fn rendering_never_grows_its_output_past_the_limit() {
+        // A buffer with exactly the limit to spare is never reallocated, whether the body fits
+        // or a write in the middle of a long field would pass the limit.
+        let block = rich_block();
+        let b = parse_signed_block(&block.body).unwrap();
+        for ep in Endpoint::ALL {
+            let mut full = Vec::new();
+            render(ep, &b, true, usize::MAX, &mut full).unwrap();
+            for limit in (0..=full.len()).step_by(7).chain([full.len()]) {
+                let mut out = Vec::with_capacity(3 + limit);
+                out.extend_from_slice(b"pre");
+                let (at, room) = (out.as_ptr(), out.capacity());
+                let done = render(ep, &b, true, limit, &mut out);
+                assert_eq!(done.is_ok(), limit == full.len(), "{ep:?} {limit}");
+                assert_eq!((out.as_ptr(), out.capacity()), (at, room), "{ep:?} {limit}");
+            }
         }
     }
 
