@@ -735,6 +735,22 @@ async fn targets_methods_and_listings_are_dispatched_as_nodeos_does() {
         let a = http.answer(false).await.expect("an answer");
         assert_eq!((a.status, a.text()), (400, ILLEGAL_TARGET), "{raw}");
     }
+
+    // The documented differences: hyper drops a fragment before the handlers see the target,
+    // and answers a target outside its URI grammar itself, empty, closing the connection.
+    for target in [
+        "/v1/chain/get_block_info#x",
+        "/v1/chain/get_block_info#/../x",
+    ] {
+        let a = http.post(target, info).await;
+        assert_eq!((a.status, &a.body), (200, &want), "{target}");
+    }
+    let a = http.post("/v1/chain/get_block_info<", info).await;
+    assert_eq!(
+        (a.status, a.body.len(), a.header("content-type")),
+        (400, 0, None)
+    );
+    assert!(http.closes_within(WAIT).await);
 }
 
 // ---- S3 ----
@@ -846,7 +862,7 @@ async fn bodies_are_read_within_their_limits_and_parsed_as_nodeos_does() {
             );
         }
         for body in [
-            r#"{"block_num_or_id":1e5}"#,
+            r#"{"block_num_or_id":1.2.3}"#,
             r#"{"block_num":"x"}"#,
             "[1]",
             "1",
@@ -875,6 +891,27 @@ async fn bodies_are_read_within_their_limits_and_parsed_as_nodeos_does() {
         .await;
     let want = r#"{"code":500,"message":"Internal Service Error","error":{"code":3010008,"name":"block_id_type_exception","what":"Invalid block ID","details":[{"message":"Invalid block ID: 0x12","file":"chain_plugin.cpp","line_number":1963,"method":"get_raw_block"}]}}"#;
     assert_eq!((a.status, a.text()), (500, want));
+    // fc reads `1e5` as the string "1e5", and a fraction where nothing reads it is no error.
+    let a = http
+        .post(GetRawBlock.path(), r#"{"block_num_or_id":1e5}"#)
+        .await;
+    assert_eq!(
+        (a.status, a.text()),
+        (500, want.replace("0x12", "1e5").as_str())
+    );
+    for ep in [GetBlockInfo, GetBlockHeader, GetRawBlock] {
+        let body = match ep {
+            GetBlockInfo => r#"{"x":1.5,"block_num":3,"y":-2e-3}"#,
+            _ => r#"{"x":1.5,"block_num_or_id":3,"y":-2e-3}"#,
+        };
+        let a = http.post(ep.path(), body).await;
+        assert_eq!(
+            a.body,
+            rendered(&chain.block(3).body, ep, false),
+            "{}",
+            ep.name()
+        );
+    }
     let long = format!("{{\"block_num_or_id\":\"{}\"}}", "a".repeat(66));
     let a = http.post(GetBlockHeader.path(), &long).await;
     let want = ApiError::BadLength {

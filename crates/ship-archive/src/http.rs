@@ -3,7 +3,7 @@
 //!
 //! | endpoint   | response                                                                    |
 //! |------------|-----------------------------------------------------------------------------|
-//! | `/health`  | 200 and JSON: version, chain id, served ranges, last block, sessions, findings, and with `--api` the chain API's listener and request slots |
+//! | `/health`  | 200 and JSON: version, chain id, served ranges, first block and its `prev_block`, last block, sessions, findings, and with `--api` the chain API's listener and request slots |
 //! | `/ready`   | 200 while the server accepts sessions (the store is open and the listener bound), 503 once it shuts down |
 //! | `/metrics` | 200 and the Prometheus text exposition ([`crate::metrics`])                 |
 //!
@@ -23,7 +23,7 @@ use tracing::{debug, warn};
 use crate::api::GET_BLOCK;
 use crate::fetch::MemoryBudget;
 use crate::metrics::Metrics;
-use crate::store::{Source, Store};
+use crate::store::{First, Source, Store};
 
 /// What the endpoints report.
 pub(crate) struct State {
@@ -158,6 +158,7 @@ pub(crate) fn health(state: &State) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "chain_id": hex::encode(store.chain_id),
         "served": served,
+        "first": first_json(store.first),
         "last": { "num": store.last.num, "id": hex::encode(store.last.id) },
         "sessions": state.metrics.sessions(),
         "findings": findings,
@@ -171,6 +172,16 @@ pub(crate) fn health(state: &State) -> Value {
         });
     }
     health
+}
+
+/// The first served block as JSON: `{num, prev_block}`, `prev_block` being `{num, id}` or
+/// `null` (block 1, or no open log names the block before it, or one that does cannot be read:
+/// [`Store::unlinked`]).
+pub(crate) fn first_json(first: First) -> Value {
+    let prev = first
+        .prev
+        .map(|p| json!({ "num": p.num, "id": hex::encode(p.id) }));
+    json!({ "num": first.num, "prev_block": prev })
 }
 
 /// A finding as JSON: its kind, whether it is a warning, and its message.

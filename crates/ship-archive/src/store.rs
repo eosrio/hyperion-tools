@@ -16,8 +16,16 @@
 //! name a block's id (at its served end), its id there is the hash of the block's header.
 //!
 //! Block ids come, in Spring's order, from the trace, chain_state and finality entry headers,
-//! then from the block log, where block `n + 1`'s `previous` is the id of `n`. That last source
-//! gives the first served block its `prev_block`, as the block before it is in no served log.
+//! then from the block log, where block `n + 1`'s `previous` is the id of `n`. The block before
+//! the first served block is in no served log, yet Spring gives that block its `prev_block`
+//! from any log it has open, so the store looks for that id once, at startup, in every open
+//! file holding it, served or not ([`First`]): a state-history entry below `--range` (the
+//! catalogs keep the file holding the block just below the range), the block log's `previous`
+//! of the first served block, or the hash of the block's own header in the block log. With
+//! `--verify-ids seams` they must all agree. With `off` only what gives the id is read, and a
+//! file that cannot be read there is skipped with a warning. Where no file names it, startup
+//! warns: a stream stitched from this server and the one before it cannot be checked for
+//! continuity there. `have_positions` are checked against the same ids.
 //!
 //! A block result ([`Package`]) is built in two steps, both blocking. [`Store::plan`] finds
 //! everything block `n`'s result needs and validates the entry headers it reads, without
@@ -280,6 +288,22 @@ impl Served {
     }
 }
 
+/// The first block served from state history and the `prev_block` its result carries: what
+/// links this server's blocks to those of the server before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct First {
+    pub num: u32,
+    /// `None` for block 1, which follows no block, and when no open file names block
+    /// `num - 1`, or (with `--verify-ids off`) one that does cannot be read
+    /// ([`Store::unlinked`]).
+    pub prev: Option<BlockPos>,
+}
+
+/// What one source gives as a block's id: the source, and the id.
+type View = (String, [u8; 32]);
+/// A file naming a block, not read yet: the source, and the read of its id.
+type Namer<'a> = (String, Box<dyn Fn() -> Result<[u8; 32]> + 'a>);
+
 /// The logs of one contiguous range, immutable once open.
 pub struct Store {
     pub trace: Option<Catalog<ShipLog>>,
@@ -289,7 +313,15 @@ pub struct Store {
     pub served: Served,
     /// `{L*, id(L*)}`: the head and LIB of every status and result.
     pub last: BlockPos,
+    /// The first served block and its `prev_block`.
+    pub first: First,
     pub chain_id: [u8; 32],
+    /// The ids of the blocks just below the served ranges that no served log names, found in
+    /// other open files: the `prev_block` of the first block of a served range.
+    below: Vec<BlockPos>,
+    /// With `--verify-ids off`, each read of a block just below a served range that failed
+    /// and was skipped: the block, and why.
+    skipped: Vec<(u32, String)>,
     abi: Utf8Bytes,
     status_v0: Bytes,
     status_v1: Bytes,
@@ -310,9 +342,21 @@ impl Store {
         let found = catalog::discover(&cfg.dirs, &cfg.index_dirs, cfg.recursive)?;
 
         let mut findings = Vec::new();
+        // The state-history catalogs reach one block below `--range`: a file holding only
+        // blocks before the range would be set aside, but the one ending where the range
+        // begins names the block before the first served one, its `prev_block`. Files there
+        // that do not line up (an overlap the range avoids) are set aside as before.
+        let reach = cfg.range.and_then(|(begin, end)| {
+            let below = begin.checked_sub(1).filter(|&b| b > 0)?;
+            Some((below, end))
+        });
         let mut ship = |kind: LogKind| -> Result<Option<Catalog<ShipLog>>> {
-            let (catalog, f) =
-                catalog::ship_catalog_within(found.ship(kind), kind, &cache, cfg.range)?;
+            let within =
+                |window| catalog::ship_catalog_within(found.ship(kind), kind, &cache, window);
+            let (catalog, f) = match reach {
+                Some(window) => within(Some(window)).or_else(|_| within(cfg.range))?,
+                None => within(cfg.range)?,
+            };
             findings.extend(f);
             Ok(catalog)
         };
@@ -404,7 +448,10 @@ impl Store {
             blocks,
             served,
             last: BlockPos::default(),
+            first: First::default(),
             chain_id,
+            below: Vec::new(),
+            skipped: Vec::new(),
             abi,
             status_v0: Bytes::new(),
             status_v1: Bytes::new(),
@@ -417,6 +464,7 @@ impl Store {
         if cfg.verify_ids == VerifyIds::Seams {
             store.verify_seams()?;
         }
+        store.link_below(cfg.verify_ids)?;
         store.status_v0 = Bytes::from(protocol::encode_status(false, &store.status()));
         store.status_v1 = Bytes::from(protocol::encode_status(true, &store.status()));
         Ok((store, findings))
@@ -451,6 +499,39 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// The warnings about the `prev_block` of the first block of each served range: each read
+    /// skipped with `--verify-ids off`, and one when the first served block gets no
+    /// `prev_block`, as no open file names the block before it (or one that does cannot be
+    /// read), so a client stitching this server's blocks to those of the server before it
+    /// cannot check that they continue one chain there. Not for block 2: block 1, the genesis
+    /// block, is in no state-history log, so no server before this one sends it.
+    pub fn unlinked(&self) -> Vec<String> {
+        let mut warnings: Vec<String> = self.skipped.iter().map(|(_, w)| w.clone()).collect();
+        let First { num, prev } = self.first;
+        if num > 2 && prev.is_none() {
+            let before = num - 1;
+            let (why, fix) = if self.skipped.iter().any(|&(n, _)| n == before) {
+                (
+                    format!("a file naming block {before} cannot be read"),
+                    "repair it".to_owned(),
+                )
+            } else {
+                (
+                    format!("no open log names block {before}"),
+                    format!(
+                        "serve the block log holding block {num}, or the state-history files \
+                         holding block {before}"
+                    ),
+                )
+            };
+            warnings.push(format!(
+                "block {num}, the first served, gets no prev_block: {why}, so a client cannot \
+                 check that block {num} follows the blocks before it; {fix}"
+            ));
+        }
+        warnings
     }
 
     /// The catalog of `kind`, if any file of it is open.
@@ -502,6 +583,127 @@ impl Store {
             return log.previous(next).context(Source::Blocks).map(Some);
         }
         Ok(None)
+    }
+
+    /// The id `prev_block` gives block `p`: [`Self::id`], else, for the block just below a
+    /// served range, the one startup found in another open file ([`Self::link_below`]).
+    fn prev_id(&self, p: u32, pages: Option<&PageCache>) -> Result<Option<[u8; 32]>> {
+        if let Some(id) = self.id_with(p, pages)? {
+            return Ok(Some(id));
+        }
+        Ok(self.below.iter().find(|b| b.num == p).map(|b| b.id))
+    }
+
+    /// Block `n`'s id wherever this server names it: [`Self::id`], else, for the block just
+    /// below a served range, the id that range's first block names as its `prev_block`.
+    /// `have_positions` are checked against it, as Spring checks them with the ids it fills
+    /// `prev_block` from.
+    pub fn named_id(&self, n: u32) -> Result<Option<[u8; 32]>> {
+        self.prev_id(n, None)
+    }
+
+    /// Find the block before the first block `n` of each served state-history range, when no
+    /// served state-history log holds it. With `seams`, every open file's id for it
+    /// ([`Self::outside_views`]) is read, and they must agree. With `off`, only what gives the
+    /// id is read: nothing when the served block log names it (block `n`'s `previous`), else
+    /// the open files in Spring's order up to the first that can be read, a file that cannot
+    /// being skipped with a warning ([`Self::unlinked`]). Where the served block log does not
+    /// name it, the first id read, in Spring's order, is `n`'s `prev_block`. Then record
+    /// [`Self::first`].
+    fn link_below(&mut self, verify: VerifyIds) -> Result<()> {
+        let begins: BTreeSet<u32> = LogKind::ALL
+            .into_iter()
+            .map(|kind| self.served.ship(kind))
+            .filter(|(begin, end)| begin < end)
+            .map(|(begin, _)| begin)
+            .collect();
+        let mut skipped = Vec::new();
+        for &n in &begins {
+            // Block 1 follows no block.
+            let Some(p) = n.checked_sub(1).filter(|&p| p > 0) else {
+                continue;
+            };
+            if LogKind::ALL
+                .into_iter()
+                .any(|kind| contains(self.served.ship(kind), p))
+            {
+                continue;
+            }
+            let found = match verify {
+                VerifyIds::Seams => {
+                    let views = self
+                        .outside_views(p)
+                        .into_iter()
+                        .map(|(what, read)| Ok((what, read()?)))
+                        .collect::<Result<Vec<View>>>()?;
+                    agree(p, &views)?;
+                    match self.id(p)? {
+                        Some(_) => None,
+                        None => views.first().map(|(_, id)| *id),
+                    }
+                }
+                VerifyIds::Off if self.block_log(n).is_some() => None,
+                // The readers' errors name the file.
+                VerifyIds::Off => self.outside_views(p).into_iter().find_map(|(_, read)| {
+                    read()
+                        .inspect_err(|e| skipped.push((p, skip_warning(p, n, e))))
+                        .ok()
+                }),
+            };
+            if let Some(id) = found {
+                self.below.push(BlockPos { num: p, id });
+            }
+        }
+        let num = begins.first().copied().unwrap_or_default();
+        let prev = match num.checked_sub(1) {
+            Some(p) => match self.prev_id(p, None) {
+                Ok(id) => id.map(|id| BlockPos { num: p, id }),
+                // With `off`, the served block log naming it is first read here: one that
+                // cannot be read is skipped, as are the files below the range.
+                Err(e) if verify == VerifyIds::Off => {
+                    skipped.push((p, skip_warning(p, num, &e)));
+                    None
+                }
+                Err(e) => return Err(e),
+            },
+            None => None,
+        };
+        self.first = First { num, prev };
+        self.skipped = skipped;
+        Ok(())
+    }
+
+    /// Every open file naming block `p`, served or not, in Spring's order, each with a read of
+    /// its id: the entry header of each state-history file holding it, then in the block logs
+    /// block `p + 1`'s `previous` and the hash of block `p`'s header. Nothing is read until a
+    /// read is called.
+    fn outside_views(&self, p: u32) -> Vec<Namer<'_>> {
+        let mut views: Vec<Namer<'_>> = Vec::new();
+        for kind in LogKind::ALL {
+            if let Some(log) = self.catalog(kind).and_then(|c| c.get(p)) {
+                let what = format!("the {} log {}", kind.label(), log.log_path().display());
+                views.push((what, Box::new(move || log.id(p))));
+            }
+        }
+        if let Some(blocks) = &self.blocks {
+            if let Some(next) = p.checked_add(1)
+                && let Some(log) = blocks.get(next)
+            {
+                let what = format!(
+                    "the block log {} (block {next} follows it)",
+                    log.log_path().display()
+                );
+                views.push((what, Box::new(move || log.previous(next))));
+            }
+            if let Some(log) = blocks.get(p) {
+                let what = format!(
+                    "the block log {} (the hash of block {p}'s header)",
+                    log.log_path().display()
+                );
+                views.push((what, Box::new(move || log.id(p))));
+            }
+        }
+        views
     }
 
     /// What a status reply reports: head and LIB at `L*`, the served ranges, the chain id.
@@ -592,7 +794,7 @@ impl Store {
         };
         let this = BlockPos { num: n, id };
         let prev = match n.checked_sub(1) {
-            Some(p) => self.id_with(p, pages)?.map(|id| BlockPos { num: p, id }),
+            Some(p) => self.prev_id(p, pages)?.map(|id| BlockPos { num: p, id }),
             None => None,
         };
         let block = match self.block_log(n) {
@@ -733,19 +935,33 @@ impl Store {
             );
             views.push((what, log.id(n)?));
         }
-        if let Some(((first, id), rest)) = views.split_first() {
-            for (what, other) in rest {
-                ensure!(
-                    other == id,
-                    "block ids disagree at block {n}: {first} has {}, {what} has {}; the logs \
-                     must come from one chain and hold only irreversible blocks",
-                    hex::encode(id),
-                    hex::encode(other)
-                );
-            }
-        }
-        Ok(())
+        agree(n, &views)
     }
+}
+
+/// The warning for a file naming block `p`, block `n`'s `prev_block`, that `--verify-ids off`
+/// skips because it cannot be read.
+fn skip_warning(p: u32, n: u32, e: &anyhow::Error) -> String {
+    format!(
+        "--verify-ids off: a file naming block {p}, the prev_block of block {n}, cannot be read \
+         and is skipped: {e:#}"
+    )
+}
+
+/// Every view of block `n`'s id must be the same id.
+fn agree(n: u32, views: &[View]) -> Result<()> {
+    if let Some(((first, id), rest)) = views.split_first() {
+        for (what, other) in rest {
+            ensure!(
+                other == id,
+                "block ids disagree at block {n}: {first} has {}, {what} has {}; the logs must \
+                 come from one chain and hold only irreversible blocks",
+                hex::encode(id),
+                hex::encode(other)
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The header of block `n`'s entry in `log`, a `kind` file holding `n`: through `pages` when
@@ -912,6 +1128,9 @@ fn nothing_served(
     blocks: &Option<Catalog<BlockLog>>,
 ) -> String {
     let dirs: Vec<String> = cfg.dirs.iter().map(|d| d.display().to_string()).collect();
+    // A catalog holding no block of --range holds only the file kept for the block just
+    // below it: it shows nothing of what the logs hold.
+    let ship = ship.map(|c| c.as_ref().filter(|c| clip(c.range(), cfg.range) != (0, 0)));
     if ship.iter().all(|c| c.is_none()) {
         return format!(
             "no state-history log (trace_history, chain_state_history or finality_data_history) \

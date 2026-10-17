@@ -115,7 +115,8 @@ connect too: to it, the server is a node whose head never moves. `curl
 http://10.0.0.5:9180/health` reports what is served:
 
 ```json
-{"chain_id":"aca376f2…","findings":[],"last":{"id":"000f4df8…","num":1003000},
+{"chain_id":"aca376f2…","findings":[],"first":{"num":1000001,"prev_block":{"id":"000f4240…","num":1000000}},
+ "last":{"id":"000f4df8…","num":1003000},
  "served":{"blocks":{"begin":1000001,"end":1003001},"chain_state":{"begin":1000001,"end":1003001},
  "finality":{"begin":0,"end":0},"trace":{"begin":1000001,"end":1003001}},"sessions":0,"version":"0.1.0"}
 ```
@@ -146,7 +147,11 @@ a message naming the file and what to do.
 5. **Block-id checks** (`--verify-ids seams`). At every file seam and at both edges of every
    served range, every log that knows a block's id must give the same one: the state-history
    entry headers, and the block log (block `n + 1`'s `previous`, or at the end of what it
-   serves, the hash of block `n`'s header).
+   serves, the hash of block `n`'s header). The block just below each served range, which
+   the range's first block names as its `prev_block`, must have one id in every open file
+   holding it, served or not. With `--verify-ids off` none of this is checked, and that block
+   is read only where its id comes from: a file that cannot be read there is skipped with a
+   warning instead of refusing startup.
 6. **Status.** head and LIB are both `{L*, id(L*)}`, the ranges are the served ones, and the
    chain id comes from the block logs (or `--chain-id`). Both status replies are encoded once.
 
@@ -159,6 +164,8 @@ Each connection is a replica of a Spring 1.x SHiP session (`session.hpp`):
 - Requests are decoded with fc's leniency. A `get_blocks` request replaces the current one,
   credit and cursor included, after Spring's `have_positions` rule moves its start back to
   the lowest listed block below it whose id this server does not know or knows differently.
+  The block before the first served one counts as known when a file names it, as the first
+  result names it as `prev_block`.
   An ack adds to the credit and wraps at 32 bits, as Spring's plain addition does.
 - Status requests are answered first and cost no credit. Then one block is sent while
   `credit > 0 && cursor <= L* && cursor < end`. Each block costs a credit and advances the
@@ -185,7 +192,7 @@ Each connection is a replica of a Spring 1.x SHiP session (`session.hpp`):
 |---|---|---|
 | head, `last_irreversible` | always | `{L*, id(L*)}` |
 | `this_block` | block `n`'s id is known | the entry header of the first served log holding `n` (trace, then chain_state, then finality), else block `n + 1`'s `previous` in the served block log |
-| `prev_block` | block `n − 1`'s id is known (never for block 1: there is no block 0) | the same, for `n − 1`; for the first served block, the block log's `previous` |
+| `prev_block` | block `n − 1`'s id is known (never for block 1: there is no block 0) | the same, for `n − 1`; for the first served block, any open file naming `n − 1`, as a node fills it from any log it has open: the block log's `previous` of `n`, or a state-history file holding `n − 1` below `--range` |
 | `block` | `fetch_block`, `this_block` known, and the block log serves `n` | the stored `signed_block`, as Spring sends it |
 | `traces`, `deltas`, `finality_data` | requested (`finality_data` only for a v1 request with `fetch_finality_data`), and `n` in that log's served range | the inflated entry payload, unchanged |
 
@@ -215,8 +222,10 @@ Every refusal names the file and the reason.
   log holding only its preamble) are skipped. A second identical copy of a file is dropped.
 - **One contiguous range per server.** Any other overlap, and any hole, refuses startup,
   naming both files. `--range BEGIN-END` serves only `[BEGIN, END)`: every file is still
-  opened and validated, but only the files holding a block of the range must line up. Serve
-  each side of a hole with its own server.
+  opened and validated, but only the files holding a block of the range must line up. The
+  state-history file holding block `BEGIN − 1` is kept too when it lines up: it names the
+  first block's `prev_block`, so servers split by `--range` over one directory send at each
+  seam what one server sends. Serve each side of a hole with its own server.
 
 ### Block logs are needed too
 
@@ -225,6 +234,12 @@ state-history logs. By default (`--blocks required`) the server needs the block 
 same blocks and serves only what it covers: the state-history ranges are cut to the block-log
 range, and startup warns about state history left out. The block log also gives the first
 served block its `prev_block`, and it is what startup checks the state-history ids against.
+Without it, only a state-history file holding the block before the first served one names
+that block: startup warns when none does, and `/health` reports `first.prev_block` as `null`,
+since a SHiP-aware router or proxy stitching this server to the one before it then cannot
+check the seam. A history from genesis is the exception: its first block, 2, follows the
+genesis block, which is in no state-history log and which no server sends, so there is no
+seam to check and no warning.
 
 **Plan disk space so that each archive server holds the block log for its whole range**,
 lined up with its state-history files.
@@ -267,7 +282,8 @@ antelope-ship-archive check --dir state-history --dir blocks --hash    # also ha
 ```
 
 `check` takes the same store options as `serve` and prints the coverage per log, the files,
-the seams, the chain id, every finding, and the result; `--json` prints one JSON document
+the seams, the chain id, the first block and its `prev_block` (a warning when no file names
+the block before it), every finding, and the result; `--json` prints one JSON document
 (`ok`, `coverage`, `findings`, `warnings`, `errors`, `more_errors`, `deep`) instead. The
 first 100 errors are listed, and the rest counted.
 
@@ -338,7 +354,7 @@ archived and live results with the same text.
 
 | Endpoint | Response |
 |---|---|
-| `/health` | 200 and JSON: `version`, `chain_id`, `served` (`trace`, `chain_state`, `finality`, `blocks`, each `{begin, end}`), `last` (`{num, id}`), `sessions`, `findings` |
+| `/health` | 200 and JSON: `version`, `chain_id`, `served` (`trace`, `chain_state`, `finality`, `blocks`, each `{begin, end}`), `first` (`{num, prev_block}`: the first served block and the `prev_block` its result carries, `{num, id}` or `null` for block 1 or when no file names the block before it), `last` (`{num, id}`), `sessions`, `findings` |
 | `/ready` | 200 while the server accepts sessions (the logs are validated and the listener is bound), 503 once it shuts down |
 | `/metrics` | Prometheus text exposition |
 
@@ -560,6 +576,14 @@ and empty files):
 - `tests/offline.rs` covers `check` (exit codes, large entries, `--deep`, `--hash`, through
   the binary), `index` (an index pointing at fork leftovers, rebuilt and then served), and
   `abi`.
+- `tests/seams.rs` splits one history across servers by `--range` (inside files, on a
+  block-log seam, and where every file ends) and across copies cut to their range, with and
+  without block logs, and requires every result of each server to equal one server's over
+  all the logs but for head and LIB, the first block's `prev_block` included. It also covers
+  the copy without block logs whose first block nothing names (the startup warning, `check`
+  and `/health`), files that disagree on the block before a range, `--verify-ids off` over
+  files that cannot be read there, a `have_positions` entry naming that block, and a history
+  from block 2.
 - `tests/real_slices.rs` serves the real EOS and WAX entries of `crates/core/testdata/`, each
   as a one-entry log, inline and streamed, as v0 and v1 results, and the real EOS block under
   the id its header hashes to, all byte for byte. Its ignored tests read a copy of a node's

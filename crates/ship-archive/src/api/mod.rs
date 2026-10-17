@@ -48,6 +48,21 @@
 //!
 //! **Shutdown.** The listener stops accepting with the SHiP listener; each connection finishes
 //! the request it is answering and closes, within the server's shutdown grace.
+//!
+//! **Differences from nodeos.** hyper parses the request-target before the handlers see it,
+//! and keeps no raw copy of it, so two kinds of target are not answered as Beast answers them:
+//!
+//!   * A fragment (`#` and what follows) is dropped. `/v1/chain/get_raw_block#x` is answered
+//!     as `/v1/chain/get_raw_block`, where nodeos's exact match answers `404`, and a `..`
+//!     after the `#` escapes the illegal-target check.
+//!   * A target holding a byte hyper's URI grammar refuses (`<`, `>`, a backquote, a control
+//!     or non-ASCII byte) gets hyper's own `400 Bad Request`, with an empty body and no
+//!     `Content-Type` or `Server` header, and the connection is closed, where nodeos answers
+//!     its JSON `404` or `400`.
+//!
+//! Clients send neither: a fragment stays in the client, and those bytes must be
+//! percent-encoded in a target. Matching Beast would mean parsing every request a second time,
+//! from the raw bytes of the connection.
 
 mod describe;
 mod handlers;

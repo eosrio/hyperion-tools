@@ -3,10 +3,12 @@
 //!
 //! [`check`] runs everything `serve` does before it accepts a session (discovery, every strict
 //! reader, the catalogs, the served ranges, the chain id and the seam checks) and reports the
-//! coverage of each log, its files and seams, the chain id and every finding. It also sizes the
-//! served entries: one inflating to more than `--warn-entry-bytes` (256 MiB by default, what a
-//! SHiP-aware router or proxy relays by default) is a warning, and one of 4 GiB or more is an
-//! error, as no varuint32 decoder reads its length. `--deep` reads every served block instead:
+//! coverage of each log, its files and seams, the chain id, the first served block and its
+//! `prev_block` (a warning when no open file names the block before it), and every finding.
+//! It also sizes the served entries: one inflating to more than `--warn-entry-bytes` (256 MiB
+//! by default, what a SHiP-aware router or proxy relays by default) is a warning, and one of
+//! 4 GiB or more is an error, as no varuint32 decoder reads its length. `--deep` reads every
+//! served block instead:
 //! each entry's header, trailer and whole zlib stream (adler32, size), the block log's index,
 //! trailers, sizes and `previous` links, and it checks that every log agrees on every block
 //! id (the block log's id of its last served block, which no next block names, is its header's
@@ -39,7 +41,7 @@ use hyperion_ship::shiplog::{ENTRY_OVERHEAD, HEADER_LEN, LogKind, ShipLog, unsup
 use serde_json::{Value, json};
 use tracing::info;
 
-use crate::store::{BlocksMode, PageCache, Source, Store, StoreConfig};
+use crate::store::{BlocksMode, First, PageCache, Source, Store, StoreConfig};
 
 /// An entry inflating to this many bytes or more has a length no varuint32 decoder reads.
 pub const MAX_ENTRY_BYTES: u64 = 1 << 32;
@@ -84,6 +86,8 @@ pub struct Coverage {
     pub chain_id: [u8; 32],
     /// Head and LIB of every status and result.
     pub last: BlockPos,
+    /// The first served block and its `prev_block`.
+    pub first: First,
     /// trace, chain_state, finality, blocks.
     pub logs: Vec<LogCoverage>,
 }
@@ -154,6 +158,16 @@ impl Report {
                 c.last.num,
                 hex::encode(c.last.id)
             );
+            let _ = match c.first.prev {
+                Some(p) => writeln!(
+                    out,
+                    "first block   {}, prev_block {} {}",
+                    c.first.num,
+                    p.num,
+                    hex::encode(p.id)
+                ),
+                None => writeln!(out, "first block   {}, no prev_block", c.first.num),
+            };
             for log in &c.logs {
                 let _ = writeln!(out);
                 let Some((hb, he)) = log.held else {
@@ -247,6 +261,7 @@ impl Report {
                 .collect();
             json!({
                 "chain_id": hex::encode(c.chain_id),
+                "first": crate::http::first_json(c.first),
                 "last": { "num": c.last.num, "id": hex::encode(c.last.id) },
                 "logs": logs,
             })
@@ -295,6 +310,7 @@ pub fn check(cfg: &CheckConfig) -> Report {
             .warnings
             .push("--hash with --blocks none: there is no block header to hash".into());
     }
+    report.warnings.extend(store.unlinked());
     if cfg.deep || cfg.hash {
         deep(&store, cfg, &mut report);
     } else {
@@ -330,6 +346,7 @@ fn coverage(store: &Store) -> Coverage {
     Coverage {
         chain_id: store.chain_id,
         last: store.last,
+        first: store.first,
         logs,
     }
 }
