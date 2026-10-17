@@ -3,7 +3,7 @@
 //!
 //! | endpoint   | response                                                                    |
 //! |------------|-----------------------------------------------------------------------------|
-//! | `/health`  | 200 and JSON: version, chain id, served ranges, last block, sessions, findings |
+//! | `/health`  | 200 and JSON: version, chain id, served ranges, last block, sessions, findings, and with `--api` the chain API's listener and request slots |
 //! | `/ready`   | 200 while the server accepts sessions (the store is open and the listener bound), 503 once it shuts down |
 //! | `/metrics` | 200 and the Prometheus text exposition ([`crate::metrics`])                 |
 //!
@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use tiny_http::{Header, Method, Request, Response, Server};
 use tracing::{debug, warn};
 
+use crate::api::GET_BLOCK;
 use crate::fetch::MemoryBudget;
 use crate::metrics::Metrics;
 use crate::store::{Source, Store};
@@ -30,8 +31,16 @@ pub(crate) struct State {
     pub findings: Arc<[Finding]>,
     pub metrics: Arc<Metrics>,
     pub budget: Arc<MemoryBudget>,
+    /// The chain API, with `--api`.
+    pub api: Option<ApiHealth>,
     /// Set while the server accepts sessions.
     pub ready: AtomicBool,
+}
+
+/// What `/health` says of the chain API besides its in-flight count.
+pub(crate) struct ApiHealth {
+    pub listen: SocketAddr,
+    pub max_in_flight: usize,
 }
 
 /// The bound HTTP listener, not serving yet.
@@ -145,14 +154,23 @@ pub(crate) fn health(state: &State) -> Value {
         served.insert(source.label().to_owned(), range(r));
     }
     let findings: Vec<Value> = state.findings.iter().map(finding_json).collect();
-    json!({
+    let mut health = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "chain_id": hex::encode(store.chain_id),
         "served": served,
         "last": { "num": store.last.num, "id": hex::encode(store.last.id) },
         "sessions": state.metrics.sessions(),
         "findings": findings,
-    })
+    });
+    if let Some(api) = &state.api {
+        health["api"] = json!({
+            "listen": api.listen.to_string(),
+            "get_block": GET_BLOCK,
+            "in_flight": state.metrics.api_in_flight(),
+            "max_in_flight": api.max_in_flight,
+        });
+    }
+    health
 }
 
 /// A finding as JSON: its kind, whether it is a warning, and its message.

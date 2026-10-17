@@ -2,10 +2,12 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::ServeConfig;
+use crate::api::{ApiConfig, DEFAULT_MAX_BODY_BYTES};
 use crate::check::{CheckConfig, IndexConfig, WARN_ENTRY_BYTES};
 use crate::store::{BlocksMode, StoreConfig, VerifyIds};
 
@@ -17,7 +19,8 @@ use crate::store::{BlocksMode, StoreConfig, VerifyIds};
         finality_data_history) and block logs, flat or retained, over the SHiP WebSocket \
         protocol exactly as a Spring node does, without nodeos. Each server holds one \
         contiguous range of irreversible blocks and reports its last block as head and LIB; a \
-        SHiP-aware router or proxy stitches such servers and live nodes into one history.\n\n\
+        SHiP-aware router or proxy stitches such servers and live nodes into one history. With \
+        --api it also answers nodeos's /v1/chain block endpoints from the block logs.\n\n\
         Every file is opened read-only and validated at startup: anything a strict reader \
         refuses, an overlap, a hole, or block ids that disagree at a seam stops the server. \
         There is no authentication: listen on a private network, behind a SHiP-aware router \
@@ -31,7 +34,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Serve the logs of one contiguous range.
-    Serve(ServeArgs),
+    Serve(Box<ServeArgs>),
     /// Validate the logs as `serve` would, without serving them, and report what is served.
     /// Exits 0 when clean, 1 on errors, and with --strict 2 on warnings.
     Check(CheckArgs),
@@ -127,6 +130,24 @@ pub struct ServeArgs {
     /// Serve /health, /ready and /metrics over HTTP at this address.
     #[arg(long, value_name = "ADDR")]
     pub http: Option<SocketAddr>,
+    /// Serve nodeos's /v1/chain block endpoints (get_block_info, get_block_header,
+    /// get_raw_block) from the block logs over HTTP at this address, as a Spring node holding
+    /// those blocks answers them; it must differ from --listen and --http. Off by default.
+    /// There is no authentication: bind it to a private address and publish it only through an
+    /// HTTP router or proxy.
+    #[arg(long, value_name = "ADDR")]
+    pub api: Option<SocketAddr>,
+    /// Chain API requests read and rendered at once, each on an io thread (default: a quarter
+    /// of --io-threads, at least 2).
+    #[arg(long, value_name = "N")]
+    pub api_max_in_flight: Option<usize>,
+    /// How long a chain API request waits for its turn before it is answered 503 Busy.
+    #[arg(long, value_name = "MS", default_value_t = 250)]
+    pub api_queue_ms: u64,
+    /// The largest chain API request body accepted; a larger one gets 413 and the connection
+    /// is closed.
+    #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_MAX_BODY_BYTES)]
+    pub api_max_body_bytes: usize,
     /// Log line format; filter with RUST_LOG (default `info`).
     #[arg(long, value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
@@ -135,16 +156,27 @@ pub struct ServeArgs {
 impl ServeArgs {
     pub fn config(&self) -> ServeConfig {
         let defaults = ServeConfig::default();
+        let io_threads = self.io_threads.unwrap_or(defaults.io_threads);
+        let api = self.api.map(|listen| {
+            let defaults = ApiConfig::new(listen, io_threads);
+            ApiConfig {
+                max_in_flight: self.api_max_in_flight.unwrap_or(defaults.max_in_flight),
+                queue: Duration::from_millis(self.api_queue_ms),
+                max_body_bytes: self.api_max_body_bytes,
+                ..defaults
+            }
+        });
         ServeConfig {
             store: self.store.config(self.abi.clone()),
             listen: self.listen,
             max_sessions: self.max_sessions,
             max_request_bytes: self.max_request_bytes,
             stream_threshold: self.stream_threshold,
-            io_threads: self.io_threads.unwrap_or(defaults.io_threads),
+            io_threads,
             prefetch: self.prefetch,
             memory_budget: self.memory_budget,
             http: self.http,
+            api,
         }
     }
 }
@@ -357,6 +389,58 @@ mod tests {
             (3, 0, 1000)
         );
         assert_eq!(cfg.http, Some("127.0.0.1:9180".parse().unwrap()));
+    }
+
+    #[test]
+    fn the_chain_api_is_off_unless_asked_for_and_defaults_as_documented() {
+        let serve = |args: &[&str]| {
+            let mut argv = vec!["prog", "serve", "--dir", "logs"];
+            argv.extend_from_slice(args);
+            let Command::Serve(args) = Cli::try_parse_from(argv).unwrap().command else {
+                panic!("a serve command")
+            };
+            args.config()
+        };
+        assert!(serve(&[]).api.is_none());
+        assert!(ServeConfig::default().api.is_none());
+
+        let cfg = serve(&["--api", "127.0.0.1:8888", "--io-threads", "16"]);
+        let api = cfg.api.expect("--api is on");
+        assert_eq!(api.listen, "127.0.0.1:8888".parse().unwrap());
+        assert_eq!(
+            (api.max_in_flight, api.queue, api.max_body_bytes),
+            (4, Duration::from_millis(250), 2 << 20)
+        );
+        assert_eq!(api.request_timeout, Duration::from_secs(10));
+        assert_eq!(api.read_delay, Duration::ZERO);
+        // A quarter of the io threads, at least 2.
+        for (io, slots) in [("1", 2), ("7", 2), ("8", 2), ("12", 3), ("64", 16)] {
+            let cfg = serve(&["--api", "127.0.0.1:8888", "--io-threads", io]);
+            assert_eq!(cfg.api.unwrap().max_in_flight, slots, "{io} io threads");
+        }
+        let defaults = serve(&["--api", "127.0.0.1:8888"]);
+        assert_eq!(
+            defaults.api.unwrap().max_in_flight,
+            (defaults.io_threads / 4).max(2)
+        );
+
+        let cfg = serve(&[
+            "--api",
+            "10.0.0.5:8888",
+            "--api-max-in-flight",
+            "1",
+            "--api-queue-ms",
+            "0",
+            "--api-max-body-bytes",
+            "4096",
+        ]);
+        let api = cfg.api.unwrap();
+        assert_eq!(
+            (api.max_in_flight, api.queue, api.max_body_bytes),
+            (1, Duration::ZERO, 4096)
+        );
+        // The API settings mean nothing without --api.
+        assert!(serve(&["--api-max-in-flight", "3"]).api.is_none());
     }
 
     #[test]

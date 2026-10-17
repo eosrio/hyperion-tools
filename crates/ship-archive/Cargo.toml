@@ -15,7 +15,8 @@ publish = false
 name = "ship_archive"
 
 [dependencies]
-hyperion-ship = { workspace = true, features = ["archive"] }
+# `chain-api` renders the nodeos block endpoints the `--api` listener serves.
+hyperion-ship = { workspace = true, features = ["archive", "chain-api"] }
 anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
@@ -23,6 +24,12 @@ hex = { workspace = true }
 serde_json = { workspace = true }   # --abi files, /health and `check --json`
 # /health, /ready and /metrics (--http): a blocking thread beside the SHiP listener.
 tiny_http = { workspace = true }
+# The chain API listener (--api): HTTP/1.1 with exact request-target dispatch, any method, no
+# `Date`, title-case header names and a header-read timeout, as nodeos's Beast server answers.
+# Crate-local, as light-api's HTTP stack; already in the lock through it.
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 # TCP keepalive timing on accepted connections, which tokio does not expose. Pure Rust (libc and
