@@ -521,7 +521,6 @@ fn deviation(asked: &Asked, nodeos: &[Answer], here: &[Answer]) -> Option<&'stat
     let first = |answers: &[Answer]| answers.iter().find(|a| !a.interim()).cloned();
     let (theirs, ours) = (first(nodeos), first(here));
     let not_found = ApiError::NotFound.body();
-    let unparsable = ApiError::Unparsable.body();
     let is_ours = |a: &Option<Answer>, status: u16, body: &[u8]| {
         a.as_ref()
             .is_some_and(|a| a.status() == status && a.body == body)
@@ -595,12 +594,6 @@ fn deviation(asked: &Asked, nodeos: &[Answer], here: &[Answer]) -> Option<&'stat
     {
         return Some("an endpoint nodeos serves and this server does not");
     }
-    if is_ours(&ours, 400, &unparsable)
-        && !is_ours(&theirs, 400, &unparsable)
-        && outside_the_subset(&asked.body)
-    {
-        return Some("a body outside the subset of fc's JSON this server reads");
-    }
     None
 }
 
@@ -613,62 +606,6 @@ fn unframed(head: &[String]) -> Vec<&String> {
                 .is_some_and(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         })
         .collect()
-}
-
-/// Whether the first value of `body` holds what fc reads differently from strict JSON: outside
-/// strings, a number with a fraction or an exponent, or a bare word other than `true`, `false`
-/// and `null`. What follows the first value is left out: fc and this server both ignore it.
-fn outside_the_subset(body: &[u8]) -> bool {
-    let (mut i, mut depth) = (0, 0_usize);
-    while i < body.len() {
-        match body[i] {
-            b'"' => {
-                i += 1;
-                while i < body.len() && body[i] != b'"' {
-                    i += if body[i] == b'\\' { 2 } else { 1 };
-                }
-                i += 1;
-            }
-            b'{' | b'[' => {
-                depth += 1;
-                i += 1;
-                continue;
-            }
-            b'}' | b']' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            b'.' => return true,
-            c if c.is_ascii_digit() => {
-                let rest = &body[i..];
-                let len = rest.iter().take_while(|c| c.is_ascii_digit()).count();
-                if matches!(rest.get(len), Some(b'.' | b'e' | b'E')) {
-                    return true;
-                }
-                i += len;
-            }
-            c if c.is_ascii_alphabetic() => {
-                let rest = &body[i..];
-                let len = rest
-                    .iter()
-                    .take_while(|c| c.is_ascii_alphanumeric())
-                    .count();
-                if !matches!(&rest[..len], b"true" | b"false" | b"null") {
-                    return true;
-                }
-                i += len;
-            }
-            _ => {
-                i += 1;
-                continue;
-            }
-        }
-        // A value just ended: at the top level, it was the first.
-        if depth == 0 {
-            return false;
-        }
-    }
-    false
 }
 
 /// The block answers that must be compared at least once each.
@@ -693,37 +630,6 @@ fn block_answer(asked: &Asked, nodeos: &[Answer]) -> Option<&'static str> {
         (Endpoint::GetBlockHeader, true) => BLOCK_ANSWERS[2],
         (Endpoint::GetRawBlock, _) => BLOCK_ANSWERS[3],
     })
-}
-
-#[test]
-fn the_subset_check_reads_the_first_value_alone() {
-    for outside in [
-        &br#"{"block_num_or_id":1.5}"#[..],
-        br#"{"block_num_or_id":1e5}"#,
-        br#"{"block_num_or_id":tru}"#,
-        br#"{"a":[1,{"b":.5}],"block_num_or_id":"1"}"#,
-        b"1.5",
-    ] {
-        assert!(
-            outside_the_subset(outside),
-            "{}",
-            String::from_utf8_lossy(outside)
-        );
-    }
-    for inside in [
-        &br#"{"block_num_or_id":"1.5e"}"#[..],
-        br#"{"block_num_or_id":-1,"include_extensions":true}"#,
-        br#"{"block_num_or_id":"1"}garbage"#,
-        br#"{"block_num_or_id":"1"} 1.5"#,
-        br#"{"a":{"b":[1,-2,"s",true,false,null,{},[]]}}tru"#,
-        br#""x" 1.5"#,
-    ] {
-        assert!(
-            !outside_the_subset(inside),
-            "{}",
-            String::from_utf8_lossy(inside)
-        );
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

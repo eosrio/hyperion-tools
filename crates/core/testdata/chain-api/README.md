@@ -58,8 +58,8 @@ directory (the script refuses one that is not) with a `--block` for a block of e
 `--image` alone starts a bare chain whose first blocks hold none of them.
 
 Requests nodeos reads differently from strict JSON (fractions, exponents and bare words, which
-fc reads as doubles or strings) are not captured: a server of archived ranges answers them as
-unparsable, a documented deviation.
+fc reads as doubles or strings) are not captured here. The request parser follows fc's legacy
+JSON reader for them, and its own unit tests pin those cases.
 
 ## `eos-mainnet/480385480/`: the public block of `testdata/blocks`
 
