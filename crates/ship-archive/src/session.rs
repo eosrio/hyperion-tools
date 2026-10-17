@@ -26,6 +26,10 @@
 //! before its first frame, so only an I/O error while streaming a large payload can end one
 //! mid-message. At shutdown each session finishes the message it is writing and sends Close
 //! 1001.
+//!
+//! A session has no idle timeout and sends nothing unasked, so a client may stay idle for as
+//! long as it likes. TCP keepalive ([`KEEPALIVE_IDLE`]) still finds a peer that vanished
+//! without closing, whose session then ends with a read error and frees its slot.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -37,6 +41,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use hyperion_ship::protocol::{self, BlocksReq, Request};
+use socket2::{SockRef, TcpKeepalive};
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, OwnedSemaphorePermit, watch};
 use tokio_tungstenite::accept_hdr_async_with_config;
@@ -59,6 +64,16 @@ use crate::store::Store;
 pub const MAX_QUEUED_STATUS: usize = 1024;
 /// How long a client has to complete the WebSocket upgrade.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// TCP keepalive on every connection: after this long without traffic the kernel probes the
+/// peer, every [`KEEPALIVE_INTERVAL`], and gives up after [`KEEPALIVE_RETRIES`] unanswered
+/// probes. A session has no idle timeout, so without it a peer that vanished without a FIN or
+/// RST (a host that lost power, an expired NAT entry) would hold its `--max-sessions` slot
+/// forever. Probes are below the WebSocket: the client sees nothing.
+pub const KEEPALIVE_IDLE: Duration = Duration::from_secs(60);
+/// Between two keepalive probes (where the platform lets it be set).
+pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+/// Unanswered keepalive probes that end the connection (where the platform lets it be set).
+pub const KEEPALIVE_RETRIES: u32 = 5;
 /// How long a session waits for the client's Close reply after its own Close at shutdown.
 const CLOSE_WAIT: Duration = Duration::from_secs(2);
 
@@ -227,8 +242,9 @@ pub(crate) async fn run(
     ctx: Arc<Ctx>,
     mut stop: watch::Receiver<bool>,
 ) {
-    // Spring disables Nagle too: a result's frames go out as soon as they are written.
-    let _ = tcp.set_nodelay(true);
+    if let Err(e) = tune(&tcp) {
+        warn!(%peer, "setting TCP_NODELAY and keepalive failed: {e}");
+    }
     let full = permit.is_none();
     let server = ctx.server.clone();
     // tungstenite fixes the callback's type, error response included.
@@ -296,6 +312,27 @@ pub(crate) async fn run(
     );
     // Dropping both halves closes the TCP connection. Unless a Close was exchanged above,
     // the client sees the connection end without one, as from Spring on an error.
+}
+
+/// Set up an accepted connection. Spring disables Nagle too: a result's frames go out as soon
+/// as they are written. Keepalive turns a vanished peer into a read error, which ends the
+/// session and frees its slot.
+fn tune(tcp: &TcpStream) -> std::io::Result<()> {
+    tcp.set_nodelay(true)?;
+    let keepalive = TcpKeepalive::new().with_time(KEEPALIVE_IDLE);
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "windows"
+    ))]
+    let keepalive = keepalive
+        .with_interval(KEEPALIVE_INTERVAL)
+        .with_retries(KEEPALIVE_RETRIES);
+    SockRef::from(tcp).set_tcp_keepalive(&keepalive)
 }
 
 /// The response refusing an upgrade over `--max-sessions`.
@@ -624,6 +661,26 @@ mod tests {
         assert_eq!(window(&s, 1000), (Some((4, 11)), 3));
         s.blocks(request(20, 20, 100));
         assert_eq!(window(&s, 1000), (None, 0));
+    }
+
+    #[tokio::test]
+    async fn accepted_connections_get_nodelay_and_keepalive() {
+        // A peer that vanishes cannot be built on loopback; what reclaims its slot is the
+        // keepalive set on every accepted socket.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap());
+        let (client, accepted) = tokio::join!(client, listener.accept());
+        let (_client, (tcp, _)) = (client.unwrap(), accepted.unwrap());
+        assert!(!SockRef::from(&tcp).keepalive().unwrap(), "off by default");
+        tune(&tcp).unwrap();
+        let sock = SockRef::from(&tcp);
+        assert!(sock.keepalive().unwrap() && tcp.nodelay().unwrap());
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            assert_eq!(sock.tcp_keepalive_time().unwrap(), KEEPALIVE_IDLE);
+            assert_eq!(sock.tcp_keepalive_interval().unwrap(), KEEPALIVE_INTERVAL);
+            assert_eq!(sock.tcp_keepalive_retries().unwrap(), KEEPALIVE_RETRIES);
+        }
     }
 
     #[test]

@@ -25,6 +25,9 @@ serde_json = { workspace = true }   # --abi files, /health and `check --json`
 tiny_http = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
+# TCP keepalive timing on accepted connections, which tokio does not expose. Pure Rust (libc and
+# windows-sys); already in the lock through tokio, which enables the same "all" feature.
+socket2 = { version = "0.6", features = ["all"] }
 # Leveled, structured server logs (per-session close lines, per-read warnings, text or JSON),
 # filtered with RUST_LOG. Crate-local, as in light-api, until other crates adopt them.
 tracing = "0.1"

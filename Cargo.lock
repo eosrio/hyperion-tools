@@ -135,6 +135,7 @@ dependencies = [
  "hex",
  "hyperion-ship",
  "serde_json",
+ "socket2",
  "tempfile",
  "tiny_http",
  "tokio",
