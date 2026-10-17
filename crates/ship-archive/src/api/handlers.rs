@@ -2,7 +2,9 @@
 //!
 //!  1. The body is read: at most `--api-max-body-bytes` (a larger one, declared or streamed,
 //!     gets `413` and the connection is closed), within the request timeout (otherwise the
-//!     connection is closed unanswered).
+//!     connection is closed unanswered). Past its first [`UNRESERVED_BODY`] bytes it holds
+//!     room reserved from the memory budget, taken as it arrives; a refusal is `503 Busy` and
+//!     the connection is closed.
 //!  2. The request-target must be origin-form and hold no `..`, Beast's check: anything else
 //!     (`OPTIONS *`, an absolute or authority form) is `400 Illegal request-target`.
 //!  3. `OPTIONS`, on any path, is `200 {}`.
@@ -15,7 +17,8 @@
 //! will hold from the memory budget, reads the block, checks it is the block asked for, walks
 //! it and renders the body. Once the block is dropped the reservation shrinks to the body,
 //! which keeps it until hyper has written it out: a client that does not read its answer holds
-//! budget, never memory beyond it.
+//! budget, never memory beyond it, and only until the connection's socket gives up on it
+//! (`super::Socket`).
 
 use std::any::Any;
 use std::fmt;
@@ -47,6 +50,10 @@ const SLACK: u64 = 64 << 10;
 /// No block renders to more than this many times its packed size: the densest element, a
 /// packed receipt with no signatures and empty data, takes 11 bytes and renders to under 170.
 const MAX_EXPANSION: u64 = 16;
+/// What of a request body is held without a reservation: every real request, a block number
+/// or id in a small JSON object, is far smaller, so it is answered even when the budget is
+/// full; a larger body reserves the rest.
+const UNRESERVED_BODY: usize = 16 << 10;
 
 /// The connection is closed without an answer (a body that did not arrive in time, or could
 /// not be read).
@@ -129,11 +136,24 @@ pub(super) async fn handle(
         Some(t) if head.method != Method::OPTIONS => route(t),
         _ => ApiRoute::Other,
     };
-    let body = match read_body(body, ctx.cfg.max_body_bytes, ctx.cfg.request_timeout).await {
+    let (cap, timeout) = (ctx.cfg.max_body_bytes, ctx.cfg.request_timeout);
+    let body = match read_body(body, cap, timeout, &ctx.budget).await {
         Ok(body) => body,
         Err(Unread::TooLarge) => {
             ctx.metrics.api_rejected(ApiRejection::BodyTooLarge);
             let reply = Reply::error(&ApiError::TooLarge(ctx.cfg.max_body_bytes));
+            return Ok(respond(&ctx, peer, route, None, reply, started));
+        }
+        Err(Unread::Refused(used)) => {
+            ctx.metrics.api_rejected(ApiRejection::Memory);
+            debug!(%peer, "chain API: the memory budget cannot hold the request body");
+            // The rest of the body is not read, so the connection cannot carry another request.
+            let reply = Reply {
+                close: true,
+                ..Reply::error(&ApiError::too_many_bytes(
+                    usize::try_from(used).unwrap_or(usize::MAX),
+                ))
+            };
             return Ok(respond(&ctx, peer, route, None, reply, started));
         }
         Err(Unread::Late) => {
@@ -153,9 +173,23 @@ pub(super) async fn handle(
     let (reply, block) = match target {
         None => (Reply::error(&ApiError::IllegalTarget), None),
         Some(_) if head.method == Method::OPTIONS => (Reply::ok(b"{}".to_vec()), None),
-        Some(target) => answer(&ctx, peer, target, &body).await,
+        Some(target) => answer(&ctx, peer, target, body).await,
     };
     Ok(respond(&ctx, peer, route, block, reply, started))
+}
+
+/// The whole response refusing a connection over `--api-max-connections`, sent before its
+/// request is read: `503 Busy` with the headers [`respond`] gives it, and `Connection: close`.
+pub(super) fn refusal(max_connections: usize) -> Vec<u8> {
+    let body = ApiError::Busy(format!("Too many connections: {max_connections}")).body();
+    let mut out = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n\
+         Server: {SERVER_HEADER}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    out.extend_from_slice(&body);
+    out
 }
 
 /// The raw request-target, when it is one nodeos serves: origin-form (no scheme, no
@@ -184,25 +218,75 @@ enum Unread {
     TooLarge,
     /// Not complete in time.
     Late,
+    /// The memory budget could not hold it; the bytes reserved then.
+    Refused(u64),
     /// The connection failed while it was read.
     Failed(hyper::Error),
 }
 
-/// The whole body, if it is at most `cap` bytes and arrives within `timeout`.
-async fn read_body(body: Incoming, cap: usize, timeout: Duration) -> Result<Vec<u8>, Unread> {
-    if body.size_hint().lower() > cap as u64 {
+/// A request body, and the budget its room past [`UNRESERVED_BODY`] holds.
+#[derive(Default)]
+struct Body {
+    bytes: Vec<u8>,
+    reserved: Vec<Reservation>,
+}
+
+impl Body {
+    /// Make room for `len` bytes, at most `limit`: the room grows to the next power of two, and
+    /// what of it lies past [`UNRESERVED_BODY`] is reserved before it is allocated.
+    fn make_room(
+        &mut self,
+        len: usize,
+        limit: usize,
+        budget: &Arc<MemoryBudget>,
+    ) -> Result<(), Unread> {
+        if len <= self.bytes.capacity() {
+            return Ok(());
+        }
+        let room = len
+            .checked_next_power_of_two()
+            .unwrap_or(len)
+            .min(limit)
+            .max(len);
+        let held: u64 = self.reserved.iter().map(Reservation::bytes).sum();
+        let needed = room.saturating_sub(UNRESERVED_BODY) as u64;
+        if needed > held {
+            let more = budget
+                .try_reserve(needed - held)
+                .ok_or_else(|| Unread::Refused(budget.used()))?;
+            self.reserved.push(more);
+        }
+        self.bytes.reserve_exact(room - self.bytes.len());
+        Ok(())
+    }
+}
+
+/// The whole body, if it is at most `cap` bytes, arrives within `timeout`, and `budget` holds
+/// what of it lies past [`UNRESERVED_BODY`].
+async fn read_body(
+    body: Incoming,
+    cap: usize,
+    timeout: Duration,
+    budget: &Arc<MemoryBudget>,
+) -> Result<Body, Unread> {
+    let hint = body.size_hint();
+    if hint.lower() > cap as u64 {
         return Err(Unread::TooLarge);
     }
+    // No room past a declared length.
+    let limit = hint.exact().map_or(cap, |n| to_usize(n).min(cap));
     let read = async {
         let mut body = body;
-        let mut out = Vec::new();
+        let mut out = Body::default();
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(Unread::Failed)?;
             if let Ok(data) = frame.into_data() {
-                if out.len() + data.len() > cap {
+                let len = out.bytes.len() + data.len();
+                if len > cap {
                     return Err(Unread::TooLarge);
                 }
-                out.extend_from_slice(&data);
+                out.make_room(len, limit, budget)?;
+                out.bytes.extend_from_slice(&data);
             }
         }
         Ok(out)
@@ -213,7 +297,7 @@ async fn read_body(body: Incoming, cap: usize, timeout: Duration) -> Result<Vec<
 }
 
 /// The answer to a request with a legal target other than `OPTIONS`, and the block it named.
-async fn answer(ctx: &Ctx, peer: SocketAddr, target: &str, body: &[u8]) -> (Reply, Option<u32>) {
+async fn answer(ctx: &Ctx, peer: SocketAddr, target: &str, body: Body) -> (Reply, Option<u32>) {
     if let Some(endpoint) = Endpoint::from_target(target) {
         return block(ctx, peer, endpoint, body).await;
     }
@@ -237,9 +321,13 @@ async fn block(
     ctx: &Ctx,
     peer: SocketAddr,
     endpoint: Endpoint,
-    body: &[u8],
+    body: Body,
 ) -> (Reply, Option<u32>) {
-    let req = match chainapi::parse(endpoint, body) {
+    let parsed = chainapi::parse(endpoint, &body.bytes);
+    // The request is all that is needed of the body: its budget goes back before the block's
+    // is taken.
+    drop(body);
+    let req = match parsed {
         Ok(req) => req,
         Err(e) => return (Reply::error(&e), None),
     };
@@ -585,6 +673,67 @@ mod tests {
         assert_eq!(budget.used(), 0);
         // A body that holds no budget is plain bytes.
         assert_eq!(&into_bytes(vec![1, 2], Vec::new())[..], [1, 2]);
+    }
+
+    #[test]
+    fn request_bodies_reserve_their_room_past_the_unreserved_part() {
+        const KIB: usize = 1 << 10;
+        let budget = MemoryBudget::new(1 << 20);
+        let mut body = Body::default();
+        // Room grows to powers of two; the first 16 KiB of it is not reserved.
+        for (len, room, used) in [
+            (100, 128, 0),
+            (128, 128, 0),
+            (16 * KIB, 16 * KIB, 0),
+            (16 * KIB + 1, 32 * KIB, 16 * KIB),
+            (40 * KIB, 64 * KIB, 48 * KIB),
+            (600 * KIB, 1024 * KIB, 1008 * KIB),
+        ] {
+            assert!(body.make_room(len, 2 << 20, &budget).is_ok());
+            assert_eq!(body.bytes.capacity(), room, "{len}");
+            assert_eq!(budget.used(), used as u64, "{len}");
+        }
+        drop(body);
+        assert_eq!(budget.used(), 0);
+
+        // Never past a declared length.
+        let mut body = Body::default();
+        assert!(body.make_room(20 * KIB, 50 * KIB, &budget).is_ok());
+        assert!(body.make_room(40 * KIB, 50 * KIB, &budget).is_ok());
+        assert_eq!(body.bytes.capacity(), 50 * KIB);
+        assert_eq!(budget.used(), 34 * KIB as u64);
+
+        // A budget that cannot hold the room refuses it, and nothing more is reserved.
+        let held = budget.try_reserve((1 << 20) - 40 * KIB as u64).unwrap();
+        let used = budget.used();
+        assert!(matches!(
+            body.make_room(60 * KIB, 2 << 20, &budget),
+            Err(Unread::Refused(n)) if n == used
+        ));
+        assert_eq!((budget.used(), body.bytes.capacity()), (used, 50 * KIB));
+        drop((body, held));
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn a_connection_over_the_cap_is_refused_with_a_whole_response() {
+        let refusal = String::from_utf8(refusal(7)).unwrap();
+        let (head, body) = refusal.split_once("\r\n\r\n").unwrap();
+        let want = ApiError::Busy("Too many connections: 7".into()).body();
+        assert_eq!(body.as_bytes(), want);
+        let mut lines = head.split("\r\n");
+        assert_eq!(lines.next(), Some("HTTP/1.1 503 Service Unavailable"));
+        let mut headers: Vec<_> = lines.collect();
+        headers.sort();
+        assert_eq!(
+            headers,
+            [
+                "Connection: close".to_owned(),
+                format!("Content-Length: {}", want.len()),
+                "Content-Type: application/json".to_owned(),
+                format!("Server: {SERVER_HEADER}"),
+            ]
+        );
     }
 
     #[test]

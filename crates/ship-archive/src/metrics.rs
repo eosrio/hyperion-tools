@@ -25,8 +25,8 @@
 //!
 //! The `api_` series count the chain API (`--api`). `endpoint` is one of [`ApiRoute::ALL`]'s
 //! labels and `code` the HTTP status answered; a pair appears once it has been counted. The
-//! rejected `reason` is one of `in_flight`, `memory`, `body_too_large` and `timeout`, the
-//! failure `reason` one of `read`, `integrity` and `panic`.
+//! rejected `reason` is one of `in_flight`, `memory`, `body_too_large`, `timeout` and
+//! `connections`, the failure `reason` one of `read`, `integrity` and `panic`.
 
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -92,7 +92,7 @@ impl ApiRoute {
     }
 }
 
-/// Why a chain API request got no answer of its own.
+/// Why a chain API request or connection got no whole answer of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApiRejection {
     /// Every request slot stayed taken for `--api-queue-ms`.
@@ -101,16 +101,21 @@ pub enum ApiRejection {
     Memory,
     /// The body was larger than `--api-max-body-bytes`.
     BodyTooLarge,
-    /// The headers or the body did not arrive in time; the connection was closed.
+    /// The headers or the body did not arrive in time, or the client took none of its answer
+    /// for as long; the connection was closed.
     Timeout,
+    /// `--api-max-connections` were open: the connection was answered 503 and closed, its
+    /// request unread.
+    Connections,
 }
 
 impl ApiRejection {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::InFlight,
         Self::Memory,
         Self::BodyTooLarge,
         Self::Timeout,
+        Self::Connections,
     ];
 
     pub fn label(self) -> &'static str {
@@ -119,6 +124,7 @@ impl ApiRejection {
             Self::Memory => "memory",
             Self::BodyTooLarge => "body_too_large",
             Self::Timeout => "timeout",
+            Self::Connections => "connections",
         }
     }
 }
@@ -169,7 +175,7 @@ pub struct Metrics {
     api_nanos: [AtomicU64; 7],
     api_in_flight: AtomicU64,
     /// Indexed as [`ApiRejection::ALL`].
-    api_rejected: [AtomicU64; 4],
+    api_rejected: [AtomicU64; 5],
     /// Indexed as [`ApiFailure::ALL`].
     api_failures: [AtomicU64; 3],
     api_bytes: AtomicU64,
@@ -457,7 +463,7 @@ impl Metrics {
             Series {
                 name: "api_rejected_total",
                 kind: "counter",
-                help: "Chain API requests refused or dropped before an answer of their own.",
+                help: "Chain API requests and connections refused, or closed before their answer was written.",
                 values: ApiRejection::ALL
                     .iter()
                     .zip(&self.api_rejected)
@@ -580,7 +586,10 @@ mod tests {
         m.api_rejected(ApiRejection::Memory);
         m.api_failure(ApiFailure::Integrity);
         m.api_failure(ApiFailure::Integrity);
-        assert_eq!(ApiRejection::ALL.map(|r| m.api_rejections(r)), [0, 1, 0, 0]);
+        assert_eq!(
+            ApiRejection::ALL.map(|r| m.api_rejections(r)),
+            [0, 1, 0, 0, 0]
+        );
         assert_eq!(ApiFailure::ALL.map(|f| m.api_failures(f)), [0, 2, 0]);
         // Labels are the routes' and the endpoints' own names.
         for ep in Endpoint::ALL {

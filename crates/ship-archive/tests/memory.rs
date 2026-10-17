@@ -10,7 +10,8 @@
 //! refuse anything holds more than the bound.
 //!
 //! The chain API (`--api`) holds its blocks and bodies within the same budget, so the bound
-//! holds with API clients hammering it too, some of them never reading their answers.
+//! holds with API clients hammering it too, some of them never reading their answers, and with
+//! clients sending large request bodies they never finish.
 //!
 //! Each test measures the whole process, so they run one at a time.
 
@@ -33,7 +34,7 @@ use hyperion_ship::testkit::ship::{Encoding, LogBuilder};
 use ship_archive::Server;
 use ship_archive::api::ApiConfig;
 use ship_archive::fetch::{FetchLimits, worst_case_bytes};
-use ship_archive::metrics::ApiRoute;
+use ship_archive::metrics::{ApiRejection, ApiRoute};
 use ship_archive::store::StoreConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
@@ -286,7 +287,8 @@ const STALLED_API: usize = 6;
 const READING_API: usize = 8;
 const API_ROUNDS: u32 = 5;
 /// What one API connection holds outside the budget, at most: hyper's 16 KiB buffer, the
-/// response head, the request, the connection task, and the client buffer of this test.
+/// response head, the request and up to 16 KiB of its body, the connection task, and the client
+/// buffer of this test.
 const API_CONNECTION: u64 = 128 << 10;
 
 /// One HTTP request for raw block `n`.
@@ -512,4 +514,127 @@ fn chain_api_requests_stay_within_the_memory_bound() {
         peak <= bound,
         "the server held {peak} bytes, over the {bound}-byte bound"
     );
+}
+
+/// API clients that each send all but the last byte of a body of `--api-max-body-bytes`.
+const BODY_CLIENTS: usize = 32;
+const BODY_BUDGET: u64 = 16 << 20;
+
+/// What the body clients send from: one static buffer, so they allocate nothing for it.
+static PADDING: [u8; 64 << 10] = [b' '; 64 << 10];
+
+/// Send a `get_raw_block` head declaring `len` bytes of body, then all of them but the last,
+/// and stop: the connection, or `None` if the server closed it first.
+async fn withheld_body(addr: SocketAddr, len: usize) -> Option<TcpStream> {
+    let mut tcp = TcpStream::connect(addr).await.expect("connect to --api");
+    let head = format!(
+        "POST /v1/chain/get_raw_block HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {len}\r\n\r\n"
+    );
+    tcp.write_all(head.as_bytes()).await.ok()?;
+    let mut left = len - 1;
+    while left > 0 {
+        let n = left.min(PADDING.len());
+        tcp.write_all(&PADDING[..n]).await.ok()?;
+        left -= n;
+    }
+    Some(tcp)
+}
+
+#[test]
+fn chain_api_request_bodies_stay_within_the_memory_bound() {
+    let _serial = serial();
+    let fx = Fixture::standard();
+    let max_block = (2..201)
+        .map(|n| fx.chain.block(n).body.len() as u64)
+        .max()
+        .unwrap();
+    let mut cfg = fx.serve();
+    cfg.max_sessions = 1;
+    cfg.stream_threshold = THRESHOLD;
+    cfg.memory_budget = BODY_BUDGET;
+    let mut api = ApiConfig::new(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)), cfg.io_threads);
+    // Nothing is dropped for being slow while the test measures.
+    api.request_timeout = Duration::from_secs(60);
+    let cap = api.max_body_bytes;
+    cfg.api = Some(api);
+    let limits = FetchLimits {
+        stream_threshold: THRESHOLD,
+    };
+    let bound =
+        worst_case_bytes(BODY_BUDGET, 1, &limits, max_block) + BODY_CLIENTS as u64 * API_CONNECTION;
+    // What the bodies would hold outside the budget, were they not reserved.
+    assert!(BODY_CLIENTS as u64 * (cap as u64 - (16 << 10)) > bound);
+
+    // Counted from here: the runtime, the server, the clients.
+    let base = NOW.load(Relaxed);
+    PEAK.store(base, Relaxed);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (held, refused, budget_peak) = runtime.block_on(async {
+        let server = Server::bind(cfg).await.expect("the server starts");
+        let api = server.api_addr().expect("--api is bound");
+        let (metrics, budget) = (Arc::clone(server.metrics()), Arc::clone(server.budget()));
+        let (stop, stopped) = oneshot::channel::<()>();
+        let task = tokio::spawn(server.run(async move {
+            let _ = stopped.await;
+        }));
+
+        // Every body is read as far as it comes, until the budget refuses room for more.
+        let clients: Vec<_> = (0..BODY_CLIENTS)
+            .map(|_| tokio::spawn(withheld_body(api, cap)))
+            .collect();
+        let mut open = Vec::new();
+        for client in clients {
+            open.extend(client.await.expect("a body client"));
+        }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut seen = (budget.used(), metrics.api_rejections(ApiRejection::Memory));
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let now = (budget.used(), metrics.api_rejections(ApiRejection::Memory));
+            if now == seen {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no steady state: {now:?} after {seen:?}"
+            );
+            seen = now;
+        }
+        let measured = (seen.0, seen.1, budget.peak());
+        drop(open);
+        let deadline = Instant::now() + WAIT;
+        while budget.used() > 0 {
+            assert!(
+                Instant::now() < deadline,
+                "{} bytes of the budget left",
+                budget.used()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        drop(stop);
+        task.await.unwrap().unwrap();
+        measured
+    });
+    drop(runtime);
+    let peak = (PEAK.load(Relaxed) - base) as u64;
+    let mib = |b: u64| b as f64 / f64::from(1 << 20);
+    eprintln!(
+        "peak {:.1} MiB of a {:.1} MiB bound; {BODY_CLIENTS} bodies of {:.1} MiB withheld by their \
+         last byte held {:.1} MiB of the budget, {refused} refused; at most {:.1} MiB of the \
+         budget used",
+        mib(peak),
+        mib(bound),
+        mib(cap as u64),
+        mib(held),
+        mib(budget_peak)
+    );
+    assert!(
+        peak <= bound,
+        "the server held {peak} bytes, over the {bound}-byte bound"
+    );
+    assert!(held > 0 && refused > 0 && budget_peak <= BODY_BUDGET);
 }

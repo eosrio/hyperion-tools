@@ -4,8 +4,9 @@
 //!     for a block log reaching below the SHiP logs, and for a public mainnet block;
 //!   * S2: dispatch on the whole target, any method, OPTIONS, illegal targets, the listings;
 //!   * S3: the response headers and keep-alive;
-//!   * S4: empty, unparsable, oversized and slow bodies, and slow heads;
-//!   * S5: full slots and a full memory budget, and a body outgrowing its first reservation;
+//!   * S4: empty, unparsable, oversized and slow bodies, slow heads, and answers left unread;
+//!   * S5: full slots and a full memory budget, a body outgrowing its first reservation, large
+//!     request bodies within the budget, and connections over `--api-max-connections`;
 //!   * S6: a block that does not decode and a block that cannot be read;
 //!   * S7: configurations refused at startup;
 //!   * S8: a SHiP session streaming while API clients hammer `get_raw_block`;
@@ -37,7 +38,7 @@ use ship_archive::metrics::{ApiFailure, ApiRejection, ApiRoute, Metrics};
 use ship_archive::store::{BlocksMode, StoreConfig};
 use ship_archive::{SERVER_HEADER, ServeConfig, Server};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
@@ -338,6 +339,17 @@ impl Http {
         }
     }
 
+    /// A connection whose client takes little at a time: with an 8 KiB receive buffer, the
+    /// server's writes soon wait on its reads.
+    async fn connect_small(addr: SocketAddr) -> Self {
+        let socket = TcpSocket::new_v4().unwrap();
+        socket.set_recv_buffer_size(8 << 10).unwrap();
+        Self {
+            tcp: socket.connect(addr).await.expect("connect to --api"),
+            buf: Vec::new(),
+        }
+    }
+
     async fn send(&mut self, bytes: &[u8]) {
         self.tcp.write_all(bytes).await.expect("send");
     }
@@ -422,6 +434,15 @@ impl Http {
             Err(_) => panic!("nothing from the server within {WAIT:?}"),
         }
     }
+}
+
+/// The bytes of a POST with `body`.
+fn post_bytes(target: &str, body: &str) -> Vec<u8> {
+    format!(
+        "POST {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
 }
 
 /// One POST on a connection of its own.
@@ -920,6 +941,120 @@ async fn bodies_are_read_within_their_limits_and_parsed_as_nodeos_does() {
     assert_eq!(server.metrics.api_rejections(ApiRejection::Timeout), 3);
 }
 
+/// Block 5 carries 6 MiB of transaction data: its raw body, the data in hex, is over 12 MiB,
+/// more than the sockets between the server and a client that does not read can take.
+fn bulky(n: u32) -> BlockSpec {
+    let mut spec = rich(n);
+    if n == 5 {
+        spec.transactions = vec![Receipt {
+            status: 0,
+            cpu_usage_us: 100,
+            net_usage_words: 10,
+            trx: ReceiptTrx::Packed {
+                signatures: vec![Signature::K1([5; 65])],
+                compression: 0,
+                packed_context_free_data: Vec::new(),
+                packed_trx: vec![0xa5; 6 << 20],
+            },
+        }];
+    }
+    spec
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_left_unread_is_cut_off_and_gives_its_budget_back() {
+    let chain = Chain::build(bulky, |_| {});
+    let want = rendered(&chain.block(5).body, GetRawBlock, false);
+    assert!(want.len() > 12 << 20, "{} bytes", want.len());
+    let timeout = Duration::from_secs(1);
+    let mut cfg = chain.config();
+    api_cfg(&mut cfg).request_timeout = timeout;
+    let server = start(cfg).await;
+    let request = post_bytes(GetRawBlock.path(), &body_for(GetRawBlock, "5", false));
+
+    // A client that pauses between reads, never for the whole timeout, gets the whole answer
+    // however long that takes: the limit is on progress, not on the answer.
+    let mut slow = Http::connect_small(server.api).await;
+    let started = Instant::now();
+    slow.send(&request).await;
+    let mut chunk = vec![0; 64 << 10];
+    let mut burst = 0;
+    loop {
+        if let Some(at) = slow.buf.windows(4).position(|w| w == b"\r\n\r\n")
+            && slow.buf.len() >= at + 4 + want.len()
+        {
+            break;
+        }
+        let n = tokio::time::timeout(WAIT, slow.tcp.read(&mut chunk))
+            .await
+            .expect("more of the answer")
+            .expect("a read");
+        assert!(
+            n > 0,
+            "the connection of a client reading its answer was closed"
+        );
+        slow.buf.extend_from_slice(&chunk[..n]);
+        burst += n;
+        if burst >= 2 << 20 {
+            burst = 0;
+            tokio::time::sleep(timeout / 4).await;
+        }
+    }
+    let a = slow.answer(false).await.expect("an answer");
+    assert_eq!(a.status, 200);
+    assert!(a.body == want, "{} bytes, not the block's", a.body.len());
+    assert!(
+        started.elapsed() > timeout,
+        "read in {:?}, within the timeout",
+        started.elapsed()
+    );
+    until("the answer read gives its budget back", || {
+        server.budget.used() == 0
+    })
+    .await;
+
+    drop(slow);
+
+    // A client that stops reading is cut off once an answer has waited the whole timeout with
+    // none of it taken, and the budget the answer held is given back. It asks several times at
+    // once: some platforms take whole answers into the socket, whatever their size, before one
+    // has to wait.
+    let asks = 8;
+    let mut stalled = Http::connect_small(server.api).await;
+    let asked = Instant::now();
+    stalled.send(&request.repeat(asks)).await;
+    tokio::time::sleep(timeout / 2).await;
+    assert!(
+        server.budget.used() > 0,
+        "an answer waiting on its client keeps its reservation"
+    );
+    until("the unread answer is cut off", || {
+        server.metrics.api_rejections(ApiRejection::Timeout) == 1
+    })
+    .await;
+    assert!(
+        asked.elapsed() >= timeout,
+        "cut off after {:?}",
+        asked.elapsed()
+    );
+    until("the unread answer gives its budget back", || {
+        server.budget.used() == 0
+    })
+    .await;
+    // The connection is closed: the client reads what was sent before the cut, then the end.
+    let mut rest = std::mem::take(&mut stalled.buf);
+    let _ = tokio::time::timeout(WAIT, stalled.tcp.read_to_end(&mut rest))
+        .await
+        .expect("the connection is closed");
+    assert!(rest.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert!(
+        rest.len() < asks * want.len(),
+        "{} bytes of {asks} {}-byte answers",
+        rest.len(),
+        want.len()
+    );
+}
+
 // ---- S5 ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1034,6 +1169,115 @@ async fn a_body_larger_than_its_first_reservation_is_rendered_again() {
     let want = busy(&format!("Too many bytes in flight: {first}"));
     assert_eq!((a.status, a.text()), (503, want.as_str()));
     assert_eq!(server.budget.used(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn request_bodies_past_16_kib_are_held_within_the_memory_budget() {
+    let chain = Chain::new();
+    let mut cfg = chain.config();
+    cfg.memory_budget = 1 << 20;
+    let server = start(cfg).await;
+    let head = format!(
+        "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n",
+        GetRawBlock.path(),
+        2 << 20
+    );
+
+    // A body on its way holds room to the next power of two of what has arrived; all of that
+    // room but the first 16 KiB is reserved.
+    let mut slow = Http::connect(server.api).await;
+    slow.send(head.as_bytes()).await;
+    slow.send(&vec![b' '; 600 << 10]).await;
+    let held = (1 << 20) - (16 << 10);
+    until("the body's room is reserved", || {
+        server.budget.used() == held
+    })
+    .await;
+
+    // A request whose body fits in the unreserved part is answered with the budget full.
+    let a = post(server.api, "/v1/node/get_supported_apis", "").await;
+    assert_eq!((a.status, a.text()), (200, SUPPORTED));
+    // A body needing more room than the budget has left is refused once it does, and its
+    // connection is closed.
+    let mut refused = Http::connect(server.api).await;
+    refused.send(head.as_bytes()).await;
+    refused.send(&vec![b' '; (32 << 10) + 1]).await;
+    let a = refused.answer(false).await.expect("an answer");
+    let used: u64 = a
+        .text()
+        .split("Too many bytes in flight: ")
+        .nth(1)
+        .and_then(|t| t.split('"').next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("{}", a.text()));
+    let want = busy(&format!("Too many bytes in flight: {used}"));
+    assert_eq!((a.status, a.text()), (503, want.as_str()));
+    // What the stalled body holds, and what of its own room the refused one held then.
+    assert!((held..=1 << 20).contains(&used), "{used}");
+    assert_eq!(a.header("connection"), Some("close"));
+    assert!(refused.closes_within(WAIT).await);
+    assert_eq!(server.metrics.api_rejections(ApiRejection::Memory), 1);
+    assert_eq!(server.budget.used(), held);
+    drop(slow);
+    until("the first body gives its budget back", || {
+        server.budget.used() == 0
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connections_over_the_cap_are_answered_busy_and_closed() {
+    let chain = Chain::new();
+    let mut cfg = chain.config();
+    api_cfg(&mut cfg).max_connections = 2;
+    let server = start(cfg).await;
+    let body = body_for(GetRawBlock, "3", false);
+    let mut first = Http::connect(server.api).await;
+    let mut second = Http::connect(server.api).await;
+    for http in [&mut first, &mut second] {
+        assert_eq!(http.post(GetRawBlock.path(), &body).await.status, 200);
+    }
+
+    // One more connection is answered at once, before it sends anything, and closed.
+    let mut over = Http::connect(server.api).await;
+    let a = over.answer(false).await.expect("a refusal");
+    let want = busy("Too many connections: 2");
+    assert_eq!((a.status, a.text()), (503, want.as_str()));
+    assert_eq!(
+        a.headers(),
+        [
+            "Connection: close".to_owned(),
+            format!("Content-Length: {}", want.len()),
+            "Content-Type: application/json".to_owned(),
+            format!("Server: {SERVER_HEADER}"),
+        ]
+    );
+    assert!(over.closes_within(WAIT).await);
+    assert_eq!(server.metrics.api_rejections(ApiRejection::Connections), 1);
+
+    // The open connections are still served, and once one closes its place is free again.
+    assert_eq!(first.post(GetRawBlock.path(), &body).await.status, 200);
+    drop(second);
+    let deadline = Instant::now() + WAIT;
+    let mut next = loop {
+        let mut http = Http::connect(server.api).await;
+        // A refusal comes unasked; an accepted connection waits for its request.
+        if tokio::time::timeout(QUIET, http.read_more()).await.is_err() {
+            break http;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the closed connection's place stays taken"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(next.post(GetRawBlock.path(), &body).await.status, 200);
+    drop(server);
+
+    let mut cfg = chain.config();
+    api_cfg(&mut cfg).max_connections = 0;
+    let e = Server::bind(cfg).await.err().expect("refused");
+    assert_eq!(e.to_string(), "--api-max-connections must be at least 1");
 }
 
 // ---- S6 ----

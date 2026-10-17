@@ -28,7 +28,9 @@
 //! `--stream-threshold` bytes and one block (at most 20 MiB), plus its streaming and write
 //! buffers ([`fetch::SESSION_BUFFERS`]). Larger payloads are inflated chunk by chunk as they are
 //! sent. [`fetch::worst_case_bytes`] is the bound. Chain API requests reserve what they hold
-//! from the same budget, never waiting for it, and keep it until their body is written out.
+//! from the same budget, never waiting for it, and keep it until their body is written out or
+//! the client has taken none of it for the request timeout; besides the budget each of at most
+//! `--api-max-connections` connections holds only its buffers and up to 16 KiB of request.
 
 pub mod api;
 pub mod check;
@@ -189,9 +191,11 @@ impl Server {
             let (begin, end) = store.served.blocks;
             let c = api.config();
             info!(
-                "serving the chain API on http://{} for blocks {begin}..{end}: at most {} requests \
-                 at once, each waiting up to {:?} for its turn; bodies up to {} bytes",
+                "serving the chain API on http://{} for blocks {begin}..{end}: at most {} \
+                 connections and {} requests at once, each waiting up to {:?} for its turn; \
+                 bodies up to {} bytes",
                 api.local_addr(),
+                c.max_connections,
                 c.max_in_flight,
                 c.queue,
                 c.max_body_bytes

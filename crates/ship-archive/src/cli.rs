@@ -7,7 +7,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::ServeConfig;
-use crate::api::{ApiConfig, DEFAULT_MAX_BODY_BYTES};
+use crate::api::{ApiConfig, DEFAULT_MAX_BODY_BYTES, DEFAULT_MAX_CONNECTIONS};
 use crate::check::{CheckConfig, IndexConfig, WARN_ENTRY_BYTES};
 use crate::store::{BlocksMode, StoreConfig, VerifyIds};
 
@@ -148,6 +148,9 @@ pub struct ServeArgs {
     /// is closed.
     #[arg(long, value_name = "BYTES", default_value_t = DEFAULT_MAX_BODY_BYTES)]
     pub api_max_body_bytes: usize,
+    /// Chain API connections open at once; one more is answered 503 Busy at once and closed.
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_MAX_CONNECTIONS)]
+    pub api_max_connections: usize,
     /// Log line format; filter with RUST_LOG (default `info`).
     #[arg(long, value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
@@ -163,6 +166,7 @@ impl ServeArgs {
                 max_in_flight: self.api_max_in_flight.unwrap_or(defaults.max_in_flight),
                 queue: Duration::from_millis(self.api_queue_ms),
                 max_body_bytes: self.api_max_body_bytes,
+                max_connections: self.api_max_connections,
                 ..defaults
             }
         });
@@ -411,6 +415,7 @@ mod tests {
             (api.max_in_flight, api.queue, api.max_body_bytes),
             (4, Duration::from_millis(250), 2 << 20)
         );
+        assert_eq!(api.max_connections, 256);
         assert_eq!(api.request_timeout, Duration::from_secs(10));
         assert_eq!(api.read_delay, Duration::ZERO);
         // A quarter of the io threads, at least 2.
@@ -433,12 +438,15 @@ mod tests {
             "0",
             "--api-max-body-bytes",
             "4096",
+            "--api-max-connections",
+            "8",
         ]);
         let api = cfg.api.unwrap();
         assert_eq!(
             (api.max_in_flight, api.queue, api.max_body_bytes),
             (1, Duration::ZERO, 4096)
         );
+        assert_eq!(api.max_connections, 8);
         // The API settings mean nothing without --api.
         assert!(serve(&["--api-max-in-flight", "3"]).api.is_none());
     }
