@@ -139,6 +139,15 @@ Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1
   apply as a verified no-op. The unfixed build refuses both.
 - WAX's Leap 5 build writes compressed (not stored) zlib, so a SHIP fetch never
   matches its entries. The tool refuses them, as documented; donor logs work.
+- **One log, several encodings.** In the EOS full-history SHIP logs (from genesis),
+  sampled entries up to block 380,000,399 are compressed (`78 9c`), and from block
+  420,000,006 on they are stored (`78 01`, 32 KiB blocks). The marker is 1 throughout.
+  - `verify` against the node's `blocks.log` is clean on 20,000-block ranges at
+    340M and at 520M, in both SHIP logs.
+  - `prepare --ship` rebuilds a stored-era trace record (block 480,000,085) as
+    `already identical`, and refuses a compressed-era one (block 340,000,399) with
+    `entry … length 4530 differs from target 2321`: the endpoint's payload re-encoded
+    as stored zlib, against the original's compressed bytes. Nothing was written.
 - `prepare` on a live, appending log fails with `target changed during fetch` once
   a fetch outlasts a block interval. Stop nodeos first.
 
@@ -214,7 +223,11 @@ found.
   the same way, but `dm-dust` was not available to emulate that directly.
 - Replay (`replay-ship`, `prepare --nodeos`) on a real chain; it ran only on the
   smoke chain.
-- Leap 3 and Leap 4 logs, and chain-specific builds other than WAX's Leap 5 build.
+- Rebuilding a compressed SHIP stretch: replay with the older release that wrote it,
+  or a donor from another node with byte-identical entries for that range. Which
+  release switched from compressed to stored payloads.
+- Leap 3 logs (marker 0 framing is parsed by the tests only), and chain-specific
+  builds other than WAX's Leap 5 build.
 - `verify` without a reference does not check `blocks.log` transaction bodies: it does
   not recompute transaction Merkle roots, and signatures cover only headers.
 - Valid public-certificate WSS end to end. Operators normally use `ws://` inside

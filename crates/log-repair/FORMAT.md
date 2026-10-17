@@ -12,8 +12,9 @@ Reviewed against these primary sources on 2026-10-15:
   u64 little-endian entry positions and trailers, pruning flag.
 - [Spring state_history/log.hpp](https://github.com/AntelopeIO/spring/blob/main/libraries/state_history/include/eosio/state_history/log.hpp):
   `ship` name magic, version 0, pruning feature, 48-byte entry header, zlib payload,
-  three payload-size preambles, absolute position trailer. The Leap 4+ writer uses
-  stored zlib and includes the uncompressed size.
+  three payload-size preambles, absolute position trailer. The Leap 4+ preamble
+  includes the uncompressed size. The zlib payload is compressed by older releases and
+  stored by Spring (see [payload encodings](#ship-payload-encodings-across-nodeos-versions)).
 - [Spring state_history/abi.cpp](https://github.com/AntelopeIO/spring/blob/main/libraries/state_history/abi.cpp):
   SHIP v0 request/result variant ordering and optional result fields.
 - [Hyperion Tools SHIP client](https://github.com/eosrio/hyperion-tools/blob/main/crates/core/src/ship.rs):
@@ -157,6 +158,29 @@ per-region donor logs, and checked against the target before the command succeed
 The stored deflate blocks are 32 KiB, with the last one shorter and marked final, as
 Spring writes them (measured on 1.2.2 and 1.2.3 logs); a generic zlib encoder at
 level 0 splits differently, and any payload over one block would then never match.
+
+### SHIP payload encodings across nodeos versions
+
+A SHIP log keeps the encoding each entry was written with; upgrading nodeos never
+rewrites old entries. A long-lived log therefore holds several encodings. Measured on
+an EOS mainnet full-history log (from genesis):
+
+| Blocks | Preamble | zlib payload |
+|---|---|---|
+| up to about 380,000,000 | marker 1 | compressed (`78 9c`, fixed and dynamic Huffman blocks) |
+| from about 420,000,000 | marker 1 | stored (`78 01`, 32 KiB blocks), as Spring 1.2.x writes |
+
+WAX's Leap 5 build still writes compressed payloads. Which release made the switch to
+stored was not established.
+
+- **Reading** (`scan`, `verify`, anchors, donors) handles every encoding: the payload
+  is decompressed and its Adler-32 checked.
+- **SHIP endpoints** serve decompressed payloads, which the tool can re-encode only as
+  stored zlib. Entries that were written compressed never match, and the fetch is
+  refused (`entry N length … differs from target`).
+- For a compressed stretch, use a donor log whose entries for that range are
+  byte-identical, from a node whose log was written by the same release, or a replay
+  with that release (`--nodeos`).
 
 ## Replay blocklog slice
 

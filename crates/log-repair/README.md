@@ -119,6 +119,28 @@ The tool repairs bytes the operating system **refuses to read**: reads that fail
 It runs on Linux and other Unix systems. On Windows, `scan`, `prepare`, `build`, and
 the fetch commands work for review on copied files, but writing is disabled.
 
+### Logs written by several nodeos versions
+
+Upgrading nodeos never rewrites a log: a log started on an older release and now
+written by Spring keeps each part as it was first written. Which release wrote the
+*damaged part* decides the repair options, not the release running now.
+
+- **`blocks.log`:** the format (v3) and the packed blocks are the same across releases.
+  Leap 5 and Spring copies of the same chain were byte-identical in testing. Any intact
+  copy, or any state-history endpoint, can supply the blocks.
+- **Finding damage** (`scan`, `verify`) works on every part of a log.
+- **SHIP logs:** older releases compressed each entry, while Spring stores it
+  uncompressed inside zlib. In an EOS mainnet log from genesis, entries up to about
+  block 380M are compressed and entries from about 420M on are stored (details in
+  [FORMAT.md](FORMAT.md#ship-payload-encodings-across-nodeos-versions)).
+  - A damaged stretch written by **Spring** can be rebuilt from any state-history
+    endpoint.
+  - A stretch written **compressed** cannot be rebuilt from an endpoint, and the fetch is
+    refused before anything is written. Use a donor log whose entries for that range
+    are byte-identical, from a node whose log was written by the same release, or a
+    replay with that release (`--nodeos`). Replay with an older release has not been
+    tested (see [Validation](#validation)).
+
 ## How it works
 
 ```text
@@ -239,13 +261,15 @@ It also holds `source.json` with the endpoints, digests, and compatibility verdi
 Pass the directory to `build --sources`.
 
 SHIP endpoints send uncompressed history payloads, not disk entries. The tool
-re-encodes them in the stored-zlib framing found on the target's anchors, split into
-32 KiB stored blocks as Spring writes them (measured on Spring 1.2.2 and 1.2.3 logs). If the original node used another
-compressor, debug setting, or node version, the lengths or readable bytes will not
-match. Some chain-specific builds write compressed (not stored) zlib, for example WAX's
-Leap 5 build; their entries never match a SHIP fetch. The fetch then fails and keeps its files and report
-for diagnosis, and build refuses them. Use replay, or a donor log from a node with
-the same configuration.
+re-encodes them in the framing found on the target's anchors, as stored zlib split
+into 32 KiB blocks the way Spring writes them (measured on Spring 1.2.2 and 1.2.3
+logs). Entries that nodeos **compressed** never match. Older releases compressed every
+entry, and WAX's Leap 5 build still does, so the older part of a long-lived log usually
+cannot be rebuilt from an endpoint (see
+[Logs written by several nodeos versions](#logs-written-by-several-nodeos-versions)).
+A different debug setting or node version can also change the bytes. In every such
+case the fetch fails and keeps its files and report for diagnosis, and build refuses
+them. Use replay, or a donor log from a node with the same configuration.
 
 ### Another node's blocks.log
 
@@ -465,7 +489,7 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 | `stopped after N failed reads` | Widespread damage | Check the device and pool health. Raise `--max-bad-reads` only if you are sure |
 | `this platform reports no filesystem block size` | Windows, or an unusual filesystem | Pass `--record-size` |
 | `followed by orphaned fork entries … reaches them` | The damage covers entries nodeos abandoned after a fork, which no source holds | Not repairable. Narrow the selection to the other regions; for these bytes, resync or restore the log |
-| `entry N length … differs from target` | The source encodes this entry differently: another compressor, node version, or debug setting | Use replay with the original nodeos version and settings, or a donor from an identical node |
+| `entry N length … differs from target` | The source encodes this entry differently. Most often the entry was written compressed by an older release, and an endpoint can only supply stored zlib; another node version or debug setting also does this | Use replay with the original nodeos version and settings, or a donor from an identical node |
 | `rebuilt bytes … differ from the readable target bytes` | The source does not match your log | Wrong chain or fork, or a differently configured source node |
 | `belongs to another chain or fork` | Anchor IDs do not match | The source is from another chain or fork |
 | `SHIP endpoints disagree` / `block sources disagree` | Two sources gave different bytes | Find out which one is wrong. Use only sources you trust |
