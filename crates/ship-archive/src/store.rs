@@ -486,6 +486,11 @@ impl Store {
 
     /// [`Self::id`], reading entry offsets through `pages` when given.
     fn id_with(&self, n: u32, pages: Option<&PageCache>) -> Result<Option<[u8; 32]>> {
+        // There is no block 0. Block 1's `previous` is the zero id, which Spring never reports
+        // (it takes block-log ids from block headers), so block 1 has no `prev_block`.
+        if n == 0 {
+            return Ok(None);
+        }
         for kind in LogKind::ALL {
             if let Some(log) = self.ship_log(kind, n) {
                 return header(kind, log, n, pages).map(|h| Some(h.id));
@@ -1080,6 +1085,62 @@ mod tests {
         assert!(
             inline > 0 && streamed > 0,
             "{inline} inline, {streamed} streamed"
+        );
+    }
+
+    #[test]
+    fn block_0_has_no_id_though_block_1_follows_the_zero_id() {
+        // A chain logged from genesis, as a Spring node writes it: block 1 is in the block log
+        // and its `previous` is the zero id.
+        let dir = tmp();
+        let chain = SyntheticChain::new(1, 4);
+        assert_eq!(chain.block(1).previous, [0; 32]);
+        chain
+            .write_node(dir.path(), &[LogKind::Trace], Encoding::SizedStored)
+            .unwrap();
+        let cfg = StoreConfig {
+            dirs: vec![dir.path().to_path_buf()],
+            ..StoreConfig::default()
+        };
+        let (store, _) = Store::open(&cfg).unwrap();
+        assert_eq!(store.id(0).unwrap(), None);
+        assert_eq!(store.id(1).unwrap(), Some(chain.id(1)));
+        let limits = FetchLimits {
+            stream_threshold: 1 << 20,
+        };
+        let job = |n| Job {
+            generation: 1,
+            n,
+            v1: false,
+            flags: Flags {
+                block: true,
+                traces: true,
+                deltas: false,
+                finality: false,
+            },
+        };
+        // Block 1 has `this_block` and its block, but no `prev_block`.
+        let plan = store.plan(&job(1), None).unwrap();
+        assert_eq!(
+            (plan.this, plan.prev),
+            (
+                Some(BlockPos {
+                    num: 1,
+                    id: chain.id(1)
+                }),
+                None
+            )
+        );
+        let package = store.read(plan, &limits).unwrap();
+        assert_eq!(
+            package.block.as_deref(),
+            Some(chain.block(1).body.as_slice())
+        );
+        // Block 0 gets an id-less result.
+        let plan = store.plan(&job(0), None).unwrap();
+        assert_eq!(
+            (plan.this, plan.prev, plan.block.is_none()),
+            (None, None, true)
         );
     }
 
