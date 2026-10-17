@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # antelope-ship-archive: serves frozen Antelope state-history and block logs over the SHiP
-# WebSocket protocol, exactly as a Spring node does, for a SHiP-aware router or proxy. Built as a
-# static musl binary, shipped on a minimal Alpine. Build it from the repository root:
+# WebSocket protocol, exactly as a Spring node does, for a SHiP-aware router or proxy, and with
+# --api the nodeos /v1/chain block endpoints from the block logs. Built as a static musl binary,
+# shipped on a minimal Alpine. Build it from the repository root:
 #   docker build -f crates/ship-archive/Dockerfile -t antelope-ship-archive .
 FROM rust:1-alpine AS builder
 RUN apk add --no-cache musl-dev
@@ -19,10 +20,12 @@ FROM alpine:3 AS runtime
 RUN adduser -D -u 10001 ship
 COPY --from=builder /antelope-ship-archive /usr/local/bin/antelope-ship-archive
 USER ship
-# 8080: SHiP (WebSocket). 9180: /health, /ready and /metrics (--http).
-EXPOSE 8080 9180
-# SECURITY: the server opens every file read-only but has NO authentication. Run it on a private
-# network, behind a SHiP-aware router or proxy; do NOT publish it to the internet.
+# 8080: SHiP (WebSocket). 9180: /health, /ready and /metrics (--http). 8888: the nodeos
+# /v1/chain block endpoints (--api), off in the default command: add `--api 0.0.0.0:8888`.
+EXPOSE 8080 9180 8888
+# SECURITY: the server opens every file read-only but has NO authentication and NO TLS on any
+# port. Run it on a private network, behind a SHiP-aware router or proxy (and for --api, an HTTP
+# router or proxy); do NOT publish it to the internet.
 # /ready answers 200 once the logs are validated and the listener is bound, and 503 during
 # shutdown. Startup validates every file before it binds, hence the long start period. The
 # check needs `--http` on port 9180: keep it when you replace the command below.
@@ -34,6 +37,6 @@ ENTRYPOINT ["antelope-ship-archive"]
 #   docker run -p 8080:8080 -v /srv/archive/seg-0001:/data:ro ghcr.io/eosrio/antelope-ship-archive
 # To serve part of the logs, or with other options, give the whole command after the image:
 #   ... ghcr.io/eosrio/antelope-ship-archive serve --dir /data --recursive \
-#         --range 2-50000001 --listen 0.0.0.0:8080 --http 0.0.0.0:9180
+#         --range 2-50000001 --listen 0.0.0.0:8080 --http 0.0.0.0:9180 --api 0.0.0.0:8888
 # The offline commands run the same way, e.g. `... check --dir /data --recursive --deep`.
 CMD ["serve", "--dir", "/data", "--recursive", "--listen", "0.0.0.0:8080", "--http", "0.0.0.0:9180"]

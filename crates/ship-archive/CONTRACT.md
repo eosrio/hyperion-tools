@@ -5,7 +5,9 @@ proxy that stitches several archive servers and live nodes into one history. Eve
 is the behavior of a Spring 1.x SHiP session (`plugins/state_history_plugin/.../session.hpp`)
 over logs that never change, except where [Differences from a Spring node](#differences-from-a-spring-node)
 says otherwise. The integration tests in `tests/` and the session's unit tests pin these
-rules.
+rules. [Chain API](#chain-api) states the same for the nodeos `/v1/chain` block endpoints the
+server answers with `--api`, and for an HTTP router or proxy in front of nodeos-compatible
+APIs.
 
 ## Notation
 
@@ -191,3 +193,153 @@ for as long as the server runs.
 - **Limits:** at most 1024 queued status requests, requests up to `--max-request-bytes`, and
   10 s for the upgrade. Each drops the connection without a Close frame.
 - **Close 1001 at shutdown**, after the message each session is writing.
+
+## Chain API
+
+With `--api ADDR` the server also answers nodeos's `/v1/chain` block endpoints from its block
+logs. This section is what an HTTP client can rely on there, in particular an HTTP router or
+proxy in front of nodeos-compatible APIs that sends requests for old blocks to archive servers
+and everything else to live nodes. "nodeos" below is a Spring node of a release from 1.1.0 to
+1.2.2: these releases answer the block endpoints alike, error source lines included.
+`tests/chain_api.rs`, `tests/chain_api_nodeos.rs` and the core's goldens (answers captured from
+Spring 1.2.1 and 1.2.2 nodes, in `crates/core/testdata/chain-api`) pin these rules.
+
+`B = [b_B, e_B)` is the served block-log range and `L*` the last servable block
+([Notation](#notation)). With `--blocks required`, which `--api` needs, every `S_L` lies in `B`,
+so `L* ∈ B`. `B` can begin below and end above the state-history ranges.
+
+### The server MUST
+
+1. **A listener of its own.** Serve the chain API only on the `--api` address, never on
+   `--listen` or `--http`. Refuse to start when `--api` is the `--listen` or the `--http`
+   address, or with `--blocks none`.
+2. **Block endpoints.** For every `n ∈ B`, answer `/v1/chain/get_block_info` (by number),
+   `/v1/chain/get_block_header` (`include_extensions` false and true) and
+   `/v1/chain/get_raw_block` (both by number or by the block's id) byte for byte as nodeos
+   holding block `n` answers.
+3. **Unknown Block.** Answer nodeos's `400 Unknown Block` (`error.code` 3100002) for every block
+   number outside `B`, and for every id that is not the id of a block of `B` (an id is looked up
+   at the number its first four bytes give). Never answer it for a block of `B` asked by number
+   or by its own id.
+4. **Requests and their errors, as nodeos with `verbose-http-errors` off.**
+   - The empty-body rule: `400 Invalid Request`, "A Request body is required".
+   - fc's legacy JSON parser and its field conversions: `400 Invalid Request`, "Unable to
+     parse valid input from POST body".
+   - `block_num_or_id` as a number cut to 32 bits, or as an id of an even number of hex
+     digits, at most 64: `500 Invalid block ID` when it is empty, longer than 64 characters,
+     or neither.
+   - What an error echoes, cleaned as fc cleans it.
+5. **HTTP, as nodeos's server.**
+   - The request-target is checked first: one that is not origin-form, or holds `..`, gets
+     `400 Illegal request-target`.
+   - `OPTIONS`, on any path, gets `200 {}`.
+   - The handler is the one whose path is the whole target, query string included.
+   - Any method reaches the handler, with its body.
+   - Every answer the server writes carries `Content-Type: application/json`, a
+     `Content-Length`, title-case header names in nodeos's order,
+     `Server: antelope-ship-archive/<version>`, and no `Date`.
+   - A connection is kept alive as the request asks (HTTP/1.1 unless `close`, HTTP/1.0 with
+     `keep-alive`).
+6. **Listings, and nothing else.** `/v1/node/get_supported_apis` answers `{"apis":[...]}`: the
+   three block endpoints, sorted. `/v1/archive/describe` is answered from memory, with no file
+   read ([below](#v1archivedescribe)). Every other legal target gets nodeos's
+   `404 Unknown Endpoint`, `get_info`, `get_block`, and the state, push and exec endpoints
+   included.
+7. **503 Busy, never 500, for what fails on the server's side.** Such a request gets `503`
+   with the body nodeos sends when overloaded,
+   `{"code":503,"message":"Busy","error":{"code":503,"name":"Busy","what":"<why>","details":[]}}`:
+   - no request slot within `--api-queue-ms`: `Too many requests in flight: <n>`;
+   - a memory budget that cannot hold the request: `Too many bytes in flight: <bytes used>`;
+   - a block that cannot be read: `Block read failed`;
+   - a block larger than 20 MiB, that does not decode, that holds another block number than it
+     is stored under, or that renders past every bound: `Block data failed validation`;
+   - a panic: `Internal error`.
+
+   The only `500` answers are nodeos's `Invalid block ID` (rule 4).
+8. **Limits.**
+   - A body over `--api-max-body-bytes`, declared or as it arrives, gets `413` with
+     `{"code":413,"message":"Payload Too Large","error":{"code":413,"name":"Payload Too Large","what":"Request body exceeds <N> bytes","details":[]}}`,
+     and the connection is closed. So is a connection whose request body the memory budget
+     cannot hold, after its `503`.
+   - A connection whose request headers take over 10 s, or then whose body takes over 10 s, is
+     closed unanswered. So is a kept-alive connection idle for 10 s, and one whose client takes
+     none of its answer for 10 s.
+   - Over `--api-max-connections`, a new connection is answered `503 Busy` (`Too many
+     connections: <N>`) before its request is read, and closed.
+9. **Identity.** `describe.chain_id` is the chain id of SHiP status, and `describe.last` is the
+   SHiP head and LIB, `{L*, id(L*)}`. `get_block_info` for `last.num` answers with `id` equal to
+   `last.id` whenever the logs agree (the block stored at `L*` hashes to `id(L*)`), so one
+   request tells a client that the chain API and the SHiP listener serve the same blocks.
+10. **Coverage.** `describe.blocks` is `B`: exactly the block numbers rule 2 answers.
+
+### The server MUST NOT
+
+- Check `Host`: a request with any `Host`, an empty one or none is answered.
+- Send CORS headers.
+- Send `Date`.
+- Serve `get_info`, or any endpoint but those of rules 2 and 6 (`OPTIONS` gets `200 {}` on any
+  path, as from nodeos).
+
+### `/v1/archive/describe`
+
+Any method, the body ignored; not a nodeos endpoint, and never listed by
+`get_supported_apis`.
+
+```json
+{"server":"antelope-ship-archive/0.1.0","chain_id":"<64 hex>",
+ "last":{"num":50000000,"id":"<64 hex>"},
+ "blocks":{"begin":1,"end":50000001},
+ "apis":["/v1/chain/get_block_header","/v1/chain/get_block_info","/v1/chain/get_raw_block"],
+ "get_block":"off","max_in_flight":4,"in_flight":0}
+```
+
+- `server`: the `Server` header's value.
+- `chain_id`, `last`: rule 9. `blocks`: `B`, half-open (rule 10).
+- `apis`: the block endpoints served, sorted, as `get_supported_apis` lists them.
+- `get_block`: always `"off"`; `/v1/chain/get_block` is answered 404.
+- `max_in_flight`: `--api-max-in-flight`; `in_flight`: the request slots taken now.
+
+Only `in_flight` changes while the server runs.
+
+### For an HTTP router or proxy
+
+- Read `describe` for `B`, `L*`, the chain id and the request slots.
+- Before routing to a server, check its identity: `describe.chain_id` is the chain's,
+  `describe.last.id` is the head id its SHiP status reports, and `get_block_info` for
+  `last.num` answers that id (rule 9).
+- Send it only block requests whose block is in `describe.blocks` and whose endpoint is in
+  `describe.apis`, with the body unchanged. Any `Host` is accepted.
+- `400 Unknown Block` from it means that it does not hold that block: outside `B`, or an id
+  that is not the id of the block of `B` at that number. `404` means it does not serve that
+  endpoint. A node holding other blocks may answer either otherwise.
+- `503` means that nothing was done: send the request again, to a replica or a live node.
+  `200`, and the `400` and `500` parameter errors of rule 4, are what nodeos holding the block
+  answers.
+- Keep at most `describe.max_in_flight` requests in flight to it. More wait in its queue up to
+  `--api-queue-ms`, then get `503`.
+- Never send it `get_info`, state, push or exec requests: they get `404`.
+- Servers over copies of the same block logs answer each block with the same bytes: they are
+  replicas.
+
+### Differences from nodeos
+
+- **No `Host` check.** A request without a `Host`, or with an empty one, is answered as the
+  same request with one; nodeos refuses it (`400 Disallowed HTTP HOST header in the request`),
+  even with `http-validate-host = false`.
+- **An oversized body** gets `413`, then the connection is closed; nodeos closes it without an
+  answer.
+- **A block that cannot be read or fails validation** gets `503 Busy`, so that a client asks
+  elsewhere.
+- **Several `Connection` lines** in an HTTP/1.1 request: the connection is closed once any line
+  says `close`, and the answer says `Connection: close`; nodeos reads the first line alone and
+  may keep it.
+- **The request-target as hyper parses it.** A `#fragment` is dropped, so
+  `/v1/chain/get_raw_block#x` is answered as `/v1/chain/get_raw_block` (nodeos answers 404), and
+  a `..` after the `#` escapes the illegal-target check. A byte outside the URI grammar (`<`,
+  `>`, a backquote, a control or non-ASCII byte) gets hyper's own `400`, with an empty body and
+  no `Content-Type` or `Server`, and the connection is closed. Clients send neither.
+- **HEAD** is answered with the head alone; nodeos sends the body too. The interim
+  `100 Continue` to `Expect: 100-continue` carries no `Server` header.
+- **`Server`** is `antelope-ship-archive/<version>`.
+- **Error `line_number`s** are Spring 1.1.0 to 1.2.2's; other releases put these errors on
+  other source lines. `verbose-http-errors` is not mirrored.
