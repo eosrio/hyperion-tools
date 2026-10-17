@@ -114,6 +114,8 @@ The tool repairs bytes the operating system **refuses to read**: reads that fail
 | Damaged or missing `.index` | No: the index defines entry boundaries |
 | SHIP damage inside orphaned fork entries (abandoned entries nodeos leaves after a fork) | No: no other node, endpoint, or replay holds those bytes. Damage next to them is repaired, and they are kept as they are (see [FORMAT.md](FORMAT.md#target-logs)) |
 | Pruned block logs, SHIP logs with feature flags | No: refused as unsupported formats |
+| SHIP logs written by EOSIO 2.1 or 2.2 (state-history log version 1) | No: their trace entries split out prunable transaction data that SHIP does not serve. Refused by name |
+| State history from nodeos 1.5 to 1.7 (no `ship` magic) | No: an older header format. Refused by name |
 | A truncated log, or damage at the end of the file | No: use your node's normal recovery for the head of the log |
 
 It runs on Linux and other Unix systems. On Windows, `scan`, `prepare`, `build`, and
@@ -122,24 +124,55 @@ the fetch commands work for review on copied files, but writing is disabled.
 ### Logs written by several nodeos versions
 
 Upgrading nodeos never rewrites a log: a log started on an older release and now
-written by Spring keeps each part as it was first written. Which release wrote the
-*damaged part* decides the repair options, not the release running now.
+written by Spring keeps each part as it was first written. The tool works out how each
+damaged part was written from the log itself, so it does not need to know your history.
 
 - **`blocks.log`:** the format (v3) and the packed blocks are the same across releases.
-  Leap 5 and Spring copies of the same chain were byte-identical in testing. Any intact
-  copy, or any state-history endpoint, can supply the blocks.
+  Any intact copy, any retained `blocks-FIRST-LAST.log` file, or any state-history
+  endpoint can supply the blocks.
 - **Finding damage** (`scan`, `verify`) works on every part of a log.
-- **SHIP logs:** older releases compressed each entry, while Spring stores it
-  uncompressed inside zlib. In an EOS mainnet log from genesis, entries up to about
-  block 380M are compressed and entries from about 420M on are stored (details in
-  [FORMAT.md](FORMAT.md#ship-payload-encodings-across-nodeos-versions)).
-  - A damaged stretch written by **Spring** can be rebuilt from any state-history
-    endpoint.
-  - A stretch written **compressed** cannot be rebuilt from an endpoint, and the fetch is
-    refused before anything is written. Use a donor log whose entries for that range
-    are byte-identical, from a node whose log was written by the same release, or a
-    replay with that release (`--nodeos`). Replay with an older release has not been
-    tested (see [Validation](#validation)).
+- **SHIP logs:** each release wrote its entries in its own encoding:
+
+  | Writer | Payload | Preamble |
+  |---|---|---|
+  | EOSIO 1.8, 2.0; Leap 3.x; forks built on them | zlib, compressed at level 6 | u32 compressed length |
+  | Leap 4.0 to 5.0, and forks built on them (for example WAX, UX) | zlib, compressed at level 6 | `1`, then the u64 uncompressed size |
+  | Spring 1.0 and later, and forks built on it (Spring CE, Wire) | zlib, stored, 32 KiB blocks | `1`, then the u64 uncompressed size |
+
+  Endpoints, donor logs, and replays all supply the decompressed payloads, and the
+  tool **re-encodes them the way your log was written**. A long-lived log usually holds
+  both compressed and stored stretches; each region is handled on its own.
+
+**How the encoding is found.** For each damaged region the tool reads the two readable
+anchor entries around it and tries every encoding it knows:
+
+- stock zlib at levels 1 to 9;
+- stored zlib in 32,768-byte blocks (zlib 1.2.11 and later) or 32,506-byte blocks
+  (older zlib), each with or without an empty final block when a payload fills its last
+  block exactly.
+
+It keeps only the encodings that reproduce **both anchors byte for byte**. The rebuilt
+entries must then match every index position and every readable byte of the region,
+and exactly one distinct result may fit. A donor whose entries are already identical to
+yours is used as it is. `build` prints, for each region, either `source bytes as they
+are` or `re-encoded as …`.
+
+**What can stop it:**
+
+- **The node was upgraded inside the damaged region,** so its anchors differ (for
+  example the block where a node moved to Spring). Refused: `different encodings`.
+- **The node's zlib was not stock zlib,** so no candidate reproduces the anchors.
+  zlib-ng (the system libz on some distributions and containers), Intel's or Cloudflare's
+  forks, and s390x hardware compression produce other bytes; every official nodeos
+  release links the host's `libz.so.1`. Check with `ldd $(which nodeos)` and the version
+  of that library on the host that wrote the log. Refused: `no known encoding
+  reproduces anchor`. Use a donor whose entries are byte-identical instead.
+- **The writer's payloads differ,** for example a different `trace-history-debug-mode`,
+  or replay with a release that serializes traces differently. The readable bytes then
+  differ, and the region is refused.
+
+The tool encodes with stock zlib compiled into the binary, never with the zlib of the
+machine it runs on.
 
 ## How it works
 
@@ -260,16 +293,14 @@ targets, a donor `trace_history-FIRST-LAST.log`/`.index` (or `chain_state_histor
 It also holds `source.json` with the endpoints, digests, and compatibility verdict.
 Pass the directory to `build --sources`.
 
-SHIP endpoints send uncompressed history payloads, not disk entries. The tool
-re-encodes them in the framing found on the target's anchors, as stored zlib split
-into 32 KiB blocks the way Spring writes them (measured on Spring 1.2.2 and 1.2.3
-logs). Entries that nodeos **compressed** never match. Older releases compressed every
-entry, and WAX's Leap 5 build still does, so the older part of a long-lived log usually
-cannot be rebuilt from an endpoint (see
+SHIP endpoints send uncompressed history payloads, not disk entries. The fetch saves
+them as a stored-zlib donor, and build re-encodes them the way your log was written,
+compressed or stored (see
 [Logs written by several nodeos versions](#logs-written-by-several-nodeos-versions)).
-A different debug setting or node version can also change the bytes. In every such
-case the fetch fails and keeps its files and report for diagnosis, and build refuses
-them. Use replay, or a donor log from a node with the same configuration.
+If they still do not fit, for example because of a different debug setting or a
+non-stock zlib on the original host, the fetch fails and keeps its files and report
+for diagnosis, and build refuses them. Use replay, or a donor log with identical
+entries.
 
 ### Another node's blocks.log
 
@@ -285,15 +316,16 @@ they must agree byte for byte. The damaged target itself is refused as a source.
 
 ### Replay from a snapshot (SHIP logs)
 
-Packed blocks contain no traces or deltas. If no endpoint holds the history, regenerate
-it with the same nodeos version that wrote the original:
+Packed blocks contain no traces or deltas. If no endpoint or copy holds the history,
+regenerate it from a snapshot taken before the damage and the blocks after it:
 
 ```sh
 antelope-log-repair prepare --log /data/state-history/chain_state_history.log \
   --damaged-block 1234567 \
   --nodeos /opt/spring/bin/nodeos \
   --snapshot /snapshots/snapshot-1230000.bin --snapshot-block 1230000 \
-  --blocks-dir /data/blocks --chain-state-db-size-mb 32768 \
+  --blocks-dir /data/blocks --blocks-dir /data/blocks-retained \
+  --chain-state-db-size-mb 32768 \
   --out /scratch/repair-1
 ```
 
@@ -303,10 +335,17 @@ antelope-log-repair prepare --log /data/state-history/chain_state_history.log \
   allowed head.
 - `--snapshot-block` is the head you verified when obtaining the snapshot. The tool
   does not read it from the snapshot; nodeos validates the snapshot contents.
-- `--blocks-dir` holds an intact `blocks.log` + `blocks.index` covering the snapshot
-  head through the last damaged region. The tool copies **only that range** into a
-  fresh, valid v3 blocklog in the sandbox, so space and time grow with the distance
-  from the snapshot to the damage. Pick a recent snapshot.
+- `--blocks-dir` (repeatable) names directories holding the intact block history: a
+  `blocks.log` and any retained `blocks-FIRST-LAST.log` files, each with its index, for
+  example your node's `blocks-dir` and `blocks-retained-dir`. Together they must cover
+  the snapshot head through the last damaged region, without gaps, and belong to one
+  chain. The tool copies **only that range** into a fresh, valid v3 blocklog in the
+  sandbox, so space and time grow with the distance from the snapshot to the damage.
+  Pick a recent snapshot.
+- The replayed payloads are re-encoded the way your log was written, so a current
+  release can replay a stretch that an older one compressed, as long as it produces
+  the same payloads. That has been tested with Spring replaying Spring-era history
+  only; see [Validation](#validation).
 - nodeos runs only inside the new sandbox: an empty config, P2P and HTTP disabled,
   no producer, a loopback SHIP endpoint, and `--terminate-at-block` after the last
   region. `replay.json` records the exact command; nodeos's output is saved alongside.
@@ -320,8 +359,9 @@ One replay covers every damaged region in the log.
 - `--blocks FILE`: a `P2PBLK01` block container (format in [FORMAT.md](FORMAT.md)).
 - `--blocks-log FILE`: an intact `blocks.log`.
 - `--donor-log FILE`: a SHIP log of the target's kind covering a region's blocks,
-  including both anchors; its `.index` must sit alongside. Its file offsets may differ:
-  only the entries are used.
+  including both anchors; its `.index` must sit alongside. Its file offsets and its
+  encoding may differ: only the payloads are used, re-encoded the way your log was
+  written when its own bytes do not fit.
 - `--sources DIR`: a `fetch-ship` or `replay-ship` output directory.
 
 All are repeatable and can be combined.
@@ -346,6 +386,8 @@ the rebuilt bytes.
 - `target.regions`: the blocks and extents to be written;
 - `sources`: every file used, and where it came from (the `source.json` of fetched or
   replayed sources lists the endpoints or the replay command);
+- the `entries:` line of each region: `source bytes as they are`, or the encoding the
+  payloads were re-encoded with;
 - the `plan_sha256` printed by build: it is the hash of `plan.json` itself.
 
 **Trust boundary.** Block IDs authenticate block *headers*. The tool does not check
@@ -489,7 +531,11 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 | `stopped after N failed reads` | Widespread damage | Check the device and pool health. Raise `--max-bad-reads` only if you are sure |
 | `this platform reports no filesystem block size` | Windows, or an unusual filesystem | Pass `--record-size` |
 | `followed by orphaned fork entries … reaches them` | The damage covers entries nodeos abandoned after a fork, which no source holds | Not repairable. Narrow the selection to the other regions; for these bytes, resync or restore the log |
-| `entry N length … differs from target` | The source encodes this entry differently. Most often the entry was written compressed by an older release, and an endpoint can only supply stored zlib; another node version or debug setting also does this | Use replay with the original nodeos version and settings, or a donor from an identical node |
+| `entry N length … differs from target` (with no encoding that fits) | Neither the source's bytes nor any re-encoding fits this entry: the payload itself differs, for example another debug setting or node version | Use a donor from a node with the same configuration, or replay with matching settings |
+| `anchors … were written with different encodings` | The node was upgraded inside this region (for example to Spring) | Not supported. Use a donor whose entries are byte-identical |
+| `no known encoding reproduces anchor block N` | The log was written with a non-stock zlib, such as zlib-ng | Check `ldd $(which nodeos)` on the writing host; use a donor whose entries are byte-identical |
+| `several encodings reproduce the anchors and fit` | The damaged bytes cannot tell the candidates apart | Not supported. Use a donor whose entries are byte-identical |
+| `state-history log version 1, written by EOSIO 2.1 or 2.2` / `written before nodeos 1.8` | An unsupported log format | Not repairable with this tool |
 | `rebuilt bytes … differ from the readable target bytes` | The source does not match your log | Wrong chain or fork, or a differently configured source node |
 | `belongs to another chain or fork` | Anchor IDs do not match | The source is from another chain or fork |
 | `SHIP endpoints disagree` / `block sources disagree` | Two sources gave different bytes | Find out which one is wrong. Use only sources you trust |
@@ -526,8 +572,9 @@ or refusal.
 
 ## Limits
 
-- Formats: non-pruned block-log v3, and non-pruned SHIP v0, including legacy payload
-  size markers and Leap 4+ uncompressed-size headers. Unknown features fail closed.
+- Formats: non-pruned block-log v3 (including retained range files), and non-pruned
+  SHIP v0, including legacy payload size markers and Leap 4+ uncompressed-size headers,
+  compressed or stored. Unknown features fail closed.
 - Record size: a power of two from 512 B to 16 MiB.
 - Per plan: up to 64 regions and 256 MiB of damaged bytes.
 - Per region: up to 9,998 affected blocks and 256 MiB of affected entries.

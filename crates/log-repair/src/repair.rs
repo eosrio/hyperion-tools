@@ -7,7 +7,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::format::{Blocks, Kind, Log, block_header, container, orphans};
+use crate::codec::Codec;
+use crate::format::{
+    Blocks, Kind, Log, block_header, container, encode_ship_with, orphans, ship_marker,
+    ship_payload,
+};
 use crate::io::{Disk, MAX_BYTES, Stamp, create_dir, create_file, hash, media_error, sync_dir};
 use crate::report::{Out, arg, bytes, duration};
 use crate::target::{
@@ -440,6 +444,8 @@ pub struct Rebuilt {
     /// Replacement bytes for every extent, concatenated in plan order.
     pub replacement: Vec<u8>,
     pub evidence_sha256: String,
+    /// How each region's entries were produced from the sources.
+    pub encodings: Vec<String>,
 }
 
 /// Reconstruct every region's entries at TARGET offsets, rebasing source trailers.
@@ -459,13 +465,17 @@ pub fn rebuild(log: &Log, t: &Target, src: &Loaded) -> Result<Rebuilt> {
             .read(0, if log.kind == Kind::Blocks { 8 } else { 48 })?,
     );
     let mut replacement = Vec::with_capacity(t.damaged_bytes() as usize);
+    let mut encodings = Vec::new();
     for r in &t.regions {
-        rebuild_region(log, r, src, &mut digest, &mut replacement)
-            .with_context(|| format!("region blocks {}..{}", r.first_block, r.last_block))?;
+        encodings.push(
+            rebuild_region(log, r, src, &mut digest, &mut replacement)
+                .with_context(|| format!("region blocks {}..{}", r.first_block, r.last_block))?,
+        );
     }
     Ok(Rebuilt {
         replacement,
         evidence_sha256: hex::encode(digest.finalize()),
+        encodings,
     })
 }
 
@@ -475,7 +485,7 @@ fn rebuild_region(
     src: &Loaded,
     digest: &mut Sha256,
     out: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<String> {
     let (left, right) = r.source_range();
     let after = if log.kind == Kind::Blocks {
         Some(log.body(right)?)
@@ -509,8 +519,9 @@ fn rebuild_region(
         }
         Some(d)
     };
+    // The id chain from the left anchor to the right one, over the source blocks.
     let mut expected = left_id;
-    let mut span = Vec::new();
+    let mut source_bodies = Vec::new();
     for n in r.first_block..=right {
         let packed = match &after {
             Some(after) if n == right => after.clone(),
@@ -518,8 +529,7 @@ fn rebuild_region(
                 .block(n)?
                 .with_context(|| format!("block sources lack block {n}"))?,
         };
-        let packed = &packed;
-        let h = block_header(packed)?;
+        let h = block_header(&packed)?;
         ensure!(
             h.number == n && h.previous == expected,
             "id chain broken at block {n}"
@@ -527,7 +537,7 @@ fn rebuild_region(
         expected = h.id;
         digest.update(n.to_le_bytes());
         digest.update((packed.len() as u64).to_le_bytes());
-        digest.update(packed);
+        digest.update(&packed);
         let (a, b) = log.bounds(n)?;
         digest.update(a.to_le_bytes());
         digest.update(b.to_le_bytes());
@@ -535,13 +545,63 @@ fn rebuild_region(
             ensure!(h.id == right_id, "right anchor mismatch");
             break;
         }
-        let body = if let Some(d) = donor {
-            let body = d.body(n)?;
-            ensure!(d.id(n, &body)? == h.id, "SHIP block id mismatch at {n}");
-            body
-        } else {
-            packed.clone()
-        };
+        source_bodies.push(match donor {
+            Some(d) => {
+                let body = d.body(n)?;
+                ensure!(d.id(n, &body)? == h.id, "SHIP block id mismatch at {n}");
+                body
+            }
+            None => packed,
+        });
+    }
+    // Every readable byte of the affected entries, which the rebuild must match exactly.
+    let mut readable = Vec::new();
+    let mut cursor = r.span_start;
+    for e in r.extents.iter().copied().chain([Extent {
+        offset: r.span_end,
+        len: 0,
+    }]) {
+        if e.offset > cursor {
+            readable.push((cursor, log.log.read(cursor, e.offset - cursor)?));
+        }
+        cursor = e.end();
+    }
+
+    // The source's entries as they are; for SHIP logs, failing that, the same payloads
+    // re-encoded the way the target's own anchors are encoded.
+    let (encoding, bodies, span) = match assemble(log, r, &source_bodies, &readable) {
+        Ok(span) => ("source bytes as they are".to_string(), source_bodies, span),
+        Err(as_is) if log.kind != Kind::Blocks => {
+            translate(log, r, &source_bodies, &readable, as_is)?
+        }
+        Err(e) => return Err(e),
+    };
+    for body in &bodies {
+        digest.update((body.len() as u64).to_le_bytes());
+        digest.update(body);
+    }
+    digest.update(encoding.as_bytes());
+    for (_, have) in &readable {
+        digest.update(have);
+    }
+    for e in &r.extents {
+        let at = (e.offset - r.span_start) as usize;
+        out.extend_from_slice(&span[at..at + e.len as usize]);
+    }
+    Ok(encoding)
+}
+
+/// Lay `bodies` (entries `first_block..=last_block`, trailers excluded) out at the target's
+/// offsets and check them: lengths, orphaned fork entries, and every readable byte.
+fn assemble(
+    log: &Log,
+    r: &Region,
+    bodies: &[Vec<u8>],
+    readable: &[(u64, Vec<u8>)],
+) -> Result<Vec<u8>> {
+    let mut span = Vec::new();
+    for (n, body) in (r.first_block..).zip(bodies) {
+        let (a, b) = log.bounds(n)?;
         let own = body.len() as u64 + 8;
         let mismatch = || {
             format!(
@@ -578,9 +638,7 @@ fn rebuild_region(
         } else {
             Vec::new()
         };
-        digest.update((body.len() as u64).to_le_bytes());
-        digest.update(&body);
-        span.extend_from_slice(&body);
+        span.extend_from_slice(body);
         span.extend_from_slice(&a.to_le_bytes());
         span.extend_from_slice(&gap);
     }
@@ -588,28 +646,113 @@ fn rebuild_region(
         span.len() as u64 == r.span_end - r.span_start,
         "rebuilt span length mismatch"
     );
-    // Every readable byte of the affected entries must match the rebuild exactly.
-    let mut compare = |from: u64, to: u64| -> Result<()> {
-        if to > from {
-            let have = log.log.read(from, to - from)?;
-            let at = (from - r.span_start) as usize;
-            ensure!(
-                span[at..at + have.len()] == have[..],
-                "rebuilt bytes {from}..{to} differ from the readable target bytes; the \
-                 source does not match this log"
-            );
-            digest.update(&have);
-        }
-        Ok(())
-    };
-    let mut cursor = r.span_start;
-    for e in &r.extents {
-        compare(cursor, e.offset)?;
-        let at = (e.offset - r.span_start) as usize;
-        out.extend_from_slice(&span[at..at + e.len as usize]);
-        cursor = e.end();
+    for (from, have) in readable {
+        let at = (from - r.span_start) as usize;
+        ensure!(
+            span[at..at + have.len()] == have[..],
+            "rebuilt bytes {from}..{} differ from the readable target bytes; the source does \
+             not match this log",
+            from + have.len() as u64
+        );
     }
-    compare(cursor, r.span_end)
+    Ok(span)
+}
+
+/// Re-encode the source payloads in every encoding that reproduces the target's readable
+/// anchors byte for byte, and keep the one result that fits. Several different results that
+/// all fit, or none, are refused.
+fn translate(
+    log: &Log,
+    r: &Region,
+    source_bodies: &[Vec<u8>],
+    readable: &[(u64, Vec<u8>)],
+    as_is: anyhow::Error,
+) -> Result<(String, Vec<Vec<u8>>, Vec<u8>)> {
+    let (left, right) = r.source_range();
+    let (marker, codecs) = calibrate(log, left, right)
+        .with_context(|| format!("the source does not fit as it is ({as_is:#})"))?;
+    let payloads = source_bodies
+        .iter()
+        .map(|body| ship_payload(body))
+        .collect::<Result<Vec<_>>>()?;
+    let mut fits: Vec<(Codec, Vec<Vec<u8>>, Vec<u8>)> = Vec::new();
+    let mut misses = Vec::new();
+    for codec in codecs {
+        let bodies = payloads
+            .iter()
+            .map(|(id, raw)| encode_ship_with(id, raw, marker, &codec))
+            .collect::<Result<Vec<_>>>()?;
+        match assemble(log, r, &bodies, readable) {
+            Ok(span) => {
+                if !fits.iter().any(|(_, _, s)| *s == span) {
+                    fits.push((codec, bodies, span));
+                }
+            }
+            Err(e) => misses.push(format!("{}: {e:#}", codec.name())),
+        }
+    }
+    match fits.len() {
+        1 => {
+            let (codec, bodies, span) = fits.pop().expect("one fit");
+            Ok((format!("re-encoded as {}", codec.name()), bodies, span))
+        }
+        0 => bail!(
+            "the source does not fit as it is ({as_is:#}), and no encoding that reproduces the \
+             anchors fits either: {}",
+            misses.join("; ")
+        ),
+        _ => bail!(
+            "several encodings reproduce the anchors and fit this region with different bytes \
+             ({}); the damaged bytes cannot be told apart, so the region is refused",
+            fits.iter()
+                .map(|(c, _, _)| c.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// The payload preamble and the encodings that reproduce every readable anchor of a region
+/// byte for byte. An anchor too large to read whole (a full chain state) is skipped.
+fn calibrate(log: &Log, left: u32, right: u32) -> Result<(u32, Vec<Codec>)> {
+    let mut marker = None;
+    let mut fitting: Option<Vec<Codec>> = None;
+    let mut per_anchor = Vec::new();
+    for n in [left, right] {
+        let Ok(body) = log.body(n) else { continue };
+        let (id, raw) = ship_payload(&body)?;
+        let m = ship_marker(&body);
+        ensure!(
+            marker.is_none_or(|prev| prev == m),
+            "the SHIP payload preamble differs between anchors {left} and {right}: the node \
+             was upgraded inside this region, which is not supported"
+        );
+        marker = Some(m);
+        let fits: Vec<Codec> = Codec::candidates()
+            .into_iter()
+            .filter(|c| encode_ship_with(&id, &raw, m, c).is_ok_and(|e| e == body))
+            .collect();
+        ensure!(
+            !fits.is_empty(),
+            "no known encoding reproduces anchor block {n}. Its node may have used zlib-ng or \
+             another non-stock zlib (check `ldd $(which nodeos)` on that host); use a donor log \
+             whose entries are byte-identical"
+        );
+        per_anchor.push(n);
+        fitting = Some(match fitting {
+            None => fits,
+            Some(prev) => prev.into_iter().filter(|c| fits.contains(c)).collect(),
+        });
+    }
+    let fitting = fitting.with_context(|| {
+        format!("neither anchor ({left}, {right}) can be read whole to calibrate the encoding")
+    })?;
+    ensure!(
+        !fitting.is_empty(),
+        "anchors {left} and {right} were written with different encodings: the node was \
+         upgraded inside this region (for example to Spring), which is not supported"
+    );
+    Ok((marker.expect("an anchor was read"), fitting))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -699,8 +842,9 @@ pub fn build(log: &Log, t: &Target, sources: &Sources, out: &Path) -> Result<Out
         bytes(t.damaged_bytes()),
         bytes(t.record_size)
     )?;
-    for (i, r) in t.regions.iter().enumerate() {
+    for (i, (r, encoding)) in t.regions.iter().zip(&rebuilt.encodings).enumerate() {
         writeln!(text, "  [{}] {}", i + 1, region_line(t.record_size, r))?;
+        writeln!(text, "      entries: {encoding}")?;
     }
     writeln!(
         text,
@@ -723,6 +867,7 @@ pub fn build(log: &Log, t: &Target, sources: &Sources, out: &Path) -> Result<Out
     let json = json!({
         "ok": true,
         "bundle": bundle,
+        "encodings": rebuilt.encodings,
         "plan_sha256": plan_sha256,
         "replacement_sha256": plan.replacement_sha256,
         "regions": t.regions.iter().map(|r| region_json(t.record_size, r)).collect::<Vec<_>>(),

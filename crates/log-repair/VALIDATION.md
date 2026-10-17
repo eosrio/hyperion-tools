@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-47 tests on Linux; 36 on Windows, where the scan-with-faults, media-write,
+54 tests on Linux; 42 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -16,6 +16,22 @@ A write covering a whole damaged range heals it, as a full-record write does on 
   indexes, malformed varints, and oversized lengths. Re-encoded SHIP payloads use
   32 KiB stored blocks, checked at 0 B, one block, 49,349 B, an exact 64 KiB, and
   70,000 B.
+- **Encodings (translation):**
+  - *Real entries.* Seven real SHIP entries are reproduced byte for byte from their
+    decompressed payloads (`testdata/ship/`): EOS mainnet compressed traces and deltas
+    from blocks 50M to 300M, including a 30 KB entry; EOS Spring stored entries,
+    including a three-block trace; and WAX testnet Leap 5 compressed entries. For each
+    compressed entry, level 6 is the only zlib level that reproduces it.
+  - *Stored layouts.* Exact fills, with and without the empty final block, and the
+    older 32,506-byte split. Every codec round-trips, including an empty payload.
+  - *Rebuilds.* A compressed target rebuilt from a stored donor, a stored target from a
+    compressed donor, and a matching donor used as it is. A media heal of a compressed
+    log from a stored donor (Unix). An upgrade inside a region (anchors in different
+    encodings) and an encoding no candidate reproduces are refused, the second with the
+    zlib-ng hint.
+  - *Formats and replay.* Unsupported logs are named: state-history version 1 (EOSIO
+    2.1/2.2), no `ship` magic (before 1.8), and pruned. Replay slices across two retained
+    `blocks-A-B.log` files, and refuses a gap and a file from another chain.
 - **Orphaned fork entries (SHIP):** both SHIP kinds with abandoned entries from another
   fork between an entry and the next index position. Every entry reads as in the clean
   log, and an orphan with a wrong trailer is refused. Damage beside the orphans rebuilds
@@ -144,12 +160,39 @@ Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1
   420,000,006 on they are stored (`78 01`, 32 KiB blocks). The marker is 1 throughout.
   - `verify` against the node's `blocks.log` is clean on 20,000-block ranges at
     340M and at 520M, in both SHIP logs.
-  - `prepare --ship` rebuilds a stored-era trace record (block 480,000,085) as
-    `already identical`, and refuses a compressed-era one (block 340,000,399) with
-    `entry … length 4530 differs from target 2321`: the endpoint's payload re-encoded
-    as stored zlib, against the original's compressed bytes. Nothing was written.
+  - Before translation, `prepare --ship` rebuilt a stored-era trace record (block
+    480,000,085) as `already identical`, and refused a compressed-era one (block
+    340,000,399) with `entry … length 4530 differs from target 2321`. Nothing was
+    written. Translation now rebuilds both; see below.
 - `prepare` on a live, appending log fails with `target changed during fetch` once
   a fetch outlasts a block interval. Stop nodeos first.
+
+**Translating older encodings, EOS mainnet and WAX testnet.** Run with the
+translation build, which encodes with the bundled stock zlib 1.3.2.
+
+- *Live log, read-only.* On the EOS full-history node, `prepare --ship` against its own
+  endpoint now rebuilds the compressed-era trace and chain-state records at block
+  340,000,399 as `already identical`, `re-encoded as zlib level 6`.
+- *Static slices.* These are copies of the EOS SHIP logs, with trailers and index
+  rebased, tested one 4 KiB record at a time with `prepare --ship`:
+
+  | Slice | Records | Result |
+  |---|---|---|
+  | blocks 340,000,000 to 340,020,000, both logs | 40 | all `already identical`, re-encoded as zlib level 6 |
+  | blocks 120,000,000 to 120,010,000, both logs (a 842 MB trace slice, about 84 KB per entry) | 40 | all `already identical`, re-encoded as zlib level 6 |
+  | around the switch at block 389,997,245, both logs | 14 | before it, re-encoded as zlib level 6; after it, the endpoint's stored bytes as they are; the record holding both encodings refused (`different encodings`) |
+
+- *Real damage, healed.* On a disposable btrfs, four records were damaged beneath the
+  data checksums in each of six files (18 extents):
+  - EOS slices (340M) from the EOS endpoint over the LAN;
+  - WAX testnet slices (written on a zlib 1.3 host) from the WAX endpoint;
+  - the same EOS slices from a donor in the other encoding (the payloads rewritten as
+    Spring's stored zlib), with the fetched blocks.
+
+  Every region was rebuilt `re-encoded as zlib level 6`. After a remount, all files
+  scanned clean and were byte-identical to the originals.
+- *Replay.* The real-nodeos smoke test (Spring 1.2.2), including sliced snapshot
+  replay, passes with the translation build.
 
 **Orphaned fork entries, Libre mainnet (Spring 1.2.3-alpha1, ext4).** A static
 30,000-block copy of each SHIP log keeps all 1,859 orphaned fork entries; positions and
@@ -223,11 +266,16 @@ found.
   the same way, but `dm-dust` was not available to emulate that directly.
 - Replay (`replay-ship`, `prepare --nodeos`) on a real chain; it ran only on the
   smoke chain.
-- Rebuilding a compressed SHIP stretch: replay with the older release that wrote it,
-  or a donor from another node with byte-identical entries for that range. Which
-  release switched from compressed to stored payloads.
-- Leap 3 logs (marker 0 framing is parsed by the tests only), and chain-specific
-  builds other than WAX's Leap 5 build.
+- Replay of a compressed stretch, with an older release or with Spring: whether the
+  replayed payloads equal the ones the original release wrote. The readable bytes
+  check refuses any difference, but it has not been run on a real chain.
+- Logs written on a host with non-stock zlib (zlib-ng, s390x hardware compression):
+  refused by calibration, not tested on a real log.
+- Leap 3 and EOSIO 1.8/2.0 logs written by those releases themselves (their legacy
+  u32 preamble is covered by unit tests), and chain-specific builds other than WAX's
+  Leap 5 build. The EOS log tested here was written with the Leap 4+ preamble
+  throughout.
+- An upgrade inside a damaged region (refused, not translated).
 - `verify` without a reference does not check `blocks.log` transaction bodies: it does
   not recompute transaction Merkle roots, and signatures cover only headers.
 - Valid public-certificate WSS end to end. Operators normally use `ws://` inside

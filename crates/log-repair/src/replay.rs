@@ -1,7 +1,7 @@
 //! Controlled replay: slice inputs into a NEW directory, never let nodeos open original logs.
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, IntoInnerError, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, ensure};
@@ -9,7 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::format::{Blocks, Kind, Log, encode_container, u64le};
-use crate::io::{Disk, create_dir, create_file, hash, sync_dir};
+use crate::io::{Disk, Stamp, create_dir, create_file, hash, sync_dir};
 use crate::repair::{LogFile, Sources, rebuild, target_flags};
 use crate::report::{Out, arg};
 use crate::target::{Extent, Target};
@@ -19,7 +19,9 @@ pub struct ReplayOptions<'a> {
     pub snapshot: &'a Path,
     /// Operator-supplied head; nodeos independently verifies snapshot contents.
     pub snapshot_block: u32,
-    pub blocks_dir: &'a Path,
+    /// Directories holding the intact block history: a `blocks.log` and/or retained
+    /// `blocks-FIRST-LAST.log` files (`blocks-dir`, `blocks-retained-dir`, an archive).
+    pub blocks_dirs: &'a [PathBuf],
     pub out: &'a Path,
     pub debug_traces: bool,
     pub state_db_size_mb: u32,
@@ -55,25 +57,28 @@ pub fn run(log: &Log, t: &Target, o: ReplayOptions<'_>) -> Result<Out> {
         snap.read(0, 8)? == [0x50, 0x05, 0x51, 0x30, 1, 0, 0, 0],
         "expected an uncompressed portable Antelope snapshot (magic 0x30510550, file format 1)"
     );
-    let blocks = Log::open(&o.blocks_dir.join("blocks.log"), None, false)?;
+    let blocks = BlockSet::open(o.blocks_dirs)?;
+    // Include the snapshot head itself when present; nodeos replays only the blocks after it.
+    let (slice_first, slice_last) = (o.snapshot_block.max(blocks.first()), last + 1);
     ensure!(
-        blocks.kind == Kind::Blocks && blocks.first <= o.snapshot_block + 1 && blocks.last > last,
-        "blocklog must cover snapshot+1 through block {}",
-        last + 1
+        slice_first <= o.snapshot_block + 1,
+        "the block logs start at block {}, after the snapshot head {}; nodeos needs every block \
+         after the snapshot",
+        blocks.first(),
+        o.snapshot_block
     );
+    blocks.check_covers(slice_first, slice_last)?;
     // Anchor chain compatibility is checked BEFORE copying anything.
     for r in &t.regions {
         let (left, right) = r.source_range();
         for n in [left, right] {
             ensure!(
-                blocks.id(n, &blocks.body(n)?)? == log.ship_entry_id(n)?,
+                blocks.id(n)? == log.ship_entry_id(n)?,
                 "replay blocklog belongs to a different chain/fork at anchor {n}"
             );
         }
     }
-    fs2::FileExt::try_lock_shared(&blocks.log.file).context("lock replay blocks.log")?;
-    fs2::FileExt::try_lock_shared(&blocks.index.file).context("lock replay blocks.index")?;
-    let before = (blocks.log.stamp()?, blocks.index.stamp()?);
+    let before = blocks.lock_and_stamp(slice_first, slice_last)?;
     create_dir(o.out)?;
     let out = o.out.canonicalize()?;
     let data = out.join("data");
@@ -86,8 +91,6 @@ pub fn run(log: &Log, t: &Target, o: ReplayOptions<'_>) -> Result<Out> {
         &config.join("config.ini"),
         b"# Isolated repair replay. No peers, producer, or HTTP plugins.\n",
     )?;
-    // Include the snapshot head itself when present; nodeos replays only the blocks after it.
-    let (slice_first, slice_last) = (o.snapshot_block.max(blocks.first), last + 1);
     eprintln!(
         "Writing blocks {slice_first}..{slice_last} of the intact blocklog into {}. \
          Replay does not open original log paths.",
@@ -95,7 +98,7 @@ pub fn run(log: &Log, t: &Target, o: ReplayOptions<'_>) -> Result<Out> {
     );
     write_slice(&blocks, slice_first, slice_last, &sliced_blocks)?;
     ensure!(
-        (blocks.log.stamp()?, blocks.index.stamp()?) == before,
+        blocks.lock_and_stamp(slice_first, slice_last)? == before,
         "replay input changed during copy; stop its node and use a new output directory"
     );
     let history = data.join("state-history");
@@ -223,38 +226,157 @@ pub fn run(log: &Log, t: &Target, o: ReplayOptions<'_>) -> Result<Out> {
     Ok(Out { json: report, text })
 }
 
-/// Write a nodeos-readable v3 `blocks.log` + `blocks.index` holding `first..=last`, with
-/// trailers and index rebased. The header carries the chain ID: copied from a sliced source,
-/// or, for a source starting at genesis, the SHA-256 of its packed genesis state. nodeos
-/// checks that ID against the snapshot before replaying.
-pub fn write_slice(src: &Log, first: u32, last: u32, dir: &Path) -> Result<()> {
-    ensure!(
-        src.kind == Kind::Blocks && src.first <= first && first <= last && last <= src.last,
-        "blocklog slice {first}..{last} is outside {}..{}",
-        src.first,
-        src.last
-    );
+/// Intact block logs covering a range: `blocks.log` files and retained `blocks-A-B.log` range
+/// files, from one or more directories. Every file must carry the same chain ID.
+pub struct BlockSet {
+    logs: Vec<Log>,
+    chain_id: [u8; 32],
+}
+
+impl BlockSet {
+    pub fn open(dirs: &[PathBuf]) -> Result<Self> {
+        ensure!(!dirs.is_empty(), "replay needs --blocks-dir");
+        let mut logs = Vec::new();
+        for dir in dirs {
+            let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+                .with_context(|| format!("read --blocks-dir {}", dir.display()))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| is_block_log(p))
+                .collect();
+            paths.sort();
+            for path in paths {
+                let log = Log::open(&path, None, false)
+                    .with_context(|| format!("open {}", path.display()))?;
+                ensure!(
+                    log.kind == Kind::Blocks,
+                    "{} is not a block log",
+                    path.display()
+                );
+                logs.push(log);
+            }
+        }
+        ensure!(
+            !logs.is_empty(),
+            "no blocks.log or blocks-FIRST-LAST.log in the --blocks-dir directories"
+        );
+        logs.sort_by_key(|l| (l.first, l.last));
+        Self::from_logs(logs)
+    }
+
+    pub fn from_logs(logs: Vec<Log>) -> Result<Self> {
+        let mut chain_id = None;
+        for log in &logs {
+            let id = chain_id_of(log)?;
+            ensure!(
+                chain_id.is_none_or(|c| c == id),
+                "{} belongs to another chain than the other block logs",
+                log.log.path.display()
+            );
+            chain_id = Some(id);
+        }
+        Ok(Self {
+            logs,
+            chain_id: chain_id.context("no block logs")?,
+        })
+    }
+
+    pub fn first(&self) -> u32 {
+        self.logs.iter().map(|l| l.first).min().unwrap_or(u32::MAX)
+    }
+
+    /// The log holding block `n`; where files overlap, the first one in block order.
+    fn log_for(&self, n: u32) -> Option<&Log> {
+        self.logs.iter().find(|l| l.first <= n && n <= l.last)
+    }
+
+    pub fn check_covers(&self, first: u32, last: u32) -> Result<()> {
+        let mut n = first;
+        while n <= last {
+            let log = self.log_for(n).with_context(|| {
+                format!("no block log holds block {n}; replay needs blocks {first}..{last}")
+            })?;
+            match log.last.checked_add(1) {
+                Some(next) => n = next,
+                None => break,
+            }
+        }
+        Ok(())
+    }
+
+    pub fn id(&self, n: u32) -> Result<[u8; 32]> {
+        let log = self
+            .log_for(n)
+            .with_context(|| format!("no block log holds block {n}"))?;
+        log.id(n, &log.body(n)?)
+    }
+
+    /// Lock the files a slice reads against concurrent repair runs, and stamp them so that a
+    /// change during the copy is detected.
+    fn lock_and_stamp(&self, first: u32, last: u32) -> Result<Vec<(Stamp, Stamp)>> {
+        let mut stamps = Vec::new();
+        for log in self
+            .logs
+            .iter()
+            .filter(|l| l.first <= last && first <= l.last)
+        {
+            fs2::FileExt::try_lock_shared(&log.log.file)
+                .with_context(|| format!("lock {}", log.log.path.display()))?;
+            fs2::FileExt::try_lock_shared(&log.index.file)
+                .with_context(|| format!("lock {}", log.index.path.display()))?;
+            stamps.push((log.log.stamp()?, log.index.stamp()?));
+        }
+        Ok(stamps)
+    }
+}
+
+/// `blocks.log`, or a retained range file `blocks-FIRST-LAST.log`.
+fn is_block_log(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name == "blocks.log"
+        || name
+            .strip_prefix("blocks-")
+            .and_then(|r| r.strip_suffix(".log"))
+            .and_then(|r| r.split_once('-'))
+            .is_some_and(|(a, b)| a.parse::<u32>().is_ok() && b.parse::<u32>().is_ok())
+}
+
+/// A block log's chain ID: from its header, or for a log starting at genesis, the SHA-256 of
+/// the packed genesis state it holds.
+fn chain_id_of(src: &Log) -> Result<[u8; 32]> {
     let first_pos = src.pos(src.first)?;
-    let chain_id: [u8; 32] = if src.first == 1 {
+    Ok(if src.first == 1 {
         Sha256::digest(src.log.read(8, first_pos - 16)?).into()
     } else {
         ensure!(first_pos == 48, "unexpected blocks.log v3 header length");
         src.log.read(8, 32)?.try_into().unwrap()
-    };
+    })
+}
+
+/// Write a nodeos-readable v3 `blocks.log` + `blocks.index` holding `first..=last`, with
+/// trailers and index rebased, copied across as many source files as the range spans. The
+/// header carries the chain ID, which nodeos checks against the snapshot before replaying.
+pub fn write_slice(src: &BlockSet, first: u32, last: u32, dir: &Path) -> Result<()> {
+    ensure!(first <= last, "empty blocklog slice {first}..{last}");
+    src.check_covers(first, last)
+        .with_context(|| format!("blocklog slice {first}..{last}"))?;
     let mut log = BufWriter::new(new_file(&dir.join("blocks.log"))?);
     let mut index = BufWriter::new(new_file(&dir.join("blocks.index"))?);
     log.write_all(&3u32.to_le_bytes())?;
     log.write_all(&first.to_le_bytes())?;
-    log.write_all(&chain_id)?;
+    log.write_all(&src.chain_id)?;
     log.write_all(&[255; 8])?;
     let mut pos = 48u64;
     for n in first..=last {
-        let (a, b) = src.bounds(n)?;
-        let entry = src.log.read(a, b - a)?;
+        let from = src.log_for(n).context("block coverage was checked")?;
+        let (a, b) = from.bounds(n)?;
+        let entry = from.log.read(a, b - a)?;
         let body = entry.len() - 8;
         ensure!(
             u64le(&entry[body..]) == a,
-            "position trailer mismatch at block {n}"
+            "position trailer mismatch at block {n} in {}",
+            from.log.path.display()
         );
         log.write_all(&entry[..body])?;
         log.write_all(&pos.to_le_bytes())?;

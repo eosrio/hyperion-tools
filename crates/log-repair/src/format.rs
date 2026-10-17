@@ -7,9 +7,35 @@ use flate2::{Decompress, FlushDecompress, Status};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::codec::{self, Codec};
 use crate::io::{Disk, MAX_BYTES};
 
 pub const SHIP_MAGIC: u64 = 0xc35d_5000_0000_0000;
+
+/// Why a SHIP entry header is not supported, naming the writer when it is known. The magic
+/// is the name `ship` with the log version in its low 16 bits and feature flags above them.
+pub fn unsupported_ship_magic(magic: u64) -> Option<String> {
+    if magic == SHIP_MAGIC {
+        return None;
+    }
+    if magic & 0xffff_ffff_0000_0000 != SHIP_MAGIC {
+        return Some(
+            "no `ship` magic: not a state-history log, or one written before nodeos 1.8 (EOSIO \
+             1.5 to 1.7), which is not supported"
+                .into(),
+        );
+    }
+    let (version, features) = (magic & 0xffff, (magic >> 16) & 0xffff);
+    Some(if version == 1 {
+        "state-history log version 1, written by EOSIO 2.1 or 2.2, is not supported: its \
+         trace entries split out prunable transaction data that SHIP does not serve"
+            .into()
+    } else if features & 1 != 0 {
+        "pruned state-history log (state-history-log-retain-blocks) is not supported".into()
+    } else {
+        format!("unsupported state-history log version {version}, features {features:#x}")
+    })
+}
 pub const MAX_BLOCKS: u32 = 10_000;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -171,10 +197,9 @@ impl Log {
             u32le(&h[4..])
         } else {
             let h = log.read(0, 48)?;
-            ensure!(
-                u64le(&h) == SHIP_MAGIC,
-                "only non-pruned SHIP v0 without feature flags is supported"
-            );
+            if let Some(problem) = unsupported_ship_magic(u64le(&h)) {
+                bail!("{problem}");
+            }
             u32::from_be_bytes(h[8..12].try_into()?)
         };
         ensure!(first > 0, "invalid first block");
@@ -273,10 +298,9 @@ impl Log {
         let (a, b) = (self.pos(n)?, self.pos(n + 1)?);
         ensure!(b > a && b - a >= 60, "invalid index entry for block {n}");
         let h = self.log.read(a, 48)?;
-        ensure!(
-            u64le(&h) == SHIP_MAGIC,
-            "unsupported SHIP header at block {n}"
-        );
+        if let Some(problem) = unsupported_ship_magic(u64le(&h)) {
+            bail!("block {n}: {problem}");
+        }
         let own = ship_entry_size(&h);
         ensure!(
             own <= b - a,
@@ -346,10 +370,10 @@ pub fn orphans(mut bytes: &[u8], mut at: u64) -> Result<u64> {
 
 /// Verify framing, Adler checksum, exact compressed consumption, and bounded expansion.
 pub fn ship_payload(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
-    ensure!(
-        body.len() >= 52 && u64le(body) == SHIP_MAGIC,
-        "unsupported SHIP header"
-    );
+    ensure!(body.len() >= 52, "truncated SHIP entry");
+    if let Some(problem) = unsupported_ship_magic(u64le(body)) {
+        bail!("{problem}");
+    }
     let size = u64le(&body[40..]);
     ensure!(
         size == (body.len() - 48) as u64,
@@ -412,46 +436,20 @@ pub fn ship_payload(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
     Ok((body[8..40].try_into()?, raw))
 }
 
-/// Stored-block size nodeos writes for SHIP payloads (zlib level 0, 32 KiB window). Measured
-/// on Spring 1.2.2 and 1.2.3 logs; flate2's encoder splits at 31,745 bytes instead, so any
-/// payload larger than that would not reproduce the on-disk bytes.
-const SHIP_STORED_BLOCK: usize = 32 * 1024;
-
-/// zlib stream of stored deflate blocks, split the way nodeos writes them.
-fn stored_zlib(raw: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(raw.len() + (raw.len() / SHIP_STORED_BLOCK + 1) * 5 + 6);
-    out.extend_from_slice(&[0x78, 0x01]);
-    let mut chunks = raw.chunks(SHIP_STORED_BLOCK).peekable();
-    if chunks.peek().is_none() {
-        out.extend_from_slice(&[1, 0, 0, 0xff, 0xff]);
-    }
-    while let Some(chunk) = chunks.next() {
-        out.push(u8::from(chunks.peek().is_none()));
-        let len = chunk.len() as u16;
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&(!len).to_le_bytes());
-        out.extend_from_slice(chunk);
-    }
-    out.extend_from_slice(&adler32(raw).to_be_bytes());
-    out
-}
-
-fn adler32(data: &[u8]) -> u32 {
-    const MOD: u32 = 65521;
-    let (mut a, mut b) = (1u32, 0u32);
-    for chunk in data.chunks(5552) {
-        for &byte in chunk {
-            a += u32::from(byte);
-            b += a;
-        }
-        a %= MOD;
-        b %= MOD;
-    }
-    (b << 16) | a
-}
-
+/// A SHIP entry in Spring's encoding (stored zlib, 32 KiB blocks).
 pub fn encode_ship(id: &[u8; 32], raw: &[u8], marker: u32) -> Result<Vec<u8>> {
-    let compressed = stored_zlib(raw);
+    encode_ship_with(id, raw, marker, &codec::SPRING)
+}
+
+/// The preamble marker class of a SHIP entry body: 0, 1 (Leap 4+: with the uncompressed
+/// size), or 2 for the legacy u32 compressed length (EOSIO and Leap 3).
+pub fn ship_marker(body: &[u8]) -> u32 {
+    u32le(&body[48..]).min(2)
+}
+
+/// A SHIP entry whose zlib payload is produced by `codec`, with the given preamble marker.
+pub fn encode_ship_with(id: &[u8; 32], raw: &[u8], marker: u32, codec: &Codec) -> Result<Vec<u8>> {
+    let compressed = codec.encode(raw)?;
     let mut body = SHIP_MAGIC.to_le_bytes().to_vec();
     body.extend_from_slice(id);
     body.extend_from_slice(

@@ -260,9 +260,9 @@ async fn fetch_endpoint(url: &str, first: u32, last: u32, kind: Kind) -> Result<
 
 const TRUST: &str = "Block headers are authenticated by the id chain to both local anchors; \
     transaction bodies and SHIP traces/deltas are not. Use trusted independent operators; with \
-    several endpoints every byte must agree. SHIP entries are re-encoded as stored zlib, and \
-    another compressor may not fit. Incompatible artifacts are kept for diagnosis; build and \
-    apply refuse them.";
+    several endpoints every byte must agree. Fetched payloads are re-encoded in the target's \
+    own encoding, calibrated on its readable anchors; a target written by a non-stock zlib may \
+    not fit. Incompatible artifacts are kept for diagnosis; build and apply refuse them.";
 
 /// One region's agreed results and the SHIP payload marker of its anchors.
 struct Fetched {

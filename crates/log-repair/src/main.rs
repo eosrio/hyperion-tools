@@ -1,3 +1,4 @@
+mod codec;
 mod format;
 mod io;
 mod repair;
@@ -181,9 +182,11 @@ struct ReplayArgs {
     /// Operator-verified snapshot head; at most (first damaged block - 2).
     #[arg(long, requires = "nodeos")]
     snapshot_block: Option<u32>,
-    /// Directory with an intact blocks.log + blocks.index; only the replay range is copied.
+    /// Directory with intact block history: a blocks.log and/or retained
+    /// blocks-FIRST-LAST.log files, each with its index. Repeatable, e.g. the node's
+    /// blocks-dir and blocks-retained-dir. Only the replay range is copied.
     #[arg(long, requires = "nodeos")]
-    blocks_dir: Option<PathBuf>,
+    blocks_dir: Vec<PathBuf>,
     /// Match the original node's trace-history-debug-mode setting.
     #[arg(long)]
     trace_history_debug_mode: bool,
@@ -198,11 +201,11 @@ impl ReplayArgs {
     }
 
     fn run(&self, log: &format::Log, t: &target::Target, out: &Path) -> Result<Out> {
-        let (Some(nodeos), Some(snapshot), Some(snapshot_block), Some(blocks_dir)) = (
+        let (Some(nodeos), Some(snapshot), Some(snapshot_block), false) = (
             &self.nodeos,
             &self.snapshot,
             self.snapshot_block,
-            &self.blocks_dir,
+            self.blocks_dir.is_empty(),
         ) else {
             bail!("replay needs --nodeos, --snapshot, --snapshot-block, and --blocks-dir");
         };
@@ -213,7 +216,7 @@ impl ReplayArgs {
                 nodeos,
                 snapshot,
                 snapshot_block,
-                blocks_dir,
+                blocks_dirs: &self.blocks_dir,
                 out,
                 debug_traces: self.trace_history_debug_mode,
                 state_db_size_mb: self.chain_state_db_size_mb,
