@@ -4,3 +4,5 @@
 *.toml text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
+# The vendored Spring SHiP ABI is pinned by its sha256 and served byte for byte: always LF.
+crates/core/src/ship_abi.json text eol=lf
