@@ -1,6 +1,7 @@
 //! The error bodies of the block endpoints, as a Spring 1.1.0 to 1.2.2 node writes them with
-//! `verbose-http-errors` off (one detail), and the bodies for what a server of archived ranges
-//! adds: an illegal request-target, an oversized body and `503 Busy`.
+//! `verbose-http-errors` off (one detail); nodeos's refusals of an illegal request-target and of
+//! a request without a `Host`; and the bodies for what a server of archived ranges adds: an
+//! oversized body and `503 Busy`.
 //!
 //! nodeos's shape (`http_plugin.hpp` `error_results`) is
 //!
@@ -56,6 +57,9 @@ pub enum ApiError {
     NotFound,
     /// A request-target that is empty, not absolute or holds `..`.
     IllegalTarget,
+    /// A request with no `Host` header, or an empty one, which nodeos refuses even when it
+    /// validates no host names (`beast_http_session.hpp` `allow_host`).
+    DisallowedHost,
     /// A body larger than the cap, in bytes.
     TooLarge(usize),
     /// The server cannot answer now; the text says why. An HTTP router or proxy in front of it
@@ -95,7 +99,8 @@ impl ApiError {
             Self::BodyRequired
             | Self::Unparsable
             | Self::UnknownBlock { .. }
-            | Self::IllegalTarget => 400,
+            | Self::IllegalTarget
+            | Self::DisallowedHost => 400,
             Self::NotFound => 404,
             Self::TooLarge(_) => 413,
             Self::BadLength { .. } | Self::BadId { .. } => 500,
@@ -186,6 +191,14 @@ impl ApiError {
                 )
             }
             Self::IllegalTarget => nodeos(400, "Illegal request-target", 0, "", "", None),
+            Self::DisallowedHost => nodeos(
+                400,
+                "Disallowed HTTP HOST header in the request",
+                0,
+                "",
+                "",
+                None,
+            ),
             Self::TooLarge(cap) => nodeos(
                 413,
                 "Payload Too Large",
@@ -209,6 +222,7 @@ impl fmt::Display for ApiError {
             Self::UnknownBlock { .. } => f.write_str("unknown block"),
             Self::NotFound => f.write_str("unknown endpoint"),
             Self::IllegalTarget => f.write_str("illegal request-target"),
+            Self::DisallowedHost => f.write_str("missing or empty Host header"),
             Self::TooLarge(cap) => write!(f, "request body exceeds {cap} bytes"),
             Self::Busy(why) => write!(f, "busy: {why}"),
         }
@@ -470,11 +484,16 @@ mod tests {
             body(&ApiError::IllegalTarget),
             r#"{"code":400,"message":"Illegal request-target","error":{"code":0,"name":"","what":"","details":[]}}"#
         );
+        assert_eq!(
+            body(&ApiError::DisallowedHost),
+            r#"{"code":400,"message":"Disallowed HTTP HOST header in the request","error":{"code":0,"name":"","what":"","details":[]}}"#
+        );
         let statuses = [
             (ApiError::BodyRequired, 400),
             (ApiError::Unparsable, 400),
             (ApiError::NotFound, 404),
             (ApiError::IllegalTarget, 400),
+            (ApiError::DisallowedHost, 400),
             (ApiError::TooLarge(1), 413),
             (ApiError::internal(), 503),
         ];
