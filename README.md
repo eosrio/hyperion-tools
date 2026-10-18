@@ -13,6 +13,12 @@ cores instead of one node thread. Decoding uses the pure-Rust
 build. The zero-copy deserializer at the core originated in EOS Rio's
 [fleet-router](https://github.com/eosrio/fleet-router) and ships here as the `hyperion-ship` library.
 
+## Hyperion 4.5 development
+
+The [architecture definition](docs/architecture/hyperion-4.5.md) records the accepted release contracts.
+Use the [roadmap](docs/roadmap/hyperion-4.5.md) for repository ownership, milestones and the linked
+issue frontier. These documents distinguish accepted scope from implementation and qualification.
+
 ## Crates
 
 Every crate has its own README with full usage, benchmarks, and internals — follow the links.
