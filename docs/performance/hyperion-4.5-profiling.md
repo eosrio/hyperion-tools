@@ -185,6 +185,16 @@ servers or dependencies. Separate a relevant upstream fix from a demonstrated Hy
 
 ## Delivery slices
 
+Track the coverage program in [tools #28](https://github.com/eosrio/hyperion-tools/issues/28):
+
+| Slice | Deliverable | Blocked by |
+|---|---|---|
+| [History API #195](https://github.com/eosrio/hyperion-history-api/issues/195) | One guarded, verified fixture replay with an output oracle | None; use a known synthetic history if historical ABI coverage is unavailable |
+| [History API #196](https://github.com/eosrio/hyperion-history-api/issues/196) | One reader-to-ack profile with CPU/wait/resource evidence | #195 |
+| [History API #197](https://github.com/eosrio/hyperion-history-api/issues/197) | Bun 1.4.3 native transport and worker prerequisite decision | None for feasibility; full-stack replay follows the guarded harness |
+| [History API #198](https://github.com/eosrio/hyperion-history-api/issues/198) | ES 9.5.5 sorted-search, pressure and compatibility candidate evidence | None for candidate fixtures; release selection remains in P02 |
+| [History API #199](https://github.com/eosrio/hyperion-history-api/issues/199) | Correct configured ingest destinations before multi-node attribution | None |
+
 The linked release issues own executable follow-through: guarded fixtures/harness, per-stage
 observability and baseline artifacts, Bun runtime qualification, and ES version/client qualification.
 A source-confirmed ingest-node routing defect must be reproduced and resolved before attributing
