@@ -22,7 +22,20 @@ anyhow = { workspace = true }
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+# Only the `archive` readers hash: a block log's chain id is the sha256 of its genesis state.
+sha2 = { workspace = true, optional = true }
+# Only the `chain-api` renderer writes public keys and signatures as text.
+bs58 = { workspace = true, optional = true }
+ripemd = { workspace = true, optional = true }
 
 [features]
 default = []
 ship = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures"]
+# Strict, fail-closed readers for frozen SHiP and block logs, their catalog, the SHiP protocol
+# codec and the vendored Spring SHiP ABI: what a server of archived ranges builds on.
+archive = ["dep:sha2"]
+# nodeos-compatible `/v1/chain` block endpoint bodies rendered from stored blocks, and the
+# request parsing and error bodies that go with them: what a server of archived ranges answers.
+chain-api = ["archive", "dep:bs58", "dep:ripemd"]
+# Synthetic SHiP and block-log fixture writers for tests, here and in downstream crates.
+testkit = ["archive"]

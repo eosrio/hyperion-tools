@@ -1,0 +1,6 @@
+POST /v1/chain/nope HTTP/1.0
+Host: 127.0.0.1
+Connection: keep-alive
+Content-Length: 2
+
+{}

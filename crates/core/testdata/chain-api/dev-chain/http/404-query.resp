@@ -1,0 +1,6 @@
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+Server: nodeos/v1.2.2
+Content-Length: 212
+
+{"code":404,"message":"Not Found","error":{"code":0,"name":"exception","what":"unspecified","details":[{"message":"Unknown Endpoint","file":"beast_http_session.hpp","line_number":186,"method":"handle_request"}]}}

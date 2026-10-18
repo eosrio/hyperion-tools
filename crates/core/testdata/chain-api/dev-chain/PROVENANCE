@@ -1,0 +1,5 @@
+server_version_string v1.2.2
+chain_id d034b3c3aaa20489e80335b5e8c86e1e0590bf6fa43a939fcf34f1acc62ebbb1
+captured 2026-10-17
+mode node
+by scripts/capture_chain_api_goldens.sh
