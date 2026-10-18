@@ -50,6 +50,20 @@ when its ES|QL access prerequisite holds. Treat that as a conditional test-envir
 check, not a claim about Hyperion production. No dependency, image default, cluster setting or
 deployment was changed. No new Hyperion performance or compatibility measurements were taken.
 
+## Harness adoption: 2026-10-18
+
+Following the operator's request, the Tools benchmark's [Compose defaults](../../bench/docker-compose.yml)
+and [example environment](../../bench/.env.example) now select Elasticsearch and Kibana **9.5.5**.
+`ELASTIC_VERSION` remains an explicit override; existing local `.env` selections are not changed.
+The [setup guide](../../bench/README.md) keeps the ES 9.4.2 measurements identified as historical
+and requires actual server-version and image-digest evidence for new comparisons. The earlier
+pin audit above remains a record of the revisions inspected at that time.
+
+This adoption selects a benchmark candidate only. It changes no mappings, live cluster settings,
+JavaScript dependency versions or existing history. Compatibility and profiling results belong
+to [History API #198](https://github.com/eosrio/hyperion-history-api/issues/198); the default alone
+does not qualify that server/client combination.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.
