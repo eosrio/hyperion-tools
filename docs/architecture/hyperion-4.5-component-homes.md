@@ -4,6 +4,10 @@ Implementation foundation for [P01 / tools #19](https://github.com/eosrio/hyperi
 This assigns the initial package and source homes within the accepted
 [architecture](hyperion-4.5.md). A source-home assignment is not an implementation or support claim.
 
+TypeScript components follow the shared [TypeScript 7 and Bun checker policy](hyperion-4.5-typescript-toolchain.md).
+It preserves npm installation, emitted Node artifacts and runtime validation while standardizing
+the development and CI typecheck.
+
 ## Initial package and source homes
 
 | Responsibility | Package identity | Source home | Release ownership |

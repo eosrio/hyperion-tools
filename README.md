@@ -18,6 +18,8 @@ build. The zero-copy deserializer at the core originated in EOS Rio's
 The [architecture definition](docs/architecture/hyperion-4.5.md) records the accepted release contracts.
 Use the [roadmap](docs/roadmap/hyperion-4.5.md) for repository ownership, milestones and the linked
 issue frontier. These documents distinguish accepted scope from implementation and qualification.
+The [TypeScript toolchain policy](docs/architecture/hyperion-4.5-typescript-toolchain.md) defines the
+TypeScript 7 and Bun checker baseline for the History API, SDK, and TypeScript extensions.
 
 ## Crates
 
