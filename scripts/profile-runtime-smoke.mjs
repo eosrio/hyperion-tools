@@ -64,32 +64,43 @@ try {
     const uws = require('uWebSockets.js');
     uws.App().get('/probe', response => response.end('ok')).listen('127.0.0.1', 0, async token => {
       if (!token) return report(false, { error: 'Loopback listen failed' });
+      let ok = false;
+      let details;
       try {
         const port = uws.us_socket_local_port(token);
         const response = await fetch('http://127.0.0.1:' + port + '/probe', { signal: AbortSignal.timeout(2000) });
-        report(response.status === 200 && await response.text() === 'ok', { exercised: 'native HTTP loopback request/listen/close' });
+        ok = response.status === 200 && await response.text() === 'ok';
+        details = { exercised: 'native HTTP loopback request/listen/close' };
       } catch (error) {
-        report(false, { error: error.message });
+        details = { error: error.message };
       } finally {
-        uws.us_listen_socket_close(token);
+        try {
+          uws.us_listen_socket_close(token);
+        } catch (error) {
+          ok = false;
+          details = { ...details, cleanupError: error.message };
+        }
       }
+      report(ok, details);
     });
   } else if (mode === 'abieos') {
     const { Abieos } = require('@eosrio/node-abieos');
     const instance = Abieos.getInstance();
+    let hex;
+    let decoded;
     try {
       instance.loadAbi('probe', {
         version: 'eosio::abi/1.2', types: [],
         structs: [{ name: 'probe', base: '', fields: [{ name: 'value', type: 'uint32' }] }],
         actions: [], tables: [], ricardian_clauses: [], error_messages: [], abi_extensions: [], variants: [],
       });
-      const hex = instance.jsonToHex('probe', 'probe', { value: 42 });
-      const decoded = instance.hexToJson('probe', 'probe', hex);
-      report(hex.toLowerCase() === '2a000000' && decoded.value === 42,
-        { exercised: 'native ABI load/encode/decode/cleanup', hex, decoded });
+      hex = instance.jsonToHex('probe', 'probe', { value: 42 });
+      decoded = instance.hexToJson('probe', 'probe', hex);
     } finally {
       instance.cleanup();
     }
+    report(hex.toLowerCase() === '2a000000' && decoded.value === 42,
+      { exercised: 'native ABI load/encode/decode/cleanup', hex, decoded });
   } else {
     const heap = getHeapStatistics();
     report(typeof heap.used_heap_size === 'number' && heap.heap_size_limit > 0,
