@@ -19,6 +19,37 @@ Source inspected: `eosrio/hyperion-history-api` at [`b571c5fb2e7c1422aa5bff31c45
 
 One configuration defect can invalidate scaling experiments: [`prepareIngestClients`](https://github.com/eosrio/hyperion-history-api/blob/b571c5fb2e7c1422aa5bff31c45c1c7ac54caddc/src/indexer/connections/manager.class.ts#L140) loops over `ingest_nodes` but constructs every client using `_es.host`, ignoring the loop's `node`. Verify actual request destinations before attributing a result to multiple configured ingest nodes. This review changes no runtime code.
 
+## Follow-up review: 2026-10-18 12:03 UTC
+
+The [release notes](https://www.elastic.co/docs/release-notes/elasticsearch) still list
+9.5.5 first. The [known-issues page](https://www.elastic.co/docs/release-notes/elasticsearch/known-issues)
+still lists the previously recorded 9.5.0–9.5.2 indexing-pressure defect and its 9.5.3 fix;
+no 9.5.5-specific entry was observed. The
+[official security index](https://discuss.elastic.co/c/announcements/security-announcements/31)
+shows October 6 as its latest advisory activity. All six linked advisories retain the recorded
+affected versions, prerequisites and fixed releases. Their official Discourse first-post records
+remain version 1, last updated October 6, before the previous review. No new actionable upstream
+change was identified in this scope. This is not a complete cluster exposure assessment.
+
+The repository pin audit adds the following baseline detail. These are tracked defaults and
+resolved dependencies, not running-server observations or a qualified 4.5 support matrix.
+
+| Repository revision and scope | Exact observed version | Evidence |
+| --- | --- | --- |
+| History API `release/4.5`, `e821fdfa687471427b6248a68fc40cf2e6c36047`, JavaScript dependencies | Client **8.19.1**, transport **8.10.1** | [Manifest](https://github.com/eosrio/hyperion-history-api/blob/e821fdfa687471427b6248a68fc40cf2e6c36047/package.json), [lockfile](https://github.com/eosrio/hyperion-history-api/blob/e821fdfa687471427b6248a68fc40cf2e6c36047/package-lock.json) |
+| Same revision, end-to-end server default | **9.3.1**; overridable via `ES_VERSION` or the harness configuration | [Compose](https://github.com/eosrio/hyperion-history-api/blob/e821fdfa687471427b6248a68fc40cf2e6c36047/tests/e2e/docker-compose.yml#L37), [ChainManager](https://github.com/eosrio/hyperion-history-api/blob/e821fdfa687471427b6248a68fc40cf2e6c36047/tests/e2e/lib/chain-manager.ts#L46) |
+| Hyperion Tools `main`, `0f3865925a681e60f0a3b1eab8ef90c940a35720`, benchmark server default | Elasticsearch and Kibana **9.4.2**; overridable via `ELASTIC_VERSION` | [Compose](https://github.com/eosrio/hyperion-tools/blob/0f3865925a681e60f0a3b1eab8ef90c940a35720/bench/docker-compose.yml#L15), [example environment](https://github.com/eosrio/hyperion-tools/blob/0f3865925a681e60f0a3b1eab8ef90c940a35720/bench/.env.example#L16) |
+
+Neither harness default exercises the 9.5.5 candidate. Both Compose configurations use version
+tags rather than immutable image digests. [History API #198](https://github.com/eosrio/hyperion-history-api/issues/198)
+must record explicit server/image-digest overrides and the resolved client/transport for each
+qualification run; a default-harness pass cannot establish 9.5.5 compatibility. These older server
+versions also lie within the affected ranges of
+[ESA-2026-185](https://discuss.elastic.co/t/elasticsearch-8-19-23-9-4-8-9-5-5-security-update-esa-2026-185/390859)
+when its ES|QL access prerequisite holds. Treat that as a conditional test-environment exposure
+check, not a claim about Hyperion production. No dependency, image default, cluster setting or
+deployment was changed. No new Hyperion performance or compatibility measurements were taken.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.
