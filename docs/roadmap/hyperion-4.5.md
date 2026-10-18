@@ -26,10 +26,10 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 | igorls/wormdb | Database engine capabilities and engine-specific correctness/performance fixes. | Existing; file engine work here when demonstrated necessary. |
 | eosrio/hyperion-docs | Operator-facing upgrade, installation, configuration and recovery documentation. | Existing; publish operator guidance as behavior becomes qualified. |
 
-Backend adapters remain separately versioned extension packages. Their initial source homes should
-follow the implementation language and host integration; assign those homes in the foundation
-work before filing adapter implementation issues. A package does not automatically need another
-repository. Repository layout must not introduce a new service or a worker rewrite by itself.
+Backend adapters remain separately versioned extension packages. The
+[component foundation](../architecture/hyperion-4.5-component-homes.md) assigns their initial source
+homes and package names, alongside the existing runtime and new SDK/plugin packages. A package
+does not automatically need another repository or a new service/worker rewrite.
 
 ### Existing SDK and catalog migration
 

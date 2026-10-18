@@ -12,7 +12,8 @@ additional release requirements or settled architectural choices.
 This is the 4.5 release of Hyperion History API. Most development happens in hyperion-tools, with
 substantial indexer/API changes in hyperion-history-api and database work in WormDB as needed.
 Repository homes and release coordination are recorded in the [approved roadmap](../roadmap/hyperion-4.5.md).
-Detailed source homes for runtime submodules and backend adapters remain part of the foundation work.
+The [component foundation](hyperion-4.5-component-homes.md) assigns initial package/source homes
+and separates the new SDK metadata contract from legacy plugin migration.
 
 The release must deliver:
 
@@ -170,6 +171,7 @@ Changes to release scope, public behavior, or component ownership return to arch
 
 ## References
 
+- [SDK, runtime and adapter source homes](hyperion-4.5-component-homes.md)
 - [Approved development roadmap and repository ownership](../roadmap/hyperion-4.5.md)
 - [Approved initial issue batch](../roadmap/hyperion-4.5-initial-issues.md)
 - [Detailed decisions and their status](hyperion-4.5-decisions.md)

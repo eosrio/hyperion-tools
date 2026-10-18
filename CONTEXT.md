@@ -62,6 +62,15 @@ A declarative description of the chain events, projections, query fields, and in
 contract, authored or generated in full auto-map mode. The same definition applies to either supported
 state backend and may refer to code hooks for complex behavior.
 
+**Component manifest**:
+Versioned metadata identifying an extension package, its package version and kind, and declared
+Hyperion/SDK eligibility ranges. A backend adapter also declares database-engine requirements.
+Metadata validation does not load code or establish tested release support.
+
+**Tested component set**:
+A catalog record identifying exact Hyperion, SDK and selected component/engine versions and source
+pins, with qualification evidence. Its declarations remain distinct from the overall 4.5 release gates.
+
 **Compatible plugin set**:
 The tested, pinned plugin versions identified for a Hyperion release, giving operators a supported
 core/plugin combination without manual version matching.
