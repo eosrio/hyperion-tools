@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check runtime probe syntax
+        run: node --check scripts/profile-runtime-smoke.mjs
+      - name: Test runtime probe failure reporting
+        run: node --test scripts/profile-runtime-smoke.test.mjs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt

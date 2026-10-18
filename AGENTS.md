@@ -4,6 +4,11 @@ Before changing 4.5 behavior, read [the architecture definition](docs/architectu
 the applicable [ADRs](docs/adr/), and [the delivery roadmap](docs/roadmap/hyperion-4.5.md).
 Use [CONTEXT.md](CONTEXT.md) for shared terms.
 
+For performance or runtime work, follow the
+[component profiling program](docs/performance/hyperion-4.5-profiling.md). Use guarded,
+ABI-correct workloads and publish stage/resource evidence before selecting an optimization.
+Track Bun runtime qualification and Elasticsearch release changes separately from toolchain checks.
+
 - Work from a scoped issue in the repository that owns the change. Coordinate cross-repository
   work through the release issue linked from the roadmap.
 - Preserve existing Elasticsearch history through upgrades; initialize new state projections separately.

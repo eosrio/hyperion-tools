@@ -63,6 +63,13 @@ instead of waiting for a speculative complete SDK.
 
 ## Parallel workstreams and release gates
 
+- **Component profiling and runtime qualification:** follow the
+  [profiling program](../performance/hyperion-4.5-profiling.md) across every shipping component.
+  Establish guarded, ABI-correct fixtures and correctness oracles, then collect CPU/native,
+  allocation/GC, queue/wait, storage and p50/p95/p99 profiles under live, bulk and mixed workloads.
+  Evaluate Bun 1.4.3 against the Node controls with explicit runtime/transport qualification.
+  Review Elasticsearch release notes and qualify server/client changes without requiring a
+  full Hyperion history reindex. Historical reports and faster typechecking are not runtime evidence.
 - **Upgrade and reliability:** preserve usable existing Elasticsearch history and continued history
   indexing without a full reindex; initialize new state separately. Exercise failure/retry,
   reconnect, backpressure and live-priority behavior using the existing worker infrastructure.
