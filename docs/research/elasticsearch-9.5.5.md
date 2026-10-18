@@ -64,6 +64,26 @@ JavaScript dependency versions or existing history. Compatibility and profiling 
 to [History API #198](https://github.com/eosrio/hyperion-history-api/issues/198); the default alone
 does not qualify that server/client combination.
 
+### First executed compatibility/profiling slice
+
+[History API #200](https://github.com/eosrio/hyperion-history-api/pull/200) updates the E2E
+Compose default and `ChainManager` fallback to 9.5.5 while retaining explicit overrides.
+Its [initial evidence report](https://github.com/eosrio/hyperion-history-api/blob/298db4241d3ff3b43582d60fd0f797fe52921675/docs/performance/elasticsearch-9.5.5-initial.md)
+records three unprofiled and two profiled single-node synthetic executions using client 8.19.1
+and transport 8.10.1. Each verified 2,500 acknowledged documents, complete helper-generated
+query results and exact owned-index cleanup. Node 24.19.0 default/HttpConnection and Bun 1.4.3
+HttpConnection passed that bounded request surface. CPU/heap artifacts, server statistics,
+hot threads and exact source/image/executable hashes are retained with checksums.
+
+Two draft runs failed shard allocation because of the local Docker filesystem's disk
+watermark; their reports and the isolated fixture adjustment are preserved. Both runtimes
+also returned bulk `took` values exceeding client wall time in some samples; those remain
+unresolved timing warnings, not corrected measurements. These observations do not establish
+a runtime speed ranking, a server regression or full Hyperion compatibility. Neither entire
+chain E2E indexing nor the existing Tools bulk benchmark was run by this client probe.
+Timeout/late-shard failures, replicas/pressure, full mappings and retained-index upgrades
+remain open in [#198](https://github.com/eosrio/hyperion-history-api/issues/198).
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.
