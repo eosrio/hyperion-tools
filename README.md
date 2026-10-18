@@ -17,7 +17,8 @@ build. The zero-copy deserializer at the core originated in EOS Rio's
 
 The [architecture definition](docs/architecture/hyperion-4.5.md) records the accepted release contracts.
 Use the [roadmap](docs/roadmap/hyperion-4.5.md) for repository ownership, milestones and the linked
-issue frontier. These documents distinguish accepted scope from implementation and qualification.
+issue frontier. Track cross-repository delivery in [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24).
+These documents distinguish accepted scope from implementation and qualification.
 
 ## Crates
 

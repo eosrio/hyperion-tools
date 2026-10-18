@@ -19,10 +19,10 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 |---|---|---|
 | eosrio/hyperion-tools | Release plan, Rust ingestion/codec and snapshot tooling, reusable processing/recovery components where appropriate, replay and cross-component qualification. | Existing; retain as the main coordination home. |
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
-| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Approved new repository; bootstrap tracked below. |
+| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
-| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Approved new repository; bootstrap tracked below. |
-| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Approved new repository; bootstrap tracked below. |
+| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Created; scaffold CI passed. |
+| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Created; scaffold CI passed. |
 | igorls/wormdb | Database engine capabilities and engine-specific correctness/performance fixes. | Existing; file engine work here when demonstrated necessary. |
 | eosrio/hyperion-docs | Operator-facing upgrade, installation, configuration and recovery documentation. | Existing; publish operator guidance as behavior becomes qualified. |
 
@@ -97,7 +97,7 @@ or measurement and a separate scope decision.
 
 ## First issue batch
 
-The [initial issue drafts](hyperion-4.5-initial-issues.md) define ten bounded starting outcomes:
+The [published initial issue batch](hyperion-4.5-initial-issues.md) defines ten bounded starting outcomes:
 
 1. Establish SDK/plugin repositories and upgrade the existing catalog.
 2. Define the supported release and upgrade qualification matrix.
@@ -121,11 +121,46 @@ The following already exist and must be reused rather than duplicated:
 The failed-Mongo-write acknowledgment path is source-confirmed in the inspected working tree.
 The reports in #187/#188 have not all been reproduced during this planning exercise.
 
+
+## Publication record — 2026-10-17
+
+Release coordination: [hyperion-tools #24](https://github.com/eosrio/hyperion-tools/issues/24).
+The ten issues below are native sub-issues of that release issue; genuine blockers are also
+registered as native GitHub dependencies.
+
+| Planning ID | Published issue | Milestone | Current prerequisites |
+|---|---|---|---|
+| P01 | [eosrio/hyperion-tools #19](https://github.com/eosrio/hyperion-tools/issues/19) | M0 | None |
+| P02 | [eosrio/hyperion-tools #20](https://github.com/eosrio/hyperion-tools/issues/20) | M0 | None |
+| P03 | [eosrio/hyperion-history-api #189](https://github.com/eosrio/hyperion-history-api/issues/189) | M1 | None |
+| P04 | [eosrio/hyperion-history-api #190](https://github.com/eosrio/hyperion-history-api/issues/190) | M0 | [P02](https://github.com/eosrio/hyperion-tools/issues/20) |
+| P05 | [eosrio/hyperion-sdk #1](https://github.com/eosrio/hyperion-sdk/issues/1) | M1 | [P01](https://github.com/eosrio/hyperion-tools/issues/19) |
+| P06 | [eosrio/hyperion-history-api #191](https://github.com/eosrio/hyperion-history-api/issues/191) | M1 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
+| P07 | [eosrio/hyperion-tools #21](https://github.com/eosrio/hyperion-tools/issues/21) | M2 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
+| P08 | [eosrio/hyperion-tools #22](https://github.com/eosrio/hyperion-tools/issues/22) | M3 | None |
+| P09 | [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23) | M4 | None |
+| P10 | [eosrio/hyperion-atomicassets-plugin #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1) | M3 | None |
+
+The repository-creation prerequisite for P10 is fulfilled. P01 remains open for adapter source
+homes, SDK migration policy and the catalog compatibility format/consumer audit; repository
+creation alone does not complete that issue. P03 is marked ready-for-agent. Setup and investigation
+work can start independently without being mislabeled as implementation-ready.
+
+Repository bootstrap is published on main in [hyperion-sdk](https://github.com/eosrio/hyperion-sdk),
+[hyperion-atomicassets-plugin](https://github.com/eosrio/hyperion-atomicassets-plugin) and
+[hyperion-wire-plugin](https://github.com/eosrio/hyperion-wire-plugin). Each has MIT licensing,
+contribution and agent guidance, a scoped task template, and passing initial scaffold CI.
+
+The architecture/plan baseline was merged through [tools PR #18](https://github.com/eosrio/hyperion-tools/pull/18).
+Catalog preparation is [catalog PR #1](https://github.com/eosrio/hyperion-plugins/pull/1), preserving
+legacy entries and adding guidance plus structural CI. The compatibility schema migration remains
+P01 work. Runtime implementation and release qualification remain pending.
+
 ## Publication and evidence
 
-The operator approved the repository names and first batch on 2026-10-17. Publish the
-architecture/roadmap baseline and a release coordination issue; create the approved component
-issues with real cross-repository references and blocking links. Investigation/setup issues must
+The operator approved the repository names and first batch on 2026-10-17. The architecture baseline,
+release issue and initial component issues are published with real cross-repository references
+and blocking links. Investigation/setup issues must
 not be labeled implementation-ready merely because they are on the roadmap.
 
 All implementation issues cite the published architecture baseline, state their delivered behavior,

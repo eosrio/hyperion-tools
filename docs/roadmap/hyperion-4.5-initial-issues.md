@@ -1,13 +1,16 @@
 # Hyperion 4.5: approved initial issue batch
 
-Status: Repository names and breakdown approved on 2026-10-17. P01-P10 are stable planning
-identifiers; the publication record maps them to actual GitHub issues.
+Status: Approved and published on 2026-10-17. P01-P10 are stable planning identifiers.
+[Release coordination issue #24](https://github.com/eosrio/hyperion-tools/issues/24) and the
+[roadmap publication record](hyperion-4.5.md#publication-record--2026-10-17) map the live frontier.
 
 Source: [release roadmap](hyperion-4.5.md) and [architecture definition](../architecture/hyperion-4.5.md).
 The detailed decisions remain binding. This first batch opens the delivery frontier; it is not
 the entire 4.5 backlog. Later milestone work needs its own bounded issues.
 
 ## P01: Establish the 4.5 SDK and plugin repository homes
+
+**Published issue:** [eosrio/hyperion-tools #19](https://github.com/eosrio/hyperion-tools/issues/19).
 
 **Lead repository:** eosrio/hyperion-tools (setup coordination).
 **Type:** Repository setup and migration planning.
@@ -18,7 +21,7 @@ the SDK and first-party extensions, without replacing existing plugin infrastruc
 
 Acceptance criteria:
 
-- [ ] Create the reviewed SDK, AtomicAssets and Wire repositories with explicit ownership,
+- [x] Create the reviewed SDK, AtomicAssets and Wire repositories with explicit ownership,
   contribution/license policy and minimal appropriate CI; avoid publishing empty stable SDK releases.
 - [ ] Record package names and source homes for the runtime pieces and separately versioned MongoDB
   and WormDB adapter extensions. Package boundaries do not require separate processes.
@@ -30,6 +33,8 @@ Acceptance criteria:
   No plugin execution or automatic code update is triggered by catalog metadata.
 
 ## P02: Define the 4.5 release qualification matrix
+
+**Published issue:** [eosrio/hyperion-tools #20](https://github.com/eosrio/hyperion-tools/issues/20).
 
 **Lead repository:** eosrio/hyperion-tools.
 **Type:** Bounded release planning.
@@ -52,6 +57,8 @@ Acceptance criteria:
   to their own issues.
 
 ## P03: Keep failed MongoDB writes retryable
+
+**Published issue:** [eosrio/hyperion-history-api #189](https://github.com/eosrio/hyperion-history-api/issues/189).
 
 **Lead repository:** eosrio/hyperion-history-api.
 **Type:** Correctness fix.
@@ -76,6 +83,8 @@ a distinct write-acknowledgment defect.
 
 ## P04: Prove a 4.5 upgrade preserves existing history
 
+**Published issue:** [eosrio/hyperion-history-api #190](https://github.com/eosrio/hyperion-history-api/issues/190).
+
 **Lead repository:** eosrio/hyperion-history-api, with tooling support as needed.
 **Type:** Upgrade integration slice.
 **Blocked by:** P02 selects the first supported source baseline and fixture.
@@ -98,6 +107,8 @@ This establishes a repeatable guard, not final qualification of an otherwise unf
 
 ## P05: Round-trip one contract through the SDK and MongoDB adapter
 
+**Published issue:** [eosrio/hyperion-sdk #1](https://github.com/eosrio/hyperion-sdk/issues/1).
+
 **Lead repository:** eosrio/hyperion-sdk; linked adapter/host changes in their assigned homes.
 **Type:** First portable vertical slice.
 **Blocked by:** P01 establishes the SDK and adapter source homes.
@@ -118,6 +129,8 @@ Acceptance criteria:
   do not introduce contract-specific logic into Hyperion core.
 
 ## P06: Index and serve the first portable contract in Hyperion
+
+**Published issue:** [eosrio/hyperion-history-api #191](https://github.com/eosrio/hyperion-history-api/issues/191).
 
 **Lead repository:** eosrio/hyperion-history-api.
 **Type:** Worker-to-API integration slice.
@@ -141,6 +154,8 @@ Acceptance criteria:
 
 ## P07: Prove projection rollback survives restart
 
+**Published issue:** [eosrio/hyperion-tools #21](https://github.com/eosrio/hyperion-tools/issues/21).
+
 **Lead repository:** eosrio/hyperion-tools; adapter changes in the P01-assigned source home.
 **Type:** Runtime/adapter recovery slice.
 **Blocked by:** P05 supplies the first durable projection fixture.
@@ -163,6 +178,8 @@ behavior and live SHiP fork/reconnect qualification require subsequent host inte
 
 ## P08: Define a reproducible Wire testnet qualification profile
 
+**Published issue:** [eosrio/hyperion-tools #22](https://github.com/eosrio/hyperion-tools/issues/22).
+
 **Lead repository:** eosrio/hyperion-tools; hand off extension implementation to the Wire repo.
 **Type:** Protocol qualification preparation.
 **Blocked by:** None for profile definition; repository creation gates later extension PRs.
@@ -182,6 +199,8 @@ Acceptance criteria:
 - [ ] Produce bounded implementation issues from demonstrated gaps; do not port the pseudo-fork wholesale.
 
 ## P09: Assess WormDB against the 4.5 backend contract
+
+**Published issue:** [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23).
 
 **Lead repository:** eosrio/hyperion-tools; demonstrated engine gaps become linked igorls/wormdb issues.
 **Type:** Capability investigation.
@@ -206,9 +225,12 @@ Acceptance criteria:
 
 ## P10: Establish the AtomicAssets and AtomicMarket parity inventory
 
+**Published issue:** [eosrio/hyperion-atomicassets-plugin #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1).
+
 **Lead repository:** eosrio/hyperion-atomicassets-plugin.
 **Type:** Parity baseline and reusable test harness.
-**Blocked by:** P01 creates the plugin source home.
+**Blocked by:** None. The repository-creation prerequisite from P01 is satisfied; remaining
+SDK/catalog setup does not block this inventory.
 
 **What it delivers:** A pinned API inventory and representative reference dataset allow endpoint
 families to be implemented and judged against the required 2.7.0 behavior.
@@ -233,6 +255,6 @@ cleanup report and [history-api #187](https://github.com/eosrio/hyperion-history
 for its resilience/observability reports. Reproduce against the selected baseline and link focused
 fixes as needed. Do not duplicate, close or rewrite those parent issues as part of publishing this batch.
 
-Publish genuine blocking links using real issue identifiers. P01/P02/P08/P09/P10
+Native blocking links and release sub-issue relationships are published using real issue identifiers. P01/P02/P08/P09/P10
 contain setup or investigation outcomes; label them accordingly rather than marking the entire
 batch implementation-ready.
