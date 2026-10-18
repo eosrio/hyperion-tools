@@ -11,7 +11,7 @@ adapters. Their package and source ownership remains defined in the
 
 | Responsibility | Baseline |
 |---|---|
-| Project compiler and editor types | Exact `typescript` development dependency `7.0.2` |
+| Project compiler and editor types | Exact `typescript` dependency `7.0.2` |
 | Fast project typecheck | Bun `1.4.3`, pinned in each migrated repository's `.bun-version` and installed from that pin in CI |
 | Dependency installation | `npm ci` using the committed `package-lock.json` |
 | Emitted JavaScript, source maps and SDK declarations | The pinned TypeScript 7 compiler through the repository's existing build scripts |
