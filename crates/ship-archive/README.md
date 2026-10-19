@@ -816,6 +816,11 @@ the bound only the buffers of its connections, at most `--api-max-connections` o
 
 ## Validation
 
+To qualify against an existing **running node without copying or moving its files**, use the
+[in-place live-node test](testdata/README.md#existing-running-node-no-copies-or-downtime).
+It pins a bounded irreversible view of the original logs and compares it with the node's SHiP
+endpoint while the node keeps running. This test does not change `serve`'s frozen-input contract.
+
 `cargo test --locked --package antelope-ship-archive` runs the server in-process on loopback
 over logs written by the core's fixture writers (one synthetic chain with consistent ids and
 `previous` links; Spring stored, Leap compressed and legacy entry encodings; retained, split

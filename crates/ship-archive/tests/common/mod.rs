@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
+use hyperion_ship::binio::FcReader;
 use hyperion_ship::protocol::{self, BlockPos, BlocksReq, Request, Status};
 use hyperion_ship::shiplog::LogKind;
 use hyperion_ship::testkit::SyntheticChain;
@@ -27,6 +28,44 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// A status reply, including legacy v0 replies without a chain id.
+pub struct ParsedStatus {
+    pub head: BlockPos,
+    pub lib: BlockPos,
+    pub trace: (u32, u32),
+    pub chain_state: (u32, u32),
+    pub chain_id: Option<[u8; 32]>,
+}
+
+pub fn parse_status(msg: &[u8]) -> ParsedStatus {
+    let mut r = FcReader::new(msg);
+    let variant = r.varuint32().expect("status variant");
+    assert!(matches!(variant, 0 | 3), "not a status reply");
+    let mut pos = || BlockPos {
+        num: r.u32().unwrap(),
+        id: r.id().unwrap(),
+    };
+    let (head, lib) = (pos(), pos());
+    let trace = (r.u32().unwrap(), r.u32().unwrap());
+    let chain_state = (r.u32().unwrap(), r.u32().unwrap());
+    let chain_id = if r.remaining() == 0 {
+        None
+    } else {
+        Some(r.id().unwrap())
+    };
+    if variant == 3 {
+        let _finality = (r.u32().unwrap(), r.u32().unwrap());
+    }
+    assert_eq!(r.remaining(), 0, "bytes after status reply");
+    ParsedStatus {
+        head,
+        lib,
+        trace,
+        chain_state,
+        chain_id,
+    }
+}
 
 /// How long a test waits for something that must happen.
 pub const WAIT: Duration = Duration::from_secs(20);

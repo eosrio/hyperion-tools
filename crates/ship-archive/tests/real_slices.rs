@@ -515,34 +515,6 @@ fn positions(msg: &[u8]) -> (Option<BlockPos>, Option<BlockPos>) {
     (this, next())
 }
 
-/// A status message's fields; the v0 `chain_id` only when the server sends it.
-struct ParsedStatus {
-    head: BlockPos,
-    lib: BlockPos,
-    trace: (u32, u32),
-    chain_state: (u32, u32),
-    chain_id: Option<[u8; 32]>,
-}
-
-fn parse_status(msg: &[u8]) -> ParsedStatus {
-    assert!(
-        matches!(msg[0], 0 | 3) && msg.len() >= 89,
-        "not a status: {msg:02x?}"
-    );
-    let u32_at = |at: usize| u32::from_le_bytes(msg[at..at + 4].try_into().unwrap());
-    let pos = |at: usize| BlockPos {
-        num: u32_at(at),
-        id: msg[at + 4..at + 36].try_into().unwrap(),
-    };
-    ParsedStatus {
-        head: pos(1),
-        lib: pos(37),
-        trace: (u32_at(73), u32_at(77)),
-        chain_state: (u32_at(81), u32_at(85)),
-        chain_id: (msg.len() >= 121).then(|| msg[89..121].try_into().unwrap()),
-    }
-}
-
 /// `got` must be `want`; a mismatch shows where, not the megabytes around it.
 fn assert_same(what: &str, got: &[u8], want: &[u8]) {
     if got != want {

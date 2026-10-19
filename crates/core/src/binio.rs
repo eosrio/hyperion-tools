@@ -49,6 +49,19 @@ impl PosFile {
         self.len
     }
 
+    /// A read-only view ending at a complete record boundary chosen by the caller. The
+    /// original descriptor stays open, so a rename never redirects reads to a new file.
+    /// This is a bound, not a filesystem snapshot: bytes inside it must be irreversible.
+    pub fn prefix(mut self, len: u64) -> Result<Self> {
+        ensure!(
+            len <= self.len,
+            "prefix of {} exceeds its length",
+            self.path.display()
+        );
+        self.len = len;
+        Ok(self)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -137,6 +150,7 @@ fn pread_exact(file: &File, mut off: u64, mut buf: &mut [u8]) -> io::Result<()> 
 pub struct FileCache {
     cap: usize,
     lru: Mutex<Lru>,
+    pinned: Option<HashMap<PathBuf, PosFile>>,
 }
 
 #[derive(Default)]
@@ -172,11 +186,42 @@ impl FileCache {
         Arc::new(Self {
             cap: cap.max(1),
             lru: Mutex::default(),
+            pinned: None,
         })
+    }
+
+    /// Fixed file views for an in-place live-node test. No eviction, reopen or fallback:
+    /// callers must bound the number of descriptors and select irreversible records.
+    pub fn pinned(files: Vec<PosFile>) -> Result<Arc<Self>> {
+        let mut pinned = HashMap::new();
+        for file in files {
+            let path = file.path().to_path_buf();
+            ensure!(
+                pinned.insert(path.clone(), file).is_none(),
+                "duplicate pinned file {}",
+                path.display()
+            );
+        }
+        Ok(Arc::new(Self {
+            cap: 0,
+            lru: Mutex::default(),
+            pinned: Some(pinned),
+        }))
     }
 
     /// The open file for `path`, opening it on a miss. A failed open is not cached.
     pub fn get(&self, path: &Path) -> Result<PosFile> {
+        if let Some(files) = &self.pinned {
+            let file = files
+                .get(path)
+                .with_context(|| format!("{} is outside the pinned view", path.display()))?;
+            ensure!(
+                file.file.metadata()?.len() >= file.len,
+                "{} was truncated inside the pinned view",
+                path.display()
+            );
+            return Ok(file.clone());
+        }
         if let Some(file) = self.lock().touch(path) {
             return Ok(file);
         }
@@ -196,7 +241,9 @@ impl FileCache {
 
     /// Files currently held open by the cache (clones handed out are not counted).
     pub fn open_files(&self) -> usize {
-        self.lock().open.len()
+        self.pinned
+            .as_ref()
+            .map_or_else(|| self.lock().open.len(), HashMap::len)
     }
 
     /// Every critical section leaves the map consistent, so a panic elsewhere while holding

@@ -333,13 +333,23 @@ impl Store {
     /// `--verify-ids seams`) on disagreeing block ids at seams. The findings are what was
     /// skipped or should be known (empty files, misleading names, duplicates).
     pub fn open(cfg: &StoreConfig) -> Result<(Self, Vec<Finding>)> {
+        let cache = FileCache::new(cfg.max_open_files);
+        let found = catalog::discover(&cfg.dirs, &cfg.index_dirs, cfg.recursive)?;
+        Self::open_files(cfg, found, cache)
+    }
+
+    /// Open already discovered inputs through their file views. Used by live-node tests
+    /// to exercise the same strict readers and store over a fixed irreversible prefix.
+    pub fn open_files(
+        cfg: &StoreConfig,
+        found: catalog::Discovered,
+        cache: Arc<FileCache>,
+    ) -> Result<(Self, Vec<Finding>)> {
         ensure!(!cfg.dirs.is_empty(), "no log directory given (--dir)");
         if let Some((begin, end)) = cfg.range {
             ensure!(begin < end, "--range {begin}-{end} holds no block");
         }
         let abi = load_abi(cfg.abi.as_deref())?;
-        let cache = FileCache::new(cfg.max_open_files);
-        let found = catalog::discover(&cfg.dirs, &cfg.index_dirs, cfg.recursive)?;
 
         let mut findings = Vec::new();
         // The state-history catalogs reach one block below `--range`: a file holding only
