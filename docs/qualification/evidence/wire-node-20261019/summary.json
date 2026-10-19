@@ -1,0 +1,36 @@
+{
+  "status": "passed",
+  "candidateOnly": true,
+  "chainId": "0b99f90492dab673bcf7e2c9ed1cabab6019de897a90996f00d9717b84ed89d2",
+  "sourceCommit": "7dede884e0150d36fa788e85a119e10653ade8ca",
+  "version": "v1.0.0-7dede884e0150d36fa788e85a119e10653ade8ca",
+  "before": {
+    "head_block_num": 160,
+    "last_irreversible_block_num": 158,
+    "head_block_time": "2026-10-19T20:16:44.000"
+  },
+  "after": {
+    "head_block_num": 162,
+    "last_irreversible_block_num": 160,
+    "head_block_time": "2026-10-19T20:16:45.500"
+  },
+  "cleanRestart": true,
+  "contractDeployment": "not performed",
+  "pluginIntegration": "not performed",
+  "launchProfile": "not selected",
+  "note": "Empty single-producer engineering node; not Wire release qualification.",
+  "host": "x570-hyperion-1",
+  "service": "hyperion-wire-node42.service",
+  "rpc": "127.0.0.1:18888",
+  "ship": "127.0.0.1:18080",
+  "p2p": "127.0.0.1:19876",
+  "serviceUser": "wire-hyperion42",
+  "runtimeMax": "6 hours per start; not enabled at boot",
+  "memoryMaxBytes": 4294967296,
+  "cpuQuotaCores": 2,
+  "genesisExtractionExit": 254,
+  "genesisExtractionNote": "Wire successful export terminates with extract_genesis_state_exception; validated exported public genesis fields.",
+  "secretHandling": "Only key-file permissions retained; signing keys remain on host and are excluded.",
+  "artifactSha256": "3fb7df34635a22e96f38d968d23c1a6b0ff8fb21f76836a8e5e43363c8cd9106",
+  "memberCount": 23
+}

@@ -182,6 +182,11 @@ subsequent reader-to-ack profiles; API #197 transport work is deferred by the op
 
 ## Publication and evidence
 
+The [Wire implementation delivery plan](hyperion-4.5-wire-implementation.md) records the
+2026-10-19 implementation frontier, owning issues, source-derived fixture profile and remaining
+launch decisions. Wire #1 begins executable Node/Rust primitives; codec completeness, provider
+activation, Rust consumer integration and new-testnet recovery remain explicit later gates.
+
 The operator approved the repository names and first batch on 2026-10-17. The architecture baseline,
 release issue and initial component issues are published with real cross-repository references
 and blocking links. Investigation/setup issues must
