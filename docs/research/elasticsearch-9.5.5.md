@@ -188,6 +188,61 @@ Keep those requirements open in [#198](https://github.com/eosrio/hyperion-histor
 No dependency upgrade, live cluster setting change or automatic deployment follows from
 these measurements; existing history retains its separate compatibility gate.
 
+### Sustained load and full-worker checkpoint: 2026-10-19
+
+The preceding slice is merged: [API #204](https://github.com/eosrio/hyperion-history-api/commit/c00cf9682b93fb2b71a7976b3fd7086cd9b0dacc),
+[API #205](https://github.com/eosrio/hyperion-history-api/commit/a08618012869790962cfcf700db682a706004a1b)
+and [Tools #34](https://github.com/eosrio/hyperion-tools/commit/60680bf10630a618b773f889b737673950310c4c).
+The next finite slice is [API #207](https://github.com/eosrio/hyperion-history-api/pull/207),
+with its [immutable measured report](https://github.com/eosrio/hyperion-history-api/blob/32bc4f8407e4dac2c9b40750ff9e9eca21b01a8e/docs/performance/elasticsearch-9.5.5-workers.md)
+and [checksummed evidence](https://github.com/eosrio/hyperion-history-api/tree/32bc4f8407e4dac2c9b40750ff9e9eca21b01a8e/docs/performance/evidence/es955-workers-20261019).
+
+Two fresh Node 24.19 fixtures each passed 100 s write, 100 s read and 100 s mixed
+windows, plus warmup and three sink-stall/recovery waves. The control verified **48,260**
+actions and the profile run **47,700**, with every expected ID/source independently
+verified on both data nodes. All **six** waves held the next historical range until
+resume while the live reader progressed. All 12 workers and master exited cleanly;
+postflight found no surviving observed process, broker connection/message/unacked work
+or active ES task/accounting. Each fixture's seven containers, seven volumes and network
+were then removed with ownership checks. Failed controls remain excluded and preserved.
+
+The production launcher/master/readers/deserializers/ingestors run against a known-genesis
+Spring chain, three ES nodes, RabbitMQ, Redis and MongoDB. Actual SHIP traffic decodes
+block headers with traces/deltas disabled. Dense synthetic actions separately enter the
+real action-index queue; sorted reads directly query ES. This measures worker cargo,
+prefetch, settlement and shared-reader backpressure, without qualifying historical action
+decoding, contract projections, served-domain API throughput or retained-index upgrades.
+The proxy gates actual bulk **request forwarding before ES dispatch**, then passes real
+responses unchanged. This is delayed sink completion, separate from native pressure admission.
+
+Client **8.19.1**, transport **8.10.1** and amqplib **2.0.1** remain pinned, with automatic
+UndiciConnection on Node. Production action mappings use four primaries, one replica,
+1 s refresh and `global_sequence desc` sorting. Publisher confirms, individual receipt
+copy counts and final two-copy verification are recorded separately: warmup included
+successful one-copy receipts. This slice does not establish broker/host power-loss durability.
+
+Thirteen real CPU profiles cover the master and every worker through recovery. The
+control also runs the observer/proxy; one fresh-fixture profile/control pair cannot
+establish collector overhead or a runtime ranking. Query, bulk, queue, CPU/RSS/event-loop,
+JVM/GC, pressure, breaker, refresh, merge and storage evidence is retained. Both runs
+showed zero native pressure/write rejections and no breaker trips; no native saturation
+or production bottleneck was established. Heap accounting recovery is distinct from
+returning JVM heap to its initial occupancy or proving leak freedom.
+
+The path exposed [reader prerequisite #206](https://github.com/eosrio/hyperion-history-api/pull/206):
+wait for the actual publisher drain, ignore stale closes and resume only unsent cargo
+after replacement. Windows imports required file URLs and log filenames needed colon
+removal. A fresh native probe again loads node-abieos on Bun **1.4.3** but fails the
+pinned uWebSockets import (`napi_register_module_v1`); Node 24 loads both. No full-worker
+Bun comparison follows. Remaining confirm/replay semantics are explicitly tracked in
+[API #208](https://github.com/eosrio/hyperion-history-api/issues/208), under reliability
+[#187](https://github.com/eosrio/hyperion-history-api/issues/187).
+
+Keep [#198](https://github.com/eosrio/hyperion-history-api/issues/198) open for representative
+historical/contract/API paths, longer replicated load/overhead controls, large-memory
+pressure, worker/broker-loss replay, distributed late-result ordering and retained-history
+upgrades. No dependency upgrade, live setting change or deployment follows.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.

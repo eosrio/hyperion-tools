@@ -116,6 +116,46 @@ Bun remains the preferred candidate when correctness and measured behavior suppo
 Keep a qualified Node control path. Record any remaining runtime-specific limitation explicitly
 rather than making Bun adoption an unstated prerequisite for unrelated 4.5 features.
 
+## Full-worker load checkpoint: 2026-10-19
+
+[API #207](https://github.com/eosrio/hyperion-history-api/pull/207) adds the next finite
+[#198](https://github.com/eosrio/hyperion-history-api/issues/198) experiment after merged
+API #204/#205 and Tools #34. Its [immutable report](https://github.com/eosrio/hyperion-history-api/blob/32bc4f8407e4dac2c9b40750ff9e9eca21b01a8e/docs/performance/elasticsearch-9.5.5-workers.md)
+and [evidence](https://github.com/eosrio/hyperion-history-api/tree/32bc4f8407e4dac2c9b40750ff9e9eca21b01a8e/docs/performance/evidence/es955-workers-20261019)
+record two fresh Node 24.19 executions, each with 300 s of write/read/mixed phases,
+plus warmup, three sink stalls and recovery. **95,960 actions** were verified exactly on
+both data nodes; all six pause/resume waves and both process/resource cleanups passed.
+Thirteen CPU profiles cover the master plus all 12 workers through final recovery.
+
+Actual SHIP block headers traverse the production workers; synthetic action messages
+separately feed the real action queue. Traces/deltas, contracts/state projections and
+the HTTP API server are outside this run. A proxy gates bulk request forwarding before
+ES dispatch; real responses are unchanged. This tests sink-completion delay and the
+existing shared-reader policy, rather than native ES pressure admission or a hard queue
+cap. The next pending historical range waits for resume while live reading progresses.
+Range evidence observes the actual reader method, not packet delivery or full range completion.
+
+| Evidence | Measured coverage |
+|---|---|
+| Workload/output | 48,260 control and 47,700 profile actions; exact IDs/sources separately checked on both copies; complete sorted pages with a known-visible read baseline |
+| CPU/memory/waits | Per-PID CPU/RSS/heap and one-second event-loop samples; 13 saved profiles; backend JVM/GC, breakers, pressure, refresh, merges and storage counters |
+| Recovery/cleanup | Three waves per run, live progress, no next range while paused, exact pending range invoked after resume; idle accounting and no surviving processes/broker work; all owned fixture resources removed |
+| Validation | 222 unit tests, whole-project/runner Bun typechecks, TS7 build, 11 mocked lifecycle cases and 87 real observation/profile/shutdown assertions |
+
+The control retains observer/proxy instrumentation. One sequential profile/control pair
+with fresh clusters and uncontrolled host workloads cannot attribute overhead or rank
+runtimes/capacity. Zero native rejection/breaker trips at this offered rate do not prove
+headroom, leak freedom or a production bottleneck. Preserve the archived CPU profiles
+and latency distributions as diagnostic evidence, then qualify representative dense
+historical data through #195/#196 before prioritizing throughput changes.
+
+[Reader fix #206](https://github.com/eosrio/hyperion-history-api/pull/206) and portable
+Windows imports/log filenames unblock this path. Remaining negative/unknown confirms
+and reader replay belong to [#208](https://github.com/eosrio/hyperion-history-api/issues/208)
+and #187. Bun 1.4.3 still fails the pinned uWebSockets native import on this host, despite
+node-abieos loading; there is no full-worker Bun comparison. Longer soaks, contract/API
+paths, worker-loss replay, large-memory pressure and retained-index acceptance remain open.
+
 ## Fixture and workload prerequisites
 
 The local `wax-probe` manifest declares WAX blocks **437200000–437201999** with SHIP v0 and
