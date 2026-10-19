@@ -163,6 +163,23 @@ Catalog preparation is [catalog PR #1](https://github.com/eosrio/hyperion-plugin
 legacy entries and adding guidance plus structural CI. The compatibility schema migration remains
 P01 work. Runtime implementation and release qualification remain pending.
 
+## Replay and recovery checkpoint: 2026-10-19
+
+The [profiling program](../performance/hyperion-4.5-profiling.md#guarded-replay-and-reader-recovery-checkpoint-2026-10-19)
+records the first native Linux results for parallel API #195/#208 work. The ABI
+deployment decoder correction is [API #209](https://github.com/eosrio/hyperion-history-api/pull/209).
+Range/generation confirmation tracking and retained reader assignments are
+[API #210](https://github.com/eosrio/hyperion-history-api/pull/210), with seven
+passing actual broker/worker cases and three baseline defect reproductions.
+
+The finite known-genesis contract replay in
+[API #211](https://github.com/eosrio/hyperion-history-api/pull/211) passes exact input,
+ABI and two-copy output checks. This is a correctness foundation for profiling; it does not complete
+the release gates or qualify a runtime/server upgrade. API #195 remains open for
+persisted checkpoint/restart evidence. API #208 remains open for integrated live
+fork/restart recovery and late old-generation broker callbacks. API #196 owns the
+subsequent reader-to-ack profiles; API #197 transport work is deferred by the operator.
+
 ## Publication and evidence
 
 The operator approved the repository names and first batch on 2026-10-17. The architecture baseline,
