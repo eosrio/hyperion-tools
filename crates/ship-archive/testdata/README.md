@@ -67,6 +67,58 @@ What they check:
 
 ## Differential test against a node
 
+### Existing running node: no copies or downtime
+
+Run on the node's host, with read access to its non-pruned state-history and block logs:
+
+```sh
+SHIP_LIVE_NODE=ws://127.0.0.1:8080 SHIP_LIVE_DIRS=/srv/node/data \
+  cargo test --release --locked -p antelope-ship-archive --test live_node existing_node \
+  -- --ignored --nocapture
+```
+
+PowerShell:
+
+```powershell
+$env:SHIP_LIVE_NODE = 'ws://127.0.0.1:8080'
+$env:SHIP_LIVE_DIRS = 'D:\node\data'
+cargo test --release --locked -p antelope-ship-archive --test live_node existing_node -- --ignored --nocapture
+```
+
+`SHIP_LIVE_DIRS` can be a path list (`:` on Unix, `;` on Windows) when state-history,
+retained logs and block logs live separately. Directories are scanned recursively. On Linux,
+the test can also run in a container with the existing data directories mounted **read-only**.
+No log or index is copied, moved, rebuilt or written; no links or filesystem snapshots are
+created. The node keeps running. Its SHiP endpoint must serve the same chain and selected range,
+with both `trace-history` and `chain-state-history` enabled.
+
+The test selects up to `SHIP_LIVE_BLOCKS` blocks (default 200), ending just below the node's
+reported LIB. It opens the original files read-only, pins their descriptors and bounds their
+visible lengths at complete indexed records. New appends and renamed files cannot redirect
+that fixed view. A block-log's next index offset supplies a complete block boundary, so its
+actively written tail is never treated as a complete record. Logs split across retained files
+work too. At most 256 selected descriptors are pinned; narrow `SHIP_LIVE_BLOCKS` if needed.
+
+Every selected block and payload is validated with the normal strict readers. A loopback
+archive forces streamed payloads and is compared with the running node: the whole selected
+range with every field, then every fetch-flag combination at the range's beginning. Only head
+and LIB are excluded from result equality. The archive's status must remain fixed. Set
+`SHIP_LIVE_V1=1` for Spring to compare v1/finality requests too (leave it unset for Leap).
+ABI text equality and the node's head/LIB before and after are printed. A missing configuration
+or unavailable range fails the explicitly invoked test; it never reports a skipped run as a pass.
+
+This is a bounded qualification test, not support for live-tailing archive serving. It relies
+on nodeos preserving irreversible bytes: do not prune, vacuum, repair or overwrite these files
+while it runs. Pruned formats remain refused. Capture retries up to five times over 1.5 seconds
+to tolerate rotation during discovery; a persistently incomplete range is refused and may
+require a rerun. Integrity errors inside the selected range still
+fail. Normal `serve` and `check` retain their frozen-input contract.
+
+The non-ignored tests in `live_node` exercise torn active tails, later appends, descriptor
+pinning across rotation, truncation, corruption, irreversible limits and missing coverage.
+
+### Frozen copy
+
 `differential_against_a_real_node` asks a running node and this server, over a copy of that
 node's logs, for the same blocks with every field. Each result must be byte-equal but for head and
 LIB (bytes 1..73), and must also equal what the strict readers give. It reports whether the node's

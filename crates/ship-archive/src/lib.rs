@@ -38,6 +38,7 @@ pub mod cli;
 pub mod fetch;
 pub mod frames;
 mod http;
+pub mod live_test;
 pub mod metrics;
 pub mod session;
 pub mod store;
@@ -139,6 +140,19 @@ pub struct Server {
 impl Server {
     /// Open and validate the store, log what is served, and bind the listeners.
     pub async fn bind(cfg: ServeConfig) -> Result<Self> {
+        Self::bind_inner(cfg, None).await
+    }
+
+    /// Bind a prepared store, for tests that pin a fixed view of a running node's files.
+    pub async fn bind_store(
+        cfg: ServeConfig,
+        store: Store,
+        findings: Vec<Finding>,
+    ) -> Result<Self> {
+        Self::bind_inner(cfg, Some((store, findings))).await
+    }
+
+    async fn bind_inner(cfg: ServeConfig, prepared: Option<(Store, Vec<Finding>)>) -> Result<Self> {
         ensure!(cfg.max_sessions > 0, "--max-sessions must be at least 1");
         ensure!(
             cfg.max_request_bytes >= 64,
@@ -163,10 +177,15 @@ impl Server {
                 );
             }
         }
-        let store_cfg = cfg.store.clone();
-        let (store, findings) = tokio::task::spawn_blocking(move || Store::open(&store_cfg))
-            .await
-            .context("store open task")??;
+        let (store, findings) = match prepared {
+            Some(store) => store,
+            None => {
+                let store_cfg = cfg.store.clone();
+                tokio::task::spawn_blocking(move || Store::open(&store_cfg))
+                    .await
+                    .context("store open task")??
+            }
+        };
         log_store(&store, &findings, &cfg);
         let listener = TcpListener::bind(cfg.listen)
             .await
