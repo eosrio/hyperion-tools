@@ -114,6 +114,37 @@ passed at `95bae91d69d2a00151ba0cdfb00063b9ba8f7855`. That PR remains pending me
 this checkpoint. Real TLS handshakes and sustained multi-node load still require their
 own qualification. The clock diagnostic does not close the broader #198 acceptance.
 
+### Failure and cancellation qualification: 2026-10-19
+
+The earlier API harness/routing changes and this record's previous update have merged.
+The [next finite evidence record](https://github.com/eosrio/hyperion-history-api/blob/2f76badff3fed51d09c303c6c46a1eb44051bd6d/docs/performance/elasticsearch-9.5.5-failures.md)
+contains three executions against the same digest-pinned ES 9.5.5 node: Node 24.19.0
+explicit HTTP/default Undici and Bun 1.4.3 automatic HTTP, using client 8.19.1 and
+transport 8.10.1. Each passed 87 cases over five fault waves, verified 1,000 acknowledged
+documents, and removed four owned indices. Cases cover sorted before/during-collection
+timeouts, partial/strict shard-failure policy, HTTP aborts, explicit task cancellation
+and bounded script completion after abort. Tagged tasks, search contexts, current work
+and request-breaker bytes returned to their idle baseline. The owned fixture/volume
+were removed after identity/label checks.
+
+Peak sampled request-breaker exposure was only **2,104 bytes**, with no breaker trips.
+Heap and GC observations vary and do not establish leak freedom, pressure recovery,
+sustained performance or a runtime ranking. Separate offline checks of the exact server's
+production result-consumer classes passed **5,429 assertions**, including close-before-
+late-consume and finite concurrent close/consume checks. They are internal component
+coverage, rather than successful late-response ordering through REST. Attempts at the
+latter did not prove the required order and remain preserved as failed controls.
+
+The route audit also reproduced incomplete `get_actions` responses being cached as HTTP
+200. [API #202](https://github.com/eosrio/hyperion-history-api/pull/202) rejects those as
+503, propagates main-search cancellation on actual disconnect, guards late responses,
+maps transport timeouts to 504 and preserves existing Elasticsearch error statuses.
+It retains healthy JSON shapes and covers the pinned Fastify POST signal behavior.
+Its 18 route tests use controlled dependencies; the real-server fixture is a separate
+boundary. This release evidence does not close broader #198 requirements for replicas,
+bulk pressure/durability, full mappings/plugins, retained-index upgrades, large memory
+pressure or distributed late-result ordering. No live cluster upgrade was performed.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.
