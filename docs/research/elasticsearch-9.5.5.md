@@ -243,6 +243,30 @@ historical/contract/API paths, longer replicated load/overhead controls, large-m
 pressure, worker/broker-loss replay, distributed late-result ordering and retained-history
 upgrades. No dependency upgrade, live setting change or deployment follows.
 
+### Guarded contract replay and reader recovery: 2026-10-19
+
+The next correctness evidence uses native Node 24.19.0 workers on shared
+Hyperion-1 Linux with isolated ES 9.5.5 services. The finite known-genesis
+run in [API #211](https://github.com/eosrio/hyperion-history-api/pull/211), for #195,
+verifies 87 replayed blocks and 12 signed actions across two ABI revisions,
+including exact stored output on both physical data nodes and request translog
+durability. Its supplied, captured ABI history is separate from automatic ABI
+discovery. A persisted restart checkpoint remains unqualified.
+
+[API #210](https://github.com/eosrio/hyperion-history-api/pull/210) and its
+[immutable evidence](https://github.com/eosrio/hyperion-history-api/tree/694d473257283a359a41ad55173049075a18b3ea/docs/performance/evidence/reader-recovery-20261019)
+qualify seven actual broker/worker cases and reproduce three old failures. These
+numeric-source recovery cases do not exercise Elasticsearch durability. API #208
+retains integrated live fork and late-callback acceptance. The separate ABI
+decoder correction is [API #209](https://github.com/eosrio/hyperion-history-api/pull/209).
+
+These are measured Hyperion correctness results, with failed pilots retained and
+excluded. They do not demonstrate an upstream ES performance improvement, a
+Node/Bun comparison or host capacity. Client/transport pins, retained-index
+compatibility and server release selection remain unchanged. Follow the
+[component checkpoint](../performance/hyperion-4.5-profiling.md#guarded-replay-and-reader-recovery-checkpoint-2026-10-19)
+for remaining qualification and profiling work.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.

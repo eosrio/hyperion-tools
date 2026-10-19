@@ -156,6 +156,51 @@ and #187. Bun 1.4.3 still fails the pinned uWebSockets native import on this hos
 node-abieos loading; there is no full-worker Bun comparison. Longer soaks, contract/API
 paths, worker-loss replay, large-memory pressure and retained-index acceptance remain open.
 
+## Guarded replay and reader recovery checkpoint: 2026-10-19
+
+The next parallel slices use native Node 24.19.0 workers on Hyperion-1 Linux and
+owned, disposable container services. The shared production host is suitable for
+these correctness cases; the runs do not establish capacity or throughput.
+
+- [API #209](https://github.com/eosrio/hyperion-history-api/pull/209) corrects action
+  ABI selection and native type-cache invalidation across deployment revisions,
+  including custom/current fallback contexts. Its extra block-valid lookups need
+  representative profiling before selecting a performance change.
+- [API #210](https://github.com/eosrio/hyperion-history-api/pull/210) qualifies seven
+  broker/worker recovery cases and reproduces three baseline failures. Its
+  [immutable report](https://github.com/eosrio/hyperion-history-api/blob/694d473257283a359a41ad55173049075a18b3ea/docs/performance/reader-recovery.md)
+  separates successful publisher confirms, source credits and downstream durability.
+  The scheduler uses actual methods through a focused seam, with no full-master or
+  live fork qualification. All 17 observed processes and the owned fixture were removed.
+- [API #211](https://github.com/eosrio/hyperion-history-api/pull/211), for #195, now has one
+  passing finite known-genesis contract replay: 88 captured blocks, 87 replayed
+  blocks, 12 real signed actions and two ABI deployments. Raw SHIP inputs, signed
+  transaction membership/payloads, ABI deltas, decoded output and both physical
+  Elasticsearch copies are checked. All 11 processes exited cleanly; independent
+  postflight verified source/input hashes and three idle samples before cleanup.
+
+The [replay report](https://github.com/eosrio/hyperion-history-api/blob/60942800094238317b5bb0ddec98199b04de3bab/docs/performance/guarded-contract-replay.md)
+and [checksummed raw evidence](https://github.com/eosrio/hyperion-history-api/tree/60942800094238317b5bb0ddec98199b04de3bab/docs/performance/evidence/guarded-replay-20261019)
+retain all nine excluded pilots alongside the successful run.
+
+The bulk ledger observes 15 requests and 101 successful item outcomes, with no failed
+items or repeated attempts. Initial receipts acknowledge one copy for 19 items and
+two for 82; final identity on both copies is a separate observation. This run does
+not establish two-copy acknowledgment for every original write or crash survival.
+
+The contract run supplies verified historical ABI references into its new ABI index;
+it does not qualify automatic ABI discovery, historical mainnet data, contract
+computation, state projections or served API throughput. Its Redis checkpoint remains
+null because qualification shutdown bypasses production checkpoint persistence.
+Keep #195 open for a persisted checkpoint and restart observation; do not count the
+output oracle as completed recovery acceptance. Failed harness pilots remain excluded.
+
+Keep #208 open for integrated live fork/restart recovery and broker-delivered late
+old-generation callbacks. Resolve those and the #195 checkpoint boundary alongside
+the next #196 stage instrumentation. Bun native transport work in #197 is deferred
+by operator choice. #198 and retained-history/server-selection gates remain open;
+the server and JavaScript client pins were not upgraded by these runs.
+
 ## Fixture and workload prerequisites
 
 The local `wax-probe` manifest declares WAX blocks **437200000–437201999** with SHIP v0 and
