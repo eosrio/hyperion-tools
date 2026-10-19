@@ -171,6 +171,16 @@ impl ReadAhead<'_> {
     fn from(&self, at: u64) -> &[u8] {
         &self.bytes[(at - self.offset) as usize..]
     }
+    fn index_position(&mut self, at: u64, size: u64) -> Result<u64> {
+        ensure!(
+            at.checked_add(8).is_some_and(|end| end <= size),
+            "incomplete index slot"
+        );
+        if at < self.offset || at + 8 > self.offset + self.bytes.len() as u64 {
+            self.load(at, (size - at).min(64 << 10))?;
+        }
+        Ok(u64le(self.from(at)))
+    }
     fn entry(&mut self, at: u64, size: u64, kind: Kind) -> Result<Entry> {
         if at < self.offset || at >= self.offset + self.bytes.len() as u64 {
             self.load(at, (size - at).min(64 << 10))?;
@@ -291,6 +301,11 @@ fn walk(
         offset: 0,
         bytes: Vec::new(),
     };
+    let mut index_reader = index.map(|disk| ReadAhead {
+        disk,
+        offset: 0,
+        bytes: Vec::new(),
+    });
     while at < size {
         let e = match reader.entry(at, size, kind) {
             Ok(e) => e,
@@ -360,8 +375,8 @@ fn walk(
             compared += 1;
         }
         let slot = u64::from(n - begin.first) * 8;
-        if let Some(index) = index {
-            if slot + 8 > index_bytes || u64le(&index.read(slot, 8)?) != e.offset {
+        if let Some(index) = &mut index_reader {
+            if slot + 8 > index_bytes || index.index_position(slot, index_bytes)? != e.offset {
                 discrepancies += 1;
             }
         } else {
@@ -1016,6 +1031,36 @@ mod tests {
         for (n, body) in blocks {
             assert_eq!(loaded.block(n).unwrap().unwrap(), body);
         }
+    }
+
+    #[test]
+    fn index_read_ahead_crosses_pages_and_refuses_partial_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blocks.index");
+        let mut bytes = (0u64..20_000)
+            .flat_map(|n| (n * 192 + 48).to_le_bytes())
+            .collect::<Vec<_>>();
+        bytes.extend_from_slice(&[1, 2, 3]);
+        fs::write(&path, &bytes).unwrap();
+        let disk = Disk::open(&path, false).unwrap();
+        let mut reader = ReadAhead {
+            disk: &disk,
+            offset: 0,
+            bytes: Vec::new(),
+        };
+        for n in 0..20_000 {
+            assert_eq!(
+                reader.index_position(n * 8, bytes.len() as u64).unwrap(),
+                n * 192 + 48
+            );
+        }
+        assert!(
+            reader
+                .index_position(20_000 * 8, bytes.len() as u64)
+                .is_err()
+        );
+        assert_eq!(reader.index_position(0, bytes.len() as u64).unwrap(), 48);
+        assert!(reader.bytes.len() <= 64 << 10);
     }
 
     #[test]

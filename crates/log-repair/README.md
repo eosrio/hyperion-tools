@@ -20,20 +20,20 @@ Part of the [Hyperion Tools](../../README.md) Cargo workspace, MIT licensed
 logs before relying on it in production (see [Validation](#validation)).
 
 **Contents:**
-[Quick start](#quick-start) ·
-[What it can repair](#what-it-can-repair) ·
-[How it works](#how-it-works) ·
-[1. Find the damage](#1-find-the-damage) ·
-[2. Get recovery data](#2-get-recovery-data) ·
-[3. Build and review](#3-build-and-review) ·
-[4. Apply](#4-apply) ·
-[5. After the repair](#5-after-the-repair) ·
-[Multiple damaged records](#multiple-damaged-records) ·
-[Recover a crash-damaged tail](#recover-a-crash-damaged-tail) ·
-[Check for silent corruption](#check-for-silent-corruption) ·
-[Troubleshooting](#troubleshooting) ·
-[Command reference](#command-reference) ·
-[Limits](#limits) ·
+[Quick start](#quick-start) Â·
+[What it can repair](#what-it-can-repair) Â·
+[How it works](#how-it-works) Â·
+[1. Find the damage](#1-find-the-damage) Â·
+[2. Get recovery data](#2-get-recovery-data) Â·
+[3. Build and review](#3-build-and-review) Â·
+[4. Apply](#4-apply) Â·
+[5. After the repair](#5-after-the-repair) Â·
+[Multiple damaged records](#multiple-damaged-records) Â·
+[Recover a crash-damaged tail](#recover-a-crash-damaged-tail) Â·
+[Check for silent corruption](#check-for-silent-corruption) Â·
+[Troubleshooting](#troubleshooting) Â·
+[Command reference](#command-reference) Â·
+[Limits](#limits) Â·
 [Development](#development)
 
 ## Install
@@ -89,16 +89,16 @@ Built repair bundle /scratch/repair-1/bundle
   [1] blocks 1234560..1234571: 128 KiB in 1 extent(s), record(s) 7911
   state:    1 extent(s) unreadable (will be written), 0 already identical
   ...
-  plan_sha256: da133837…
+  plan_sha256: da133837â€¦
 
 Review plan.json and the source provenance, stop nodeos, then:
-  antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837… --node-stopped
+  antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837â€¦ --node-stopped
 ```
 
 **3. Apply the approved plan,** with nodeos still stopped.
 
 ```sh
-antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837… --node-stopped
+antelope-log-repair apply --bundle /scratch/repair-1/bundle --approve da133837â€¦ --node-stopped
 ```
 
 Then verify the media (for ZFS: `zpool scrub`, then `zpool clear`), restart nodeos,
@@ -162,7 +162,7 @@ It keeps only the encodings that reproduce **both anchors byte for byte**. The r
 entries must then match every index position and every readable byte of the region,
 and exactly one distinct result may fit. A donor whose entries are already identical to
 yours is used as it is. `build` prints, for each region, either `source bytes as they
-are` or `re-encoded as …`.
+are` or `re-encoded as â€¦`.
 
 **What can stop it:**
 
@@ -185,9 +185,9 @@ machine it runs on.
 
 ```text
             readable    damaged extent     readable
-  ... ──┬───────────┬────────────────────┬───────────┬── ...
-        │  block 20 │ 21 │ 22 │ ... │ 43 │  block 44 │
-        └─ anchor ──┴───── region ───────┴─ anchor ──┘
+  ... â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€ ...
+        â”‚  block 20 â”‚ 21 â”‚ 22 â”‚ ... â”‚ 43 â”‚  block 44 â”‚
+        â””â”€ anchor â”€â”€â”´â”€â”€â”€â”€â”€ region â”€â”€â”€â”€â”€â”€â”€â”´â”€ anchor â”€â”€â”˜
 ```
 
 - **Record:** the filesystem's unit of reading and writing. On ZFS it is the file's
@@ -276,7 +276,7 @@ Every source is checked again at build and at apply. Choose one:
 |---|---|---|
 | Other nodes' state-history (SHIP) endpoints | all | `prepare --ship URL` or `fetch-ship` |
 | An intact `blocks.log` from another node or a backup | `blocks.log` (and block sources for SHIP) | `prepare --blocks-log PATH` |
-| Replaying an intact blocklog from a snapshot | SHIP logs | `prepare --nodeos … --snapshot …` or `replay-ship` |
+| Replaying an intact blocklog from a snapshot | SHIP logs | `prepare --nodeos â€¦ --snapshot â€¦` or `replay-ship` |
 | Files you already have | all | `--blocks`, `--blocks-log`, `--donor-log`, `--sources` |
 
 ### State-history endpoints
@@ -634,22 +634,22 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 | `byte N near this damage is unreadable too` | An anchor or readable gap also fails | Scan a wider range or the whole file so all nearby damage is in one plan |
 | `stopped after N failed reads` | Widespread damage | Check the device and pool health. Raise `--max-bad-reads` only if you are sure |
 | `this platform reports no filesystem block size` | Windows, or an unusual filesystem | Pass `--record-size` |
-| `followed by orphaned fork entries … reaches them` | The damage covers entries nodeos abandoned after a fork, which no source holds | Not repairable. Narrow the selection to the other regions; for these bytes, resync or restore the log |
-| `entry N length … differs from target` (with no encoding that fits) | Neither the source's bytes nor any re-encoding fits this entry: the payload itself differs, for example another debug setting or node version | Use a donor from a node with the same configuration, or replay with matching settings |
-| `anchors … were written with different encodings` | The node was upgraded inside this region (for example to Spring) | Not supported. Use a donor whose entries are byte-identical |
+| `followed by orphaned fork entries â€¦ reaches them` | The damage covers entries nodeos abandoned after a fork, which no source holds | Not repairable. Narrow the selection to the other regions; for these bytes, resync or restore the log |
+| `entry N length â€¦ differs from target` (with no encoding that fits) | Neither the source's bytes nor any re-encoding fits this entry: the payload itself differs, for example another debug setting or node version | Use a donor from a node with the same configuration, or replay with matching settings |
+| `anchors â€¦ were written with different encodings` | The node was upgraded inside this region (for example to Spring) | Not supported. Use a donor whose entries are byte-identical |
 | `no known encoding reproduces anchor block N` | The log was written with a non-stock zlib, such as zlib-ng | Check `ldd $(which nodeos)` on the writing host; use a donor whose entries are byte-identical |
 | `several encodings reproduce the anchors and fit` | The damaged bytes cannot tell the candidates apart | Not supported. Use a donor whose entries are byte-identical |
 | `state-history log version 1, written by EOSIO 2.1 or 2.2` / `written before nodeos 1.8` | An unsupported log format | Not repairable with this tool |
-| `rebuilt bytes … differ from the readable target bytes` | The source does not match your log | Wrong chain or fork, or a differently configured source node |
+| `rebuilt bytes â€¦ differ from the readable target bytes` | The source does not match your log | Wrong chain or fork, or a differently configured source node |
 | `belongs to another chain or fork` | Anchor IDs do not match | The source is from another chain or fork |
 | `SHIP endpoints disagree` / `block sources disagree` | Two sources gave different bytes | Find out which one is wrong. Use only sources you trust |
 | `block sources lack block N` / `no donor log covers blocks A..B` | A source does not cover a region | Fetch or provide that range, including both anchors |
 | `snapshot head must be at or before N` | The snapshot is too late | Use an older snapshot |
-| `process(es) [...] have … open` | Something still has the file open | Stop nodeos and any other reader or writer |
+| `process(es) [...] have â€¦ open` | Something still has the file open | Stop nodeos and any other reader or writer |
 | `target changed during fetch` | nodeos is still running and appended blocks | Stop nodeos, then run the fetch or prepare again |
 | `log changed since build` / `index changed since build` | The files changed after review; the message names the fields | Build and review a new plan. `device` alone means a pool re-import or reboot, not a content change |
 | `readable and differ from the approved replacement` | A damaged record became readable with different bytes | Investigate: the tool never overwrites readable data |
-| `write bytes … ; inspect apply-intent.json` | A write failed or was short | See [If apply fails part-way](#4-apply) |
+| `write bytes â€¦ ; inspect apply-intent.json` | A write failed or was short | See [If apply fails part-way](#4-apply) |
 | `plan hash does not match --approve` | Wrong hash, or `plan.json` was edited | Approve the hash printed by build, after reviewing |
 
 ## Command reference
@@ -671,7 +671,7 @@ Selection flags shared by scan, prepare, fetch-ship, replay-ship, and build: `--
 for every option.
 
 Output is a human summary on stdout. With `--json`, it is one JSON document on stdout,
-also for errors (`{"ok": false, "error": …}`). Progress and warnings go to stderr. The
+also for errors (`{"ok": false, "error": â€¦}`). Progress and warnings go to stderr. The
 exit status is 0 on success, including a scan that finds nothing, and 1 on any error
 or refusal.
 
@@ -693,7 +693,8 @@ or refusal.
 See [VALIDATION.md](VALIDATION.md) for exactly what is and is not covered: Rust unit
 and fault-injection tests, a real-nodeos smoke test, and a real-kernel `EIO` test.
 [FORMAT.md](FORMAT.md) documents the on-disk formats, plan and source files, and
-upstream references.
+upstream references. [PERFORMANCE.md](PERFORMANCE.md) records real-log tail-inspection
+measurements and their cache and hardware limits.
 
 ## Development
 
@@ -707,6 +708,10 @@ python3 crates/log-repair/tests/nodeos_smoke.py --tool ./target/release/antelope
 # Optional: torn copies of that development chain, then real-nodeos replay of recovered files
 python3 crates/log-repair/tests/tail_smoke.py --tool ./target/release/antelope-log-repair \
   --source-smoke /tmp/repair-smoke --nodeos /usr/bin/nodeos --out /tmp/repair-tail-smoke
+# Optional, Linux: time read-only inspection of a stable retained log or frozen copy
+python3 crates/log-repair/tests/tail_bench.py --tool ./target/release/antelope-log-repair \
+  --log /scratch/frozen/blocks.log --out /tmp/tail-benchmark \
+  --cache-note "ordinary page cache; no global cache eviction"
 # Optional, Linux, root: real kernel EIO through ext4 and device-mapper
 sudo python3 crates/log-repair/tests/eio_smoke.py --tool ./target/release/antelope-log-repair \
   --blocks-log /tmp/repair-smoke/source/blocks/blocks.log --out /root/repair-eio

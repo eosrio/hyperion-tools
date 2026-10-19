@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-72 tests on Linux; 60 on Windows, where the scan-with-faults, media-write,
+73 tests on Linux; 61 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -93,14 +93,15 @@ A write covering a whole damaged range heals it, as a full-record write does on 
 ## Copy-out tail recovery (2026-10-19)
 
 Tracked in [issue #38](https://github.com/eosrio/hyperion-tools/issues/38).
-The checks above include 18 added framing/recovery tests. They exercise byte-by-byte
+The checks above include 19 added framing/recovery tests. They exercise byte-by-byte
 cuts through the final signed block and both SHIP kinds, explicit restoration versus
 salvage, missing/empty/torn/ahead/behind/incorrect indexes, readable corruption and
 zero suffixes, canonical fork selection, conflicting donors, wrong chains and
 anchors, source aliases, changed inputs, existing output refusal, and entries larger
 than the read-ahead window. Review regressions cover source log/index/container
 pathname replacement, preamble tampering with restored metadata, and donor conflicts
-inside the retained prefix. Whole-block framing also checks a real EOS mainnet block,
+inside the retained prefix. Index read-ahead is checked across buffer boundaries,
+backward reads and partial final slots. Whole-block framing also checks a real EOS mainnet block,
 WebAuthn producer/signature fields, and packed receipts.
 
 Windows and Linux Clippy (`--all-targets -- -D warnings`), formatting, the full scoped
@@ -207,7 +208,7 @@ Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1
     340M and at 520M, in both SHIP logs.
   - Before translation, `prepare --ship` rebuilt a stored-era trace record (block
     480,000,085) as `already identical`, and refused a compressed-era one (block
-    340,000,399) with `entry … length 4530 differs from target 2321`. Nothing was
+    340,000,399) with `entry â€¦ length 4530 differs from target 2321`. Nothing was
     written. Translation now rebuilds both; see below.
 - `prepare` on a live, appending log fails with `target changed during fetch` once
   a fetch outlasts a block interval. Stop nodeos first.
@@ -330,3 +331,13 @@ found.
 Qualify a release on copies of real logs from the intended chain and node version,
 ideally on a disposable filesystem with real damage beneath its checksums (as above,
 or `zinject -t data` on ZFS), before relying on it for production repair.
+
+## Real-log inspection performance (2026-10-19)
+
+[PERFORMANCE.md](PERFORMANCE.md) records full inspection of a frozen 56.4 GB Libre
+block log containing 269,898,278 blocks. Buffered index reads preserve the entire
+inspection result, including both input hashes and every index discrepancy check.
+The Linux benchmark recorder captures artifact identity, input stamps, elapsed and
+CPU time, peak RSS, process read counters and the operator's cache description.
+These measurements cover read-only `recover-tail`, not media scanning or copy-out
+restoration.
