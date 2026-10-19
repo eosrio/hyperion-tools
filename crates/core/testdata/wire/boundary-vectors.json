@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "producer": {"kind": "explicit-source-derived-boundary-cases", "nodeExecution": false},
+  "vectors": [
+    {"id":"boundary-integer-alias-shadow","operation":"decodeValue","abi":{"version":"sysio::abi/1.3","types":[{"new_type_name":"uint8","type":"string"}]},"typeName":"uint8","hex":"00","expectedError":"invalid_abi"},
+    {"id":"boundary-integer-variant-shadow","operation":"decodeValue","abi":{"version":"sysio::abi/1.3","variants":[{"name":"int32","types":["string"]}]},"typeName":"int32","hex":"0000","expectedError":"invalid_abi"},
+    {"id":"boundary-integer-enum-shadow","operation":"decodeValue","abi":{"version":"sysio::abi/1.3","enums":[{"name":"uint64","type":"uint8","values":[{"name":"ZERO","value":0}]}]},"typeName":"uint64","hex":"00","expectedError":"invalid_abi"},
+    {"id":"boundary-legacy-slug-builtin-precedence","operation":"decodeValue","abi":{"version":"sysio::abi/1.3","structs":[{"name":"slug_name","base":"","fields":[{"name":"value","type":"uint64"}]}]},"typeName":"slug_name","hex":"0000000042150000","expected":"ETH"},
+    {"id":"boundary-unknown-mandatory-metadata","operation":"encodeAbi","abi":{"version":"sysio::abi/1.3","future_mandatory":1},"expectedError":"unsupported_feature"},
+    {"id":"boundary-empty-struct-extra-field","operation":"encodeValue","abi":{"version":"sysio::abi/1.3","structs":[{"name":"empty","base":"","fields":[]}]},"typeName":"empty","value":{"lost":1},"expectedError":"invalid_value"},
+    {"id":"boundary-bool-true","operation":"encodeValue","typeName":"bool","value":true,"expected":"01"},
+    {"id":"boundary-bool-uint8","operation":"decodeValue","typeName":"bool","hex":"ff","expected":255},
+    {"id":"boundary-empty-symbol-code","operation":"decodeValue","typeName":"symbol_code","hex":"0000000000000000","expected":""},
+    {"id":"boundary-asset-outside-range","operation":"decodeValue","typeName":"asset","hex":"ffffffffffffff7f0453595300000000","expectedError":"invalid_value"},
+    {"id":"boundary-future-ABI-version","operation":"encodeAbi","abi":{"version":"sysio::abi/1.999"},"expectedError":"unsupported_feature"},
+    {"id":"boundary-unknown-profile","operation":"decodeValue","profileId":"future-profile","typeName":"uint8","hex":"01","expectedError":"unsupported_feature"},
+    {"id":"boundary-varuint-overlong","operation":"decodeValue","typeName":"varuint32","hex":"8000","expectedError":"invalid_value"},
+    {"id":"boundary-varuint-overflow","operation":"decodeValue","typeName":"varuint32","hex":"ffffffff10","expectedError":"invalid_value"},
+    {"id":"boundary-optional-invalid-presence","operation":"decodeValue","typeName":"uint8?","hex":"02","expectedError":"invalid_value"},
+    {"id":"boundary-unresolved-required-type","operation":"decodeValue","typeName":"future_type","hex":"","expectedError":"unsupported_feature"},
+    {"id":"boundary-array-over-limit","operation":"decodeValue","typeName":"uint8[]","hex":"a18d06","expectedError":"limits_exceeded"},
+    {"id":"boundary-fixed-array-over-limit","operation":"decodeValue","typeName":"uint8[100001]","hex":"","expectedError":"limits_exceeded"},
+    {"id":"boundary-invalid-UTF8","operation":"decodeValue","typeName":"string","hex":"01ff","expectedError":"invalid_value"},
+    {"id":"boundary-required-field-missing","operation":"encodeValue","abi":{"version":"sysio::abi/1.3","structs":[{"name":"row","base":"","fields":[{"name":"n","type":"uint64"}]}]},"typeName":"row","value":{},"expectedError":"invalid_value"},
+    {"id":"boundary-integer-noncanonical","operation":"encodeValue","typeName":"uint64","value":"01","expectedError":"invalid_value"},
+    {"id":"boundary-integer-negative-unsigned","operation":"encodeValue","typeName":"uint64","value":"-1","expectedError":"invalid_value"},
+    {"id":"boundary-uint64-max","operation":"encodeValue","typeName":"uint64","value":"18446744073709551615","expected":"ffffffffffffffff"},
+    {"id":"boundary-slug-raw-input","operation":"encodeValue","typeName":"slug_name","value":{"value":"9223372036854775808"},"expected":"0000000000000080"},
+    {"id":"boundary-name-last-character","operation":"encodeValue","typeName":"name","value":"zzzzzzzzzzzzk","expectedError":"invalid_value"},
+    {"id":"boundary-type-alias-cycle","operation":"decodeValue","abi":{"version":"sysio::abi/1.3","types":[{"new_type_name":"a","type":"b"},{"new_type_name":"b","type":"a"}]},"typeName":"a","hex":"","expectedError":"invalid_abi"}
+  ]
+}

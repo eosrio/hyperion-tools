@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    "Cases are serializer inputs, not contract deployments or live behavior.",
+    "All official clio executions are offline: no --url or wallet access."
+  ],
+  "cases": [
+    {
+      "id": "kv-map-value",
+      "contract": "test_kv_map",
+      "typeName": "my_value",
+      "input": {
+        "payload": "wire\u0000fixture",
+        "amount": "18446744073709551615"
+      }
+    },
+    {
+      "id": "kv-map-put",
+      "contract": "test_kv_map",
+      "typeName": "put",
+      "input": {
+        "region": "us-east",
+        "id": "9007199254740993",
+        "payload": "hello Wire",
+        "amount": "1234"
+      }
+    },
+    {
+      "id": "kv-map-signed",
+      "contract": "test_kv_map",
+      "typeName": "signed_value",
+      "input": {
+        "original_key": "-9223372036854775808"
+      }
+    },
+    {
+      "id": "kv-user-value",
+      "contract": "test_kv_sec_query",
+      "typeName": "user_val",
+      "input": {
+        "owner": "alice",
+        "balance": "100000"
+      }
+    },
+    {
+      "id": "kv-user-action",
+      "contract": "test_kv_sec_query",
+      "typeName": "adduser",
+      "input": {
+        "id": "42",
+        "owner": "alice",
+        "balance": "5000"
+      }
+    },
+    {
+      "id": "protobuf-action",
+      "contract": "proto_abi_test",
+      "typeName": "protobuf::test.ActData",
+      "input": {
+        "id": 42,
+        "type": 7,
+        "note": "hello"
+      }
+    },
+    {
+      "id": "protobuf-result-snake-case",
+      "contract": "proto_abi_test",
+      "typeName": "protobuf::test.ActResult",
+      "input": {
+        "value": 99,
+        "str_value": "node field name"
+      }
+    },
+    {
+      "id": "protobuf-default-fields",
+      "contract": "proto_abi_test",
+      "typeName": "protobuf::test.ActData",
+      "input": {}
+    },
+    {
+      "id": "token-transfer",
+      "contract": "sysio.token",
+      "typeName": "transfer",
+      "input": {
+        "from": "alice",
+        "to": "bob",
+        "quantity": "12.3400 SYS",
+        "memo": "fixture"
+      }
+    },
+    {
+      "id": "token-stats",
+      "contract": "sysio.token",
+      "typeName": "currency_stats",
+      "input": {
+        "supply": "1.0000 SYS",
+        "max_supply": "1000000.0000 SYS",
+        "issuer": "sysio"
+      }
+    },
+    {
+      "id": "chain-enum-known",
+      "contract": "sysio.chains",
+      "typeName": "ChainKind",
+      "input": "CHAIN_KIND_EVM"
+    },
+    {
+      "id": "chain-enum-unknown",
+      "contract": "sysio.chains",
+      "typeName": "ChainKind",
+      "input": 12345
+    },
+    {
+      "id": "opreg-enum-known",
+      "contract": "sysio.opreg",
+      "typeName": "OperatorType",
+      "input": 0
+    },
+    {
+      "id": "opreg-action-log",
+      "contract": "sysio.opreg",
+      "typeName": "OperatorActionLog",
+      "input": {
+        "action": {
+          "action_type": 0,
+          "op_address": {
+            "kind": 1,
+            "address": "010203"
+          },
+          "type": 0,
+          "status": 0,
+          "amount": {
+            "token_code": "18446744073709551615",
+            "amount": "-1234"
+          },
+          "request_id": "9007199254740993",
+          "chain_code": "42",
+          "reason": "fixture",
+          "reserve_code": "7"
+        },
+        "success": true,
+        "timestamp": "1735689600000",
+        "error_message": ""
+      }
+    },
+    {
+      "id": "roa-activate",
+      "contract": "sysio.roa",
+      "typeName": "activateroa",
+      "input": {
+        "total_sys": "10.0000 SYS",
+        "bytes_per_unit": "4096"
+      }
+    },
+    {
+      "id": "roa-addpolicy",
+      "contract": "sysio.roa",
+      "typeName": "addpolicy",
+      "input": {
+        "owner": "alice",
+        "issuer": "sysio",
+        "net_weight": "1.0000 SYS",
+        "cpu_weight": "2.0000 SYS",
+        "ram_weight": "3.0000 SYS",
+        "time_block": 500,
+        "network_gen": 2
+      }
+    },
+    {
+      "id": "bool-zero",
+      "typeName": "bool",
+      "input": 0
+    },
+    {
+      "id": "bool-one",
+      "typeName": "bool",
+      "input": 1
+    },
+    {
+      "id": "uint64-boundary",
+      "typeName": "uint64",
+      "input": "18446744073709551615"
+    },
+    {
+      "id": "int64-min",
+      "typeName": "int64",
+      "input": "-9223372036854775808"
+    },
+    {
+      "id": "uint128-boundary",
+      "typeName": "uint128",
+      "input": "340282366920938463463374607431768211455"
+    },
+    {
+      "id": "int128-min",
+      "typeName": "int128",
+      "input": "-170141183460469231731687303715884105728"
+    },
+    {
+      "id": "varuint32-boundary",
+      "typeName": "varuint32",
+      "input": 4294967295
+    },
+    {
+      "id": "varint32-min",
+      "typeName": "varint32",
+      "input": -2147483648
+    },
+    {
+      "id": "varint-uint64-fixed",
+      "typeName": "varint_uint64",
+      "input": "9007199254740993"
+    },
+    {
+      "id": "varint-int64-fixed",
+      "typeName": "varint_int64",
+      "input": "-9007199254740993"
+    },
+    {
+      "id": "name",
+      "typeName": "name",
+      "input": "alice"
+    },
+    {
+      "id": "time-micros",
+      "typeName": "time_point",
+      "input": "2025-01-01T00:00:00.123456"
+    },
+    {
+      "id": "time-seconds",
+      "typeName": "time_point_sec",
+      "input": "2025-01-01T00:00:01"
+    },
+    {
+      "id": "time-block-nested",
+      "typeName": "block_timestamp_type",
+      "input": "2025-01-01T00:00:00.500"
+    },
+    {
+      "id": "float32",
+      "typeName": "float32",
+      "input": 1.25
+    },
+    {
+      "id": "float64",
+      "typeName": "float64",
+      "input": -3.5
+    },
+    {
+      "id": "float128",
+      "typeName": "float128",
+      "input": "0x0000000000000000000000000000ff3f"
+    },
+    {
+      "id": "checksum160",
+      "typeName": "checksum160",
+      "input": "000102030405060708090a0b0c0d0e0f10111213"
+    },
+    {
+      "id": "checksum256",
+      "typeName": "checksum256",
+      "input": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "checksum512",
+      "typeName": "checksum512",
+      "input": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    },
+    {
+      "id": "symbol",
+      "typeName": "symbol",
+      "input": "4,SYS"
+    },
+    {
+      "id": "symbol-code",
+      "typeName": "symbol_code",
+      "input": "SYS"
+    },
+    {
+      "id": "asset-negative",
+      "typeName": "asset",
+      "input": "-123.0001 SYS"
+    },
+    {
+      "id": "extended-asset",
+      "typeName": "extended_asset",
+      "input": {
+        "quantity": "1.0000 SYS",
+        "contract": "sysio.token"
+      }
+    },
+    {
+      "id": "bytes",
+      "typeName": "bytes",
+      "input": "00ff010080"
+    },
+    {
+      "id": "utf8-string",
+      "typeName": "string",
+      "input": "Wire \u2603 \ud83d\ude80"
+    },
+    {
+      "id": "float32-negative-zero",
+      "typeName": "float32",
+      "input": -0.0
+    },
+    {
+      "id": "float64-negative-zero",
+      "typeName": "float64",
+      "input": -0.0
+    },
+    {
+      "id": "float32-infinity",
+      "typeName": "float32",
+      "input": "Infinity"
+    },
+    {
+      "id": "float64-infinity",
+      "typeName": "float64",
+      "input": "Infinity"
+    },
+    {
+      "id": "float64-negative-infinity",
+      "typeName": "float64",
+      "input": "-Infinity"
+    },
+    {
+      "id": "float64-nan",
+      "typeName": "float64",
+      "input": "NaN"
+    },
+    {
+      "id": "float64-large",
+      "typeName": "float64",
+      "input": 1e+30
+    },
+    {
+      "id": "float64-subnormal",
+      "typeName": "float64",
+      "input": 5e-324
+    },
+    {
+      "id": "time-negative-micros",
+      "typeName": "time_point",
+      "input": "1969-12-31T23:59:59.999"
+    },
+    {
+      "id": "time-milliseconds",
+      "typeName": "time_point",
+      "input": "2025-01-01T00:00:00.123"
+    },
+    {
+      "id": "release-slug-value",
+      "contract": "sysio.chains",
+      "profiles": [
+        "7dede884"
+      ],
+      "typeName": "slug_name",
+      "input": {
+        "value": "23467707973632"
+      }
+    },
+    {
+      "id": "release-chain-row",
+      "contract": "sysio.chains",
+      "profiles": [
+        "7dede884"
+      ],
+      "typeName": "chain_row",
+      "input": {
+        "code": {
+          "value": "23467707973632"
+        },
+        "kind": "CHAIN_KIND_EVM",
+        "external_chain_id": 1,
+        "name": "Ethereum",
+        "description": "oracle fixture",
+        "is_depot": false,
+        "active": true,
+        "registered_at_ms": "1735689600000",
+        "activated_at_ms": "1735689600500"
+      }
+    },
+    {
+      "id": "release-opreg-available",
+      "contract": "sysio.opreg",
+      "profiles": [
+        "7dede884"
+      ],
+      "typeName": "available",
+      "input": {
+        "account": "alice",
+        "chain_code": {
+          "value": "23467707973632"
+        },
+        "token_code": {
+          "value": "93105927069696"
+        }
+      }
+    }
+  ]
+}

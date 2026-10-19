@@ -1,0 +1,351 @@
+{
+  "schemaVersion": 1,
+  "producer": {
+    "sourceRevision": "7dede884e0150d36fa788e85a119e10653ade8ca",
+    "binarySha256": "a8298cc96d0265b384aebba178d255ff73917fcae0a0d4abf086f45016efb76a",
+    "nodeExecution": false,
+    "contractDeployment": false
+  },
+  "commands": [
+    {
+      "id": "official-crypto-public_key-K1",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_K1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-public_key-R1",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "010279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_R1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovHPZT42\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-public_key-WA",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "020279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ff0c776972652e6578616d706c65",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_WA_8otquabuHfyP2UGMc7jraq63KTi8koABxt4DTsXLYLvPhsLwjdwFvaChxJPjWptSJBRoR\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-public_key-EM",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "030279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_EM_0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-public_key-ED",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "040707070707070707070707070707070707070707070707070707070707070707",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_ED_US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-public_key-BLS",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "0560000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "ERROR: Unable to convert the packed hex to type: public_key\n"
+    },
+    {
+      "id": "official-crypto-signature-K1",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "001f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_K1_JuFmz3r6GzoRXehRgMdLyM9xLbBHNHTQPGA4J6LVF3Ge5rH89sXHUe7Zbr5Xf8B7CwJkb5HMdHgsPuJkiy6nJXF6hbTJnc\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-R1",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "011f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_R1_JuFmz3r6GzoRXehRgMdLyM9xLbBHNHTQPGA4J6LVF3Ge5rH89sXHUe7Zbr5Xf8B7CwJkb5HMdHgsPuJkiy6nJXF6fe2tT6\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-WA",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "021f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030102030f7b2274797065223a2274657374227d",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_WA_26qwtANEwSw8w4uLznLmt9ftcYroHL1cSrnVbDB9VLejwykZYDk5ZdEr8KfHdcRa7HM3WbYWSDKmgmcMw9VfeGyGuw67tz1NdHYSNdYB8tks4te2vnwYs794VA\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-EM",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "031f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_EM_0x1f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-ED",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "04070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_ED_3RQWGwhrtwbaRTSzb4kKP61FKsJC27zTqsPzKuda9q4xbkt42afkgamdyLqHFQsybmu1vqwXsCXUdAezZpU927qCVcAGK7gGWjHWeSqrVbSEBVyVdsbBPZ9JX2jxRrkHhTt\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-BLS",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "05c001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "ERROR: Unable to convert the packed hex to type: signature\n"
+    },
+    {
+      "id": "official-crypto-public_key-BLS-valid",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "0501a627b8c93b9d01e067205fd3aefb4470b182c035e37b361a038f4f1b01768b2ed0c6d3c500a17d4829e5b8687c3a7703529e01905d4b9b4e4f530ef1bd81173c4397caa98308be9f26f3266fdd56f10b4838f912d17d480f2fb408dc5d66570f",
+        "--type",
+        "public_key",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"PUB_BLS_pie4yTudAeBnIF_TrvtEcLGCwDXjezYaA49PGwF2iy7QxtPFAKF9SCnluGh8OncDUp4BkF1Lm05PUw7xvYEXPEOXyqmDCL6fJvMmb91W8QtIOPkS0X1IDy-0CNxdZlcP32iOJQ\"\n",
+      "stderr": ""
+    },
+    {
+      "id": "official-crypto-signature-BLS-valid",
+      "args": [
+        "convert",
+        "unpack_hex",
+        "05013f70e4e49c8be166fead45d427b46a3e3111c2e3d87d157c3db4cf8809ced79031a68323ac7e33d6932d137e55675c133c175774eebbe59493a9198a43770f8b9fd546f2bc22cc61f054208a0ff1861bfcb9279249483a125f66fac138956d0c9c9a322595fc682e382f9eca4b8db76417107c094e29c600b22ef1c3b1987f97f568b0b229daa912d715004292148919e55305117a88fa63c6ede3af298daa6d4ff383affac5bdf0748316299b3d0b46bb2f54887fed3fb2d03db57715ece213",
+        "--type",
+        "signature",
+        "--abi-file",
+        "/srv/hyperion-wire-testnet/20261019-node-setup/codec-oracle-issue2/captured-ship.abi"
+      ],
+      "exitCode": 0,
+      "stdout": "\"SIG_BLS_P3Dk5JyL4Wb-rUXUJ7RqPjERwuPYfRV8PbTPiAnO15AxpoMjrH4z1pMtE35VZ1wTPBdXdO675ZSTqRmKQ3cPi5_VRvK8Isxh8FQgig_xhhv8uSeSSUg6El9m-sE4lW0MnJoyJZX8aC44L57KS423ZBcQfAlOKcYAsi7xw7GYf5f1aLCyKdqpEtcVAEKSFIkZ5VMFEXqI-mPG7eOvKY2qbU_zg6_6xb3wdIMWKZs9C0a7L1SIf-0_stA9tXcV7OITQqCG0A\"\n",
+      "stderr": ""
+    }
+  ],
+  "vectors": [
+    {
+      "id": "official-crypto-public_key-K1",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "expected": "PUB_K1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovLY8E9M",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-public_key-R1",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "010279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "expected": "PUB_R1_5p78kHbL33Rn3JWkTWRE2B9uz6gy4r1KbfAKLNQGE3ovHPZT42",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-public_key-WA",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "020279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ff0c776972652e6578616d706c65",
+      "expected": "PUB_WA_8otquabuHfyP2UGMc7jraq63KTi8koABxt4DTsXLYLvPhsLwjdwFvaChxJPjWptSJBRoR",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-public_key-EM",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "030279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      "expected": "PUB_EM_0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-public_key-ED",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "040707070707070707070707070707070707070707070707070707070707070707",
+      "expected": "PUB_ED_US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-signature-K1",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "001f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "SIG_K1_JuFmz3r6GzoRXehRgMdLyM9xLbBHNHTQPGA4J6LVF3Ge5rH89sXHUe7Zbr5Xf8B7CwJkb5HMdHgsPuJkiy6nJXF6hbTJnc",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-signature-R1",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "011f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "SIG_R1_JuFmz3r6GzoRXehRgMdLyM9xLbBHNHTQPGA4J6LVF3Ge5rH89sXHUe7Zbr5Xf8B7CwJkb5HMdHgsPuJkiy6nJXF6fe2tT6",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-signature-WA",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "021f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030102030f7b2274797065223a2274657374227d",
+      "expected": "SIG_WA_26qwtANEwSw8w4uLznLmt9ftcYroHL1cSrnVbDB9VLejwykZYDk5ZdEr8KfHdcRa7HM3WbYWSDKmgmcMw9VfeGyGuw67tz1NdHYSNdYB8tks4te2vnwYs794VA",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-signature-EM",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "031f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "SIG_EM_0x1f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-signature-ED",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "04070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+      "expected": "SIG_ED_3RQWGwhrtwbaRTSzb4kKP61FKsJC27zTqsPzKuda9q4xbkt42afkgamdyLqHFQsybmu1vqwXsCXUdAezZpU927qCVcAGK7gGWjHWeSqrVbSEBVyVdsbBPZ9JX2jxRrkHhTt",
+      "oracle": "official-clio-offline"
+    },
+    {
+      "id": "official-crypto-public_key-BLS-valid",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "public_key",
+      "hex": "0501a627b8c93b9d01e067205fd3aefb4470b182c035e37b361a038f4f1b01768b2ed0c6d3c500a17d4829e5b8687c3a7703529e01905d4b9b4e4f530ef1bd81173c4397caa98308be9f26f3266fdd56f10b4838f912d17d480f2fb408dc5d66570f",
+      "expected": "PUB_BLS_pie4yTudAeBnIF_TrvtEcLGCwDXjezYaA49PGwF2iy7QxtPFAKF9SCnluGh8OncDUp4BkF1Lm05PUw7xvYEXPEOXyqmDCL6fJvMmb91W8QtIOPkS0X1IDy-0CNxdZlcP32iOJQ",
+      "oracle": "official-clio-public-genesis-and-captured-QC",
+      "publicGenesisSha256": "cfbfdfeb64b84bdadb32f4a8d0bf56f1a0f98f0c9fa8e5f93d210b3bae4ab4bf",
+      "capturedBlock": 6350
+    },
+    {
+      "id": "official-crypto-signature-BLS-valid",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-7dede884-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "signature",
+      "hex": "05013f70e4e49c8be166fead45d427b46a3e3111c2e3d87d157c3db4cf8809ced79031a68323ac7e33d6932d137e55675c133c175774eebbe59493a9198a43770f8b9fd546f2bc22cc61f054208a0ff1861bfcb9279249483a125f66fac138956d0c9c9a322595fc682e382f9eca4b8db76417107c094e29c600b22ef1c3b1987f97f568b0b229daa912d715004292148919e55305117a88fa63c6ede3af298daa6d4ff383affac5bdf0748316299b3d0b46bb2f54887fed3fb2d03db57715ece213",
+      "expected": "SIG_BLS_P3Dk5JyL4Wb-rUXUJ7RqPjERwuPYfRV8PbTPiAnO15AxpoMjrH4z1pMtE35VZ1wTPBdXdO675ZSTqRmKQ3cPi5_VRvK8Isxh8FQgig_xhhv8uSeSSUg6El9m-sE4lW0MnJoyJZX8aC44L57KS423ZBcQfAlOKcYAsi7xw7GYf5f1aLCyKdqpEtcVAEKSFIkZ5VMFEXqI-mPG7eOvKY2qbU_zg6_6xb3wdIMWKZs9C0a7L1SIf-0_stA9tXcV7OITQqCG0A",
+      "oracle": "official-clio-public-genesis-and-captured-QC",
+      "publicGenesisSha256": "cfbfdfeb64b84bdadb32f4a8d0bf56f1a0f98f0c9fa8e5f93d210b3bae4ab4bf",
+      "capturedBlock": 6350
+    }
+  ],
+  "excluded": [
+    "official-crypto-public_key-BLS",
+    "official-crypto-signature-BLS"
+  ]
+}

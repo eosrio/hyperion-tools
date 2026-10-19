@@ -9,6 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+hyperion-ship = { workspace = true }
 rs_abieos = { workspace = true }
 hex = { workspace = true }
 clap = { workspace = true }

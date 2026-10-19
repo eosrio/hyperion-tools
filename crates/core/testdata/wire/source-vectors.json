@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "producer": {
+    "kind": "independent-source-derived-python",
+    "sourceRevision": "6508c9e8f4044df8d5acb082a7af3be6a80cd9a0",
+    "nodeExecution": false
+  },
+  "vectors": [
+    {
+      "id": "6508-source-slug-zero",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "slug_name",
+      "hex": "0000000000000000",
+      "expected": "",
+      "oracle": "source-derived-independent-python",
+      "source": "https://github.com/Wire-Network/wire-sysio/blob/6508c9e8f4044df8d5acb082a7af3be6a80cd9a0/libraries/libfc/include/fc/slug_name.hpp"
+    },
+    {
+      "id": "6508-source-slug-ETH",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "slug_name",
+      "hex": "0000000042150000",
+      "expected": "ETH",
+      "oracle": "source-derived-independent-python",
+      "source": "https://github.com/Wire-Network/wire-sysio/blob/6508c9e8f4044df8d5acb082a7af3be6a80cd9a0/libraries/libfc/include/fc/slug_name.hpp"
+    },
+    {
+      "id": "6508-source-slug-USDC",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "slug_name",
+      "hex": "0000000331550000",
+      "expected": "USDC",
+      "oracle": "source-derived-independent-python",
+      "source": "https://github.com/Wire-Network/wire-sysio/blob/6508c9e8f4044df8d5acb082a7af3be6a80cd9a0/libraries/libfc/include/fc/slug_name.hpp"
+    },
+    {
+      "id": "6508-source-slug-WIRE_123",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "slug_name",
+      "hex": "5ec79585945c0000",
+      "expected": "WIRE_123",
+      "oracle": "source-derived-independent-python",
+      "source": "https://github.com/Wire-Network/wire-sysio/blob/6508c9e8f4044df8d5acb082a7af3be6a80cd9a0/libraries/libfc/include/fc/slug_name.hpp"
+    },
+    {
+      "id": "6508-source-chain-row",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "chain_row",
+      "hex": "0000000042150000020000000100000008457468657265756d0e736f7572636520666978747572650001007c291f94010000f47d291f940100000630783132333406307835363738",
+      "expected": {
+        "code": "ETH",
+        "kind": "CHAIN_KIND_EVM",
+        "external_chain_id": 1,
+        "name": "Ethereum",
+        "description": "source fixture",
+        "is_depot": 0,
+        "active": 1,
+        "registered_at_ms": "1735689600000",
+        "activated_at_ms": "1735689600500",
+        "outpost": {
+          "opp_addr": "0x1234",
+          "opp_inbound_addr": "0x5678"
+        }
+      },
+      "oracle": "source-derived-independent-python",
+      "source": "https://github.com/Wire-Network/wire-sysio/blob/6508c9e8f4044df8d5acb082a7af3be6a80cd9a0/libraries/libfc/include/fc/slug_name.hpp"
+    }
+  ]
+}

@@ -34,6 +34,13 @@ binary ABI/value codecs, ABI-deployment resolution, protocol loading, native dis
 fork recovery. A source bundle or passing fixture suite does not satisfy working Wire support.
 Existing worker, retained-history and backend-neutral contracts remain unchanged.
 
+The next Rust integration slice in [tools #41](https://github.com/eosrio/hyperion-tools/issues/41)
+consumes the complete codec source in [Wire PR #5](https://github.com/eosrio/hyperion-wire-plugin/pull/5)
+at an exact development revision. The [entrypoint support matrix and executable evidence](../qualification/wire-rust-provider.md)
+separate provider-aware live ABI scanning and full raw frame replay from pending direct-disk,
+bulk sink, snapshot and archive integration. Unsupported paths refuse Wire before outputs or
+checkpoints change. This slice leaves #41 and the working-Wire release gate open.
+
 ## Executable frontier
 
 | Delivery | Owner and issue | Verifiable result | Actual dependencies |

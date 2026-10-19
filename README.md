@@ -35,6 +35,12 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 | [**antelope-ship-archive**](crates/ship-archive) | preview | Serves frozen state-history and block logs over the SHiP WebSocket protocol exactly as a Spring node does, without nodeos, so a SHiP-aware router or proxy can stitch archived ranges and live nodes into one history. Strict, read-only, fail-closed readers; bounded memory; `check` and `index` for preparing archives. |
 | [**action-proto**](crates/action-proto) | experimental | Direct-from-disk action reader: decodes `action_traces` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Next-gen indexer read path. |
 | [**delta-proto**](crates/delta-proto) | experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas into Hyperion-shaped delta NDJSON. |
+| [**protocol-replay**](crates/protocol-replay) | engineering | Replay complete source-pinned Wire SHiP frames and ABI/value/KV records through the coordinated package's Rust provider, retaining raw bytes and deployment context. |
+
+Wire engineering profiles are explicit `--protocol` selections. The
+[Rust provider support matrix](docs/qualification/wire-rust-provider.md) records the working
+live ABI scan/replay paths and the disk/bulk/archive paths that currently refuse Wire before
+entering incompatible readers. This integration is not selected-testnet qualification.
 
 Deploy frozen SHiP archives beside live nodes with the
 [fleet-router v0.7+ topology guide](https://eosrio.github.io/fleet-router/frozen-ship.html) and
@@ -69,14 +75,16 @@ Deploy frozen SHiP archives beside live nodes with the
 
 ## Build
 
-Requires a Rust toolchain (**1.88+**). No C++/clang needed — the pure-Rust abieos backend is used, and
-every dependency (including [`rs_abieos`](https://crates.io/crates/rs_abieos)'s `rust-backend`) comes from
-crates.io. No git dependencies.
+The workspace declares Rust **1.88**, but the current locked `rs_abieos` 0.6.0 requires **1.95**;
+the provider integration is checked on stable Rust 1.99. The
+[integration record](docs/qualification/wire-rust-provider.md) preserves this toolchain gap.
+No C++/clang is needed: the pure-Rust abieos backend remains in use. The internal Wire component
+is an exact source-pinned Cargo git dependency; the other external dependencies come from crates.io.
 
 ```bash
 git clone https://github.com/eosrio/hyperion-tools
 cd hyperion-tools
-cargo build --release
+cargo build --release --locked
 # binaries land in target/release/
 ```
 

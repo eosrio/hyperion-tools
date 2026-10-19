@@ -1126,8 +1126,14 @@ fn load_abi(path: Option<&Path>) -> Result<Utf8Bytes> {
     };
     let text =
         fs::read_to_string(path).with_context(|| format!("read --abi {}", path.display()))?;
-    serde_json::from_str::<serde_json::Value>(&text)
+    let abi = serde_json::from_str::<serde_json::Value>(&text)
         .with_context(|| format!("--abi {} is not a JSON ABI", path.display()))?;
+    ensure!(
+        !abi["version"]
+            .as_str()
+            .is_some_and(|v| v.starts_with("sysio::")),
+        "unsupported_feature: Wire ABI override cannot enable the Antelope archive's hardcoded request/result and block layouts"
+    );
     Ok(Utf8Bytes::from(text))
 }
 
