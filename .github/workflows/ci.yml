@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Wire node setup evidence checksums
+        working-directory: docs/qualification/evidence/wire-node-20261019
+        run: sha256sum -c SHA256SUMS
       - name: Check runtime probe syntax
         run: node --check scripts/profile-runtime-smoke.mjs
       - name: Test runtime probe failure reporting

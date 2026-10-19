@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "archive": "public-evidence.tar.gz",
+  "members": [
+    {
+      "path": "candidate-binary.json",
+      "sizeBytes": 2778,
+      "sha256": "7ffe000096beb5843a7d89cb90911442ce32c584ff3fd7f195fad511ae287dfe"
+    },
+    {
+      "path": "release-checksums.txt",
+      "sizeBytes": 885,
+      "sha256": "5fc20f40f4bb67805ae7c25c05d825cbc69764b26f566cf67002e8f6179f32f8"
+    },
+    {
+      "path": "source-refs.json",
+      "sizeBytes": 732,
+      "sha256": "0353fc5b589333e54020938654eba7aaea681efca704f715a53dc1f472b3f88f"
+    },
+    {
+      "path": "nodeop-version.txt",
+      "sizeBytes": 48,
+      "sha256": "d2677fd0d065df8e5d0cf975b360ef01a4b996ae5e8fbca3d5229ab2196d1c6a"
+    },
+    {
+      "path": "clio-version.txt",
+      "sizeBytes": 48,
+      "sha256": "d2677fd0d065df8e5d0cf975b360ef01a4b996ae5e8fbca3d5229ab2196d1c6a"
+    },
+    {
+      "path": "nodeop-ldd.txt",
+      "sizeBytes": 222,
+      "sha256": "d8071219b91e6db5085d763d1b577c776d7d59154d1c39be5de7168009da95af"
+    },
+    {
+      "path": "nodeop-help.txt",
+      "sizeBytes": 69975,
+      "sha256": "dc57d6d0585b183049d428841dad113c47b296ecd2e4226d8b1d10d7701127c2"
+    },
+    {
+      "path": "archive-inspection.json",
+      "sizeBytes": 1137,
+      "sha256": "e8f62aba20f79105a657558b9f02564c0ef2c52adcaecb4bb547fc2eaa30184c"
+    },
+    {
+      "path": "legacy-binaries.sha256",
+      "sizeBytes": 163,
+      "sha256": "01cb05bd89f4638acd2fb9eff8046c98aa0dca96f7ba267e224d7efffba1abbf"
+    },
+    {
+      "path": "config.ini",
+      "sizeBytes": 567,
+      "sha256": "ebd837b9f9a480ca15d1d751d2ffebcbee59128b78cb4fbca8f00bda1498a3e6"
+    },
+    {
+      "path": "hyperion-wire-node42.service",
+      "sizeBytes": 999,
+      "sha256": "bdbf70bfb8b4f09e294eff6bc5a8b444a4b41a73debed74fe9a442c99e39f6d8"
+    },
+    {
+      "path": "setup-node.sh",
+      "sizeBytes": 2786,
+      "sha256": "ef9c306aec9c6df1be4fb5370cef4b48e75acba9c328598bae4d782617862d78"
+    },
+    {
+      "path": "check-node.sh",
+      "sizeBytes": 3519,
+      "sha256": "0ec34b08b843a53fb2508b88968048f4071a62c31a7efc328e21c888992e5ed8"
+    },
+    {
+      "path": "ship-probe.mjs",
+      "sizeBytes": 1667,
+      "sha256": "5189ecfca0a44c17bc61ef8f7b2dfdb77214aae488ebcff94b3f996416b0b77c"
+    },
+    {
+      "path": "rpc-before-restart.json",
+      "sizeBytes": 897,
+      "sha256": "70a61a3e095dce7c3cc0cc035bf0b67c8a800e8b3d8f412caf23376d70b91645"
+    },
+    {
+      "path": "rpc-after-restart.json",
+      "sizeBytes": 979,
+      "sha256": "9ae24edfbf813eceb5d6f3782819b3e201b8b75edf1d7b1f777770e6934fa842"
+    },
+    {
+      "path": "genesis.json",
+      "sizeBytes": 1047,
+      "sha256": "cfbfdfeb64b84bdadb32f4a8d0bf56f1a0f98f0c9fa8e5f93d210b3bae4ab4bf"
+    },
+    {
+      "path": "ship-abi.json",
+      "sizeBytes": 32581,
+      "sha256": "c67517833717ff43d170c19a31c395afbf6d3aa347d162265eaae33731ecd060"
+    },
+    {
+      "path": "ship-abi-receipt.json",
+      "sizeBytes": 817,
+      "sha256": "2d4abd11f62694fd81dcb695fa07beae08ccf041cc92545b741e097363f9cb22"
+    },
+    {
+      "path": "clean-stop.txt",
+      "sizeBytes": 67,
+      "sha256": "f788a142278ada5005ad03e8eae41ee34a0e36c12bbe4954f1e1cfd5ede5e3e9"
+    },
+    {
+      "path": "service-final.txt",
+      "sizeBytes": 136,
+      "sha256": "cdbc324a590aefa33e9a6ab4ed7a4b965258d73ab819674e78daebe32e6d76d4"
+    },
+    {
+      "path": "key-permissions.txt",
+      "sizeBytes": 107,
+      "sha256": "fdfd297474ca67123176a7e5650c8af0a67fc69946c546cb64ac1f84152b08f5"
+    },
+    {
+      "path": "genesis-extraction.log",
+      "sizeBytes": 3290,
+      "sha256": "eb0a232951f9e76dbb4ce01fe8078a3d29afffa6520ade9401e8c38f943101b7"
+    }
+  ],
+  "memberCount": 23,
+  "privateKeysIncluded": false
+}

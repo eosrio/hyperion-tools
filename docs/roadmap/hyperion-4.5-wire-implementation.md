@@ -23,8 +23,11 @@ The operator requested beginning node setup before selecting final launch pins. 
 [tools #42](https://github.com/eosrio/hyperion-tools/issues/42): an isolated Wire `nodeop`
 (nodeos equivalent), with owned binaries/config/data and dedicated loopback ports on an inspected
 Hyperion host. Official `v1.0.0` at `7dede884e0150d36fa788e85a119e10653ade8ca` is the initial
-artifact candidate; its source manifest and checksums must match before execution. This candidate
-is distinct from the newer source-derived primitive profile and is not an accepted launch pin.
+artifact candidate. Its source manifest and checksums matched, and the isolated node now produces
+blocks, exposes a captured SHiP ABI and passes a clean restart with chain/progress continuity.
+The [setup runbook and receipts](../qualification/wire-node-setup.md) record the loopback endpoints,
+bounded lifetime and exact evidence. This candidate is distinct from the newer source-derived
+primitive profile and is not an accepted launch pin.
 
 This first slice receives already-decoded fields. It does not implement SHiP frame decoding,
 binary ABI/value codecs, ABI-deployment resolution, protocol loading, native distribution or live
@@ -82,7 +85,7 @@ provenance remain the host's responsibility.
 | Deployed contracts and WASM/ABI artifacts | Pending inventory, build receipts and SHA-256 digests. A committed WASM beside C++ does not prove a matching build. |
 | Genesis, chain identity/configuration and deployment sequence | Pending; record before node-captured qualification fixtures are accepted. |
 | Extension/SDK/host/Rust artifact versions and platform set | Pending tested coordinated set and selected packaging mechanism. No catalog support claim yet. |
-| Isolated node setup | Requested by the operator under tools #42; Hyperion-1 inspected through Chronos and SSH. Preserve all existing binaries/services. Official pinned release artifacts are a candidate for this engineering baseline. |
+| Isolated node setup | Running under tools #42 on inspected Hyperion-1; official release binary verified, RPC/SHIP and clean restart observed. Existing binaries/services preserved. Runtime is bounded to six hours per start; final network/contract qualification is pending. |
 | Final testnet provisioning | Pending selected inputs, contract deployment and qualification. The isolated node setup can begin earlier; neither setup nor prior server-test authorization permits production service replacement. |
 
 The package profile and corpus explicitly label themselves as engineering fixtures. Track each
