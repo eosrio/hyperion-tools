@@ -145,6 +145,49 @@ boundary. This release evidence does not close broader #198 requirements for rep
 bulk pressure/durability, full mappings/plugins, retained-index upgrades, large memory
 pressure or distributed late-result ordering. No live cluster upgrade was performed.
 
+### Replica, pressure and durable acknowledgment qualification: 2026-10-19
+
+The [measured report and checksummed evidence](https://github.com/eosrio/hyperion-history-api/blob/79bdf06976509845e027436f46833f87dcfbcac0/docs/performance/elasticsearch-9.5.5-replicas.md)
+record three bounded executions: Node 24.19.0 explicit HTTP/default connection and Bun
+1.4.3 automatic HTTP, with unchanged client 8.19.1 and transport 8.10.1. A digest-pinned
+ES 9.5.5 fixture uses two data nodes and a third eligible master, plus dedicated RabbitMQ.
+Each run verifies **1,523 persisted documents**, or **4,569** across the final runs.
+Every physical data-node copy independently serves the complete pressure and broker
+datasets before the process crash and after recovery; repeated reads do not increase
+those document totals.
+
+A roughly 2 MiB bulk exceeds the fixture's static 1 MiB indexing-pressure budget and
+returns a native coordinating-stage **429**, with the matching rejection-counter increase.
+All 640 IDs are replayed with identical sources in eight-document chunks and receive
+two-copy receipts. Complete node statistics show pressure reservations and current write
+work returning to baseline. The built **`ElasticRoutes`** implementation also forwards
+real RabbitMQ deliveries to Elasticsearch: a mixed bulk acknowledges its valid item and
+requeues the real mapping-error **400** item; native pressure requeues only the submitted
+640 deliveries, which replay with unchanged payload bytes. Unrelated held deliveries
+remain unacknowledged until channel closure. [API #204](https://github.com/eosrio/hyperion-history-api/pull/204)
+corrects batch settlement and requests supervised worker replacement when its current
+delivery channel cannot settle work. A child-process test verifies the exit request;
+the live fixture does not exercise a full worker/master respawn.
+
+After SIGKILL of the primary, its surviving replica promotes and retains the replicated
+seeds. With one copy absent, `wait_for_active_shards=all` returns item **503** without
+creating the requested ID; admission with `1` produces a valid single-copy receipt,
+which the two-copy oracle rejects. This distinguishes [preflight availability](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-index)
+from observed successful-copy counts. Restarting the original node on its original
+volume separately replays **120 uncommitted translog operations per run**, without a
+preceding Lucene flush, and restores exact sources. The experiment uses explicit
+[`request` translog durability](https://www.elastic.co/docs/reference/elasticsearch/index-settings/translog).
+
+This is synthetic, bounded admission/retry and process-crash evidence. It does not
+establish host power-loss durability, broker restart recovery, sustained throughput,
+large heap-pressure recovery, full worker backpressure, production templates/plugins,
+retained-history upgrade compatibility or a runtime ranking. The coordinating admission
+rejection also does not directly reproduce the translated-update primary-expansion
+failure fixed by [Elastic #158235](https://github.com/elastic/elasticsearch/pull/158235).
+Keep those requirements open in [#198](https://github.com/eosrio/hyperion-history-api/issues/198).
+No dependency upgrade, live cluster setting change or automatic deployment follows from
+these measurements; existing history retains its separate compatibility gate.
+
 ## Relevant changes and qualification cases
 
 The relevance judgments below are inferences from the cited upstream implementation and the pinned Hyperion source. None is a measured Hyperion improvement.
