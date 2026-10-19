@@ -54,6 +54,14 @@ the same ES + templates; the `--profile full` services below are scaffolding for
 
 ## Quick start
 
+The current Elasticsearch and Kibana default is **9.5.5**, the candidate under qualification in
+[History API #198](https://github.com/eosrio/hyperion-history-api/issues/198). This configuration
+change does not qualify Hyperion compatibility or establish a performance improvement. Existing
+`.env` files keep their chosen `ELASTIC_VERSION`; edit that value to select the new candidate.
+For a version comparison, set `ELASTIC_VERSION` explicitly (for example, `9.4.2` to reproduce the
+older server baseline) and use a separate throwaway data volume for each version. Record the
+resolved server version and image digest, not only the configured tag, with each result.
+
 ```bash
 cd bench
 cp .env.example .env          # then edit CHAIN, ES_JAVA_OPTS, etc.
@@ -162,7 +170,8 @@ The templates ship with Hyperion-style settings (`refresh_interval: 1s`, `number
     --mode action --chain wax --workers 32 --batch 4000
   ```
   Co-locate it with the ES under test (same box / LAN — NOT over a WAN link, which measures the
-  network, not ES). Reference point: on a 32-core box, ES 9.4.2 (16g heap, logsdb, `refresh=-1`),
+  network, not ES). Historical reference point on **ES 9.4.2** (not remeasured on 9.5.5): on a
+  32-core box (16g heap, logsdb, `refresh=-1`),
   `es-load` plateaus at **~384k docs/s / ~400 MB/s** at 32 workers (80% box CPU, 0 write rejections)
   vs ~328k for 6 Python processes. The reader decodes ~3–4× faster than that, so **ES `_bulk` is the
   system write ceiling** — exactly why the cold-tier metadata trimming matters.
