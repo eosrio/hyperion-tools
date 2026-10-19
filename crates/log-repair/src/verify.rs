@@ -16,7 +16,7 @@ use anyhow::{Result, ensure};
 use serde_json::json;
 
 use crate::format::{
-    Kind, Log, block_header, num, orphans, ship_entry_size, ship_payload, u32le, u64le,
+    Kind, Log, block_header, checked_ship_id, num, orphans, ship_entry_size, u32le, u64le,
 };
 use crate::io::{MAX_BYTES, media_error};
 use crate::report::{self, Out};
@@ -258,8 +258,8 @@ pub fn verify(
                 skipped += 1;
                 continue;
             } else {
-                match ship_payload(body) {
-                    Ok((id, _)) => {
+                match checked_ship_id(body) {
+                    Ok(id) => {
                         if num(&id) != block {
                             problems.push(format!("entry names block {}", num(&id)));
                         }

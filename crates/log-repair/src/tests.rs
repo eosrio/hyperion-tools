@@ -522,6 +522,81 @@ fn ship_corrupt_zlib_size_and_magic_are_refused() {
 }
 
 #[test]
+fn ship_decoder_separates_streams_after_errors_and_mixed_encodings() {
+    let id = [7; 32];
+    let large: Vec<u8> = (0..150_000).map(|i| (i * 31 % 251) as u8).collect();
+    let mut held = Vec::new();
+    for round in 0..3 {
+        for codec in [codec::SPRING, Codec::Deflate(6)] {
+            for marker in [0, 1, 2] {
+                let raw = if round == 1 { &[][..] } else { &large[..] };
+                let body = encode_ship_with(&id, raw, marker, &codec).unwrap();
+                held.push(ship_payload(&body).unwrap().1);
+                let mut bad = body.clone();
+                *bad.last_mut().unwrap() ^= 1;
+                assert!(ship_payload(&bad).is_err(), "checksum must remain enforced");
+                assert_eq!(ship_payload(&body).unwrap(), (id, raw.to_vec()));
+                let mut trailing = body.clone();
+                trailing.push(0);
+                let size = (trailing.len() - 48) as u64;
+                trailing[40..48].copy_from_slice(&size.to_le_bytes());
+                assert!(ship_payload(&trailing).is_err(), "consume the exact stream");
+                assert_eq!(ship_payload(&body).unwrap().1, raw);
+                assert_eq!(format::checked_ship_id(&body).unwrap(), id);
+                let mut truncated = body[..body.len() - 3].to_vec();
+                let size = (truncated.len() - 48) as u64;
+                truncated[40..48].copy_from_slice(&size.to_le_bytes());
+                assert!(ship_payload(&truncated).is_err());
+                assert_eq!(ship_payload(&body).unwrap().1, raw);
+            }
+        }
+    }
+    for (i, raw) in held.iter().enumerate() {
+        assert_eq!(
+            raw.as_slice(),
+            if i / 6 == 1 { &[][..] } else { &large[..] }
+        );
+    }
+}
+
+#[test]
+fn ship_validation_without_collection_preserves_every_stream_check() {
+    let id = [9; 32];
+    for codec in [codec::SPRING, Codec::Deflate(6)] {
+        for marker in [0, 1, 2] {
+            for len in [0, 1, 65535, 65536, 150000] {
+                let raw: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+                let body = encode_ship_with(&id, &raw, marker, &codec).unwrap();
+                assert_eq!(format::checked_ship_id(&body).unwrap(), id);
+                let mut bad_crc = body.clone();
+                *bad_crc.last_mut().unwrap() ^= 1;
+                let mut short = body[..body.len() - 3].to_vec();
+                let size = (short.len() - 48) as u64;
+                short[40..48].copy_from_slice(&size.to_le_bytes());
+                let mut trailing = body.clone();
+                trailing.push(0);
+                let size = (trailing.len() - 48) as u64;
+                trailing[40..48].copy_from_slice(&size.to_le_bytes());
+                let mut wrong_size = body.clone();
+                if marker == 1 {
+                    wrong_size[52..60].copy_from_slice(&((len + 1) as u64).to_le_bytes());
+                } else {
+                    wrong_size[48..52]
+                        .copy_from_slice(&((body.len() - 52 + 1) as u32).to_le_bytes());
+                }
+                for bad in [bad_crc, short, trailing, wrong_size] {
+                    let owned = ship_payload(&bad).unwrap_err();
+                    let checked = format::checked_ship_id(&bad).unwrap_err();
+                    assert_eq!(format!("{owned:#}"), format!("{checked:#}"));
+                    assert_eq!(format::checked_ship_id(&body).unwrap(), id);
+                }
+                assert_eq!(ship_payload(&body).unwrap().1, raw);
+            }
+        }
+    }
+}
+
+#[test]
 fn ship_payloads_use_nodeos_stored_block_split() {
     // nodeos (Spring 1.2.x) writes stored zlib in 32 KiB blocks; payloads above one block
     // must reproduce that split byte for byte, or real traces and deltas never match.
@@ -1603,6 +1678,23 @@ fn verify_finds_silent_corruption_in_ship_logs() {
         let found = verify_findings(&f.open(false), None, std::slice::from_ref(&reference.path));
         assert_eq!(found.len(), 1, "{kind:?}: {found:?}");
         assert!(found[0].1.contains("block ID differs"), "{found:?}");
+    }
+}
+
+#[test]
+fn verify_reports_overflowing_ship_lengths_without_panicking() {
+    for kind in [Kind::Trace, Kind::ChainState] {
+        for length in [u64::MAX, u64::MAX - 55, u64::MAX - 56] {
+            let f = Fixture::new(kind);
+            let at = f.open(false).pos(1015).unwrap() as usize;
+            let mut bytes = fs::read(&f.path).unwrap();
+            bytes[at + 40..at + 48].copy_from_slice(&length.to_le_bytes());
+            fs::write(&f.path, bytes).unwrap();
+            let found = verify_findings(&f.open(false), None, &[]);
+            assert_eq!(found.len(), 1, "{kind:?}: {found:?}");
+            assert_eq!(found[0].0, 1015);
+            assert!(found[0].1.contains("payload_size"), "{found:?}");
+        }
     }
 }
 

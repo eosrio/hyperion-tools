@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use crate::format::{Header, Kind, Log, num, ship_payload, u64le, unsupported_ship_magic};
+use crate::format::{
+    Header, Kind, Log, checked_ship_id, num, ship_payload, u64le, unsupported_ship_magic,
+};
 use crate::framing::{self, Incomplete};
 use crate::io::{self, Disk, MAX_BYTES, Stamp};
 use crate::repair::{Loaded, Sources};
@@ -241,7 +243,7 @@ impl ReadAhead<'_> {
                 self.load(at, len.max(64 << 10).min(size - at))?;
             }
             let bytes = self.from(at)[..len as usize].to_vec();
-            let (id, _) = ship_payload(&bytes[..bytes.len() - 8])?;
+            let id = checked_ship_id(&bytes[..bytes.len() - 8])?;
             (bytes, id, None)
         };
         ensure!(

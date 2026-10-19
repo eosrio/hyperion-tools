@@ -23,7 +23,27 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - run: python -m unittest discover -s crates/log-repair/tests -p test_qualification.py
       - run: cargo fmt --package antelope-log-repair --check
-      - run: cargo clippy --locked --package antelope-log-repair --all-targets -- -D warnings
+      - run: cargo clippy --locked --package antelope-log-repair --all-targets --all-features -- -D warnings
       - run: cargo test --locked --package antelope-log-repair
+      - run: cargo test --locked --package antelope-log-repair --features allocation-metrics allocation_metrics::tests
       - run: cargo build --release --locked --package antelope-log-repair
+      - name: Real Libre entry damage matrix
+        if: runner.os == 'Linux'
+        run: >-
+          python crates/log-repair/tests/qualify.py damage
+          --fixture crates/log-repair/tests/fixtures/libre-real-entries.json
+          --tool ./target/release/antelope-log-repair --trim
+          --out /tmp/antelope-real-entry-damage
+      - name: Process interruption and disk-full regressions
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v strace >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y strace
+          fi
+          python -O crates/log-repair/tests/qualify.py interrupt \
+            --fixture crates/log-repair/tests/fixtures/libre-real-entries.json \
+            --tool ./target/release/antelope-log-repair \
+            --out /tmp/antelope-real-entry-interruptions

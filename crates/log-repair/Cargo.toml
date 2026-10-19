@@ -10,6 +10,10 @@ description = "Reviewed media repair and copy-out tail recovery for Antelope blo
 readme = "README.md"
 publish = false
 
+[features]
+# Diagnostic builds only: count Rust allocator requests, without changing validation.
+allocation-metrics = []
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }

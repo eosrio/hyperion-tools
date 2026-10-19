@@ -765,6 +765,9 @@ and fault-injection tests, a real-nodeos smoke test, and a real-kernel `EIO` tes
 [FORMAT.md](FORMAT.md) documents the on-disk formats, plan and source files, and
 upstream references. [PERFORMANCE.md](PERFORMANCE.md) records real-log tail-inspection
 measurements and their cache and hardware limits.
+[QUALIFICATION.md](QUALIFICATION.md) tracks real-corpus performance, damage,
+process-interruption and node-replay work for the next release, including measured
+results and remaining gaps.
 
 ## Development
 
