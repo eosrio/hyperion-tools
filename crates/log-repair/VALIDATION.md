@@ -208,7 +208,7 @@ Run 2026-10-16 on Ubuntu 22.04 and 24.04 hosts (kernels 6.2 and 6.8, OpenZFS 2.1
     340M and at 520M, in both SHIP logs.
   - Before translation, `prepare --ship` rebuilt a stored-era trace record (block
     480,000,085) as `already identical`, and refused a compressed-era one (block
-    340,000,399) with `entry â€¦ length 4530 differs from target 2321`. Nothing was
+    340,000,399) with `entry … length 4530 differs from target 2321`. Nothing was
     written. Translation now rebuilds both; see below.
 - `prepare` on a live, appending log fails with `target changed during fetch` once
   a fetch outlasts a block interval. Stop nodeos first.
