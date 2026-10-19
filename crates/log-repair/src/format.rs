@@ -185,6 +185,10 @@ impl Log {
                 .unwrap_or_else(|| path.with_extension("index")),
             false,
         )?;
+        Self::from_disks(kind, log, index)
+    }
+
+    pub fn from_disks(kind: Kind, log: Disk, index: Disk) -> Result<Self> {
         let size = log.stamp()?.size;
         let count_bytes = index.stamp()?.size;
         ensure!(
@@ -472,8 +476,13 @@ pub fn encode_ship_with(id: &[u8; 32], raw: &[u8], marker: u32, codec: &Codec) -
 }
 
 pub type Blocks = BTreeMap<u32, Vec<u8>>;
+#[cfg(test)]
 pub fn container(path: &Path) -> Result<Blocks> {
     let disk = Disk::open(path, false)?;
+    container_disk(&disk)
+}
+
+pub fn container_disk(disk: &Disk) -> Result<Blocks> {
     let bytes = disk.read(0, disk.stamp()?.size)?;
     let mut c = Cursor::new(&bytes);
     ensure!(c.take(8)? == b"P2PBLK01", "not a P2PBLK01 container");

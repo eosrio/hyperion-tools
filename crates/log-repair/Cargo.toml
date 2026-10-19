@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Offline, reviewed single-record repairs for Antelope block and state-history logs"
+description = "Reviewed media repair and copy-out tail recovery for Antelope block and state-history logs"
 readme = "README.md"
 publish = false
 

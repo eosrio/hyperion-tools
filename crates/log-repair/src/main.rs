@@ -1,10 +1,12 @@
 mod codec;
 mod format;
+mod framing;
 mod io;
 mod repair;
 mod replay;
 mod report;
 mod ship;
+mod tail;
 mod target;
 #[cfg(test)]
 mod tests;
@@ -36,9 +38,14 @@ use target::Selection;
         antelope-log-repair scan --log LOG\n  \
         antelope-log-repair prepare --log LOG --damaged-block N --ship ws://HOST:PORT --out DIR\n  \
         antelope-log-repair apply --bundle DIR/bundle --approve PLAN_SHA256 --node-stopped\n\n\
-        Silent corruption (bytes that read back wrong, e.g. on ext4/xfs) is not repairable, \
-        but `verify` finds it:\n  \
-        antelope-log-repair verify --log LOG [--block-range A-B] [--against OTHER/blocks.log]"
+        In-place apply refuses silent corruption (bytes that read back wrong, e.g. on \
+        ext4/xfs). `verify` finds it:\n  \
+        antelope-log-repair verify --log LOG [--block-range A-B] [--against OTHER/blocks.log]\n\n\
+        Crash-damaged tails and missing/torn indexes have a separate copy-out workflow:\n  \
+        antelope-log-repair recover-tail --log LOG\n  \
+        antelope-log-repair recover-tail --log LOG --blocks-log DONOR/blocks.log \
+        --through-block N --out DIR --node-stopped\n\n\
+        recover-tail shows restoration and explicit salvage options and stages new files only."
 )]
 struct Cli {
     /// Print one JSON document on stdout instead of a human summary.
@@ -227,6 +234,29 @@ impl ReplayArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect crash-damaged tails and inconsistent indexes. Shows restoration and salvage
+    /// options. With --out, stages a verified NEW log/index pair; never changes originals.
+    RecoverTail {
+        #[arg(long)]
+        log: PathBuf,
+        /// Optional index evidence (default: alongside). A missing/torn index is allowed.
+        #[arg(long)]
+        index: Option<PathBuf>,
+        #[command(flatten)]
+        sources: SourceArgs,
+        /// Intended final block. Required for restoration: the file cannot prove missing history.
+        #[arg(long)]
+        through_block: Option<u32>,
+        /// Restoration is preferred. Salvage must be selected explicitly; no automatic fallback.
+        #[arg(long, value_enum, default_value = "restore")]
+        mode: tail::Mode,
+        /// NEW staging directory. Omit to inspect only. Activation remains manual.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Confirm the target node and every writer are stopped before staging recovered files.
+        #[arg(long)]
+        node_stopped: bool,
+    },
     /// Find unreadable records and report whether and how they can be repaired. Read-only.
     #[command(visible_alias = "inspect")]
     Scan {
@@ -381,6 +411,23 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<Out> {
     match cli.command {
+        Command::RecoverTail {
+            log,
+            index,
+            sources,
+            through_block,
+            mode,
+            out,
+            node_stopped,
+        } => tail::run(tail::Options {
+            log: &log,
+            index: index.as_deref(),
+            sources: &sources.resolve()?,
+            through: through_block,
+            mode,
+            out: out.as_deref(),
+            node_stopped,
+        }),
         Command::Scan { target } => {
             let (log, located) = target.locate()?;
             repair::scan_report(&log, &located)

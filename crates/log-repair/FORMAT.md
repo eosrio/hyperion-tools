@@ -45,8 +45,9 @@ completion, the Adler checksum, and full consumption of the compressed input, wi
 256 MiB decompression ceiling. No state-history ABI semantics are guessed from a
 damaged payload.
 
-The intact `.index` is the only authority for where entries start. Every entry read
-checks its trailer against its index position. A `blocks.log` entry ends at the next
+In the indexed media-repair workflow, the intact `.index` is the authority for
+where entries start. Every entry read checks its trailer against its index
+position. A `blocks.log` entry ends at the next
 index position. A SHIP entry ends where its own `payload_size` says, which can be
 earlier.
 
@@ -67,6 +68,27 @@ and 44 in 500,000 EOS blocks.
   where the orphans begin.
 
 ## Damage geometry
+
+The contracts below describe in-place media repair. `recover-tail` has a separate
+copy-out contract: its FC walker sizes a whole `signed_block` before accepting the
+following position trailer, and its SHIP walker checks the declared size, payload
+stream and trailer. The target index is optional evidence, never the authority for
+entry boundaries. Unknown preambles and pruning are refused.
+
+Recovery selects a contiguous prefix. SHIP output requires external canonical block
+IDs and checks their predecessor chain; intact noncanonical physical entries are
+omitted. It does not select a fork by block number alone. Repeated/gapped canonical
+entries stop the prefix. Restoration rebuilds the suffix through the operator's
+declared final block using trusted sources, or explicit salvage retains the prefix.
+Every emitted entry gets a freshly calculated position trailer and index slot.
+
+`recovery.json` (format version 1) records both options, the selected mode, original
+log/index identity stamps and hashes, source paths/stamps, reference evidence and
+restored-tail hashes, declared recovery range, and omitted/unclassified bytes.
+`complete.json` repeats that report, binds it by `recovery_sha256`, and records the
+read-back log/index hashes and output range. It is created last in a new staging
+directory. This is not an `apply` bundle or an activation journal. Original files
+are never mutated; absent/invalid completion evidence means output is incomplete.
 
 - A **record** is the unit of failure and of writing. Its size is a power of two,
   512 B to 16 MiB: `--record-size`, or the file's `st_blksize` by default.
@@ -250,7 +272,7 @@ the file already exists, apply refuses. Each unreadable extent then gets one
 positional write and an fsync; a short or failed write stops apply without retrying.
 After read-back and anchored verification, `receipt.json` lists the written extents.
 
-There is deliberately no salvage-by-skipping, force overwrite, missing-index
+In-place `apply` has no salvage-by-skipping, force overwrite, missing-index
 recovery, pruning support, head truncation, or automatic fallback to a guessed
-encoding. Changing a log's layout would require a separate whole-log recovery
-workflow, with its own review and disk-space requirements.
+encoding. Use the separate `recover-tail` workflow for copy-out prefix recovery
+and index rebuilding, with its own validation and disk-space requirements.

@@ -69,6 +69,16 @@ pub struct Disk {
 }
 
 impl Disk {
+    /// Keep reading the same open file, even if its pathname is replaced.
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            path: self.path.clone(),
+            #[cfg(test)]
+            fault: self.fault.clone(),
+        })
+    }
+
     pub fn open(path: &Path, writable: bool) -> Result<Self> {
         let path = path
             .canonicalize()
