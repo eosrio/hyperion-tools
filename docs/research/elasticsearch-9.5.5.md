@@ -77,12 +77,42 @@ hot threads and exact source/image/executable hashes are retained with checksums
 
 Two draft runs failed shard allocation because of the local Docker filesystem's disk
 watermark; their reports and the isolated fixture adjustment are preserved. Both runtimes
-also returned bulk `took` values exceeding client wall time in some samples; those remain
-unresolved timing warnings, not corrected measurements. These observations do not establish
+also returned bulk `took` values exceeding client wall time in some samples; those were
+initially unresolved timing warnings. The clock-control follow-up below explains the
+reproduced pattern while preserving the raw measurements. These observations do not establish
 a runtime speed ranking, a server regression or full Hyperion compatibility. Neither entire
 chain E2E indexing nor the existing Tools bulk benchmark was run by this client probe.
 Timeout/late-shard failures, replicas/pressure, full mappings and retained-index upgrades
 remain open in [#198](https://github.com/eosrio/hyperion-history-api/issues/198).
+
+### Bulk clock-control follow-up: 2026-10-18
+
+The [controlled report and checksummed evidence](https://github.com/eosrio/hyperion-history-api/blob/a6398097cd861393b89d5fffb1ac383339ce3bf2/docs/performance/elasticsearch-9.5.5-clock.md)
+resolve the timing-source investigation for the reproduced short-bulk pattern. Six raw
+HTTP probes each issued 100 one-document bulks against one dedicated digest-pinned ES
+9.5.5 fixture. Windows Node 24.19.0 and Java 27 colocated inside the Linux ES container
+reproduced overshoots with the default interval (3/100 and 4/100), none with an explicit
+zero interval, and overshoots again after restoring 200 ms (9/100 and 8/100). All 600
+items succeeded, each exact probe index was removed, and the owned container/volume were
+removed after identity/label checks. The Elasticsearch JavaScript client was not used.
+
+The actual server build's [bulk timer injection](https://github.com/elastic/elasticsearch/blob/48acba663b09e70b115dd879329141506c377890/server/src/main/java/org/elasticsearch/action/bulk/TransportBulkAction.java#L143)
+uses a clock that [defaults to a 200 ms cached update interval](https://github.com/elastic/elasticsearch/blob/48acba663b09e70b115dd879329141506c377890/server/src/main/java/org/elasticsearch/threadpool/ThreadPool.java#L247-L252).
+[Zero bypasses that cache](https://github.com/elastic/elasticsearch/blob/48acba663b09e70b115dd879329141506c377890/server/src/main/java/org/elasticsearch/threadpool/ThreadPool.java#L789-L794).
+A short request spanning an update can therefore report about 200 ms even when its full
+HTTP round trip is shorter; requests between updates can report zero. Scheduling can
+delay ticks, so 200 ms is not a guaranteed error bound. Raw values/warnings remain intact.
+Use client wall time for request latency and correlate server counters/profiles; do not
+subtract short-bulk `took` to estimate precise network overhead. The setting is startup-only;
+it was changed only by recreating this disposable fixture. This is not a production tuning
+recommendation, evidence of an ES regression or a runtime speed ranking.
+
+The configured ingest-node defect is separately fixed in
+[API #201](https://github.com/eosrio/hyperion-history-api/pull/201): six controlled routing
+regressions, whole-project typecheck/build, 134 unit tests and exact-head Node 22/24 CI
+passed at `95bae91d69d2a00151ba0cdfb00063b9ba8f7855`. That PR remains pending merge at
+this checkpoint. Real TLS handshakes and sustained multi-node load still require their
+own qualification. The clock diagnostic does not close the broader #198 acceptance.
 
 ## Relevant changes and qualification cases
 
