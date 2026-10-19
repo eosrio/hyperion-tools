@@ -19,6 +19,8 @@ The [architecture definition](docs/architecture/hyperion-4.5.md) records the acc
 Use the [roadmap](docs/roadmap/hyperion-4.5.md) for repository ownership, milestones and the linked
 issue frontier. Track cross-repository delivery in [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24).
 These documents distinguish accepted scope from implementation and qualification.
+The [TypeScript toolchain policy](docs/architecture/hyperion-4.5-typescript-toolchain.md) defines the
+TypeScript 7 and Bun checker baseline for the History API, SDK, and TypeScript extensions.
 
 ## Crates
 
