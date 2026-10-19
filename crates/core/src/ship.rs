@@ -82,9 +82,10 @@ async fn scan_range(
     };
     provider.validate()?;
     let abi: Value = serde_json::from_str(&abi_text).context("invalid SHiP handshake JSON")?;
-    let abieos = Abieos::new();
     let wire = matches!(provider, ProtocolProvider::Wire(_));
-    if !wire {
+    let abieos = if wire {
+        None
+    } else {
         // An advertised Wire ABI cannot make the account-first Antelope parser safe.
         ensure!(
             !abi["version"]
@@ -92,10 +93,12 @@ async fn scan_range(
                 .is_some_and(|v| v.starts_with("sysio::")),
             "unsupported_feature: Wire handshake requires an explicit Wire --protocol"
         );
-        abieos
+        let engine = Abieos::new();
+        engine
             .set_abi_json("0", &abi_text)
             .map_err(|e| anyhow!("[c{id}] set ship abi: {e:?}"))?;
-    }
+        Some(engine)
+    };
     let request = if wire {
         provider.encode_value(&abi,"request",&json!(["get_blocks_request_v0",{
         "start_block_num":start,"end_block_num":end.checked_add(1).context("end block overflow")?,
@@ -146,6 +149,9 @@ async fn scan_range(
                 continue;
             };
             let block = u32::try_from(block)?;
+            let block_id = bundle["envelope"][1]["this_block"]["block_id"]
+                .as_str()
+                .context("missing Wire block id")?;
             ensure!(
                 block
                     == start
@@ -156,8 +162,10 @@ async fn scan_range(
             if let Some(rows) = bundle["deltaRows"].as_array() {
                 for row in rows
                     .iter()
-                    .filter(|r| r["stream"] == "account" && r["present"] == 1)
+                    .enumerate()
+                    .filter(|(_, r)| r["stream"] == "account" && r["present"] == 1)
                 {
+                    let (ordinal, row) = row;
                     ensure!(
                         row["value"][0] == "account_v0",
                         "unsupported_feature: unknown account row layout"
@@ -170,19 +178,27 @@ async fn scan_range(
                         continue;
                     }
                     let name = account["name"].as_str().context("missing contract name")?;
-                    docs.push(build_protocol_abi_doc(&provider, name, block, abi_hex));
+                    docs.push(build_protocol_abi_doc(
+                        &provider,
+                        name,
+                        block,
+                        block_id,
+                        u32::try_from(ordinal)?,
+                        abi_hex,
+                    ));
                 }
             }
             block
         } else {
+            let abieos = abieos.as_ref().context("missing Antelope codec")?;
             let Some((block_num, deltas)) = parse_result(&bin) else {
                 tx.send(Message::Binary(ack.clone().into())).await?;
                 continue;
             };
             if !deltas.is_empty() {
                 let r = for_each_account_row(deltas, |row| {
-                    if let Some((name, abi_hex)) = account_setabi(&abieos, row)? {
-                        docs.push(build_abi_doc(&abieos, &name, block_num, &abi_hex));
+                    if let Some((name, abi_hex)) = account_setabi(abieos, row)? {
+                        docs.push(build_abi_doc(abieos, &name, block_num, &abi_hex));
                         eprintln!("[c{id}] setabi: {name} @ {block_num}");
                     }
                     Ok(())
@@ -327,6 +343,8 @@ fn build_protocol_abi_doc(
     provider: &ProtocolProvider,
     account: &str,
     block: u32,
+    block_id: &str,
+    ordinal: u32,
     abi_hex: &str,
 ) -> String {
     let decoded = hex::decode(abi_hex)
@@ -335,9 +353,13 @@ fn build_protocol_abi_doc(
     match decoded {
         Ok(abi) => {
             let names = |key:&str| abi[key].as_array().into_iter().flatten().filter_map(|v|v["name"].as_str()).map(str::to_owned).collect::<Vec<_>>();
-            json!({"account":account,"block":block,"abi":abi.to_string(),"abi_hex":abi_hex,"actions":names("actions"),"tables":names("tables"),"protocol":provider.id()}).to_string()
+            json!({"account":account,"block":block,"block_id":block_id,"ordinal":ordinal,
+                "protocol_profile":provider.id(),"abi_scope":"block-final-state",
+                "abi":abi.to_string(),"abi_hex":abi_hex,"actions":names("actions"),"tables":names("tables")}).to_string()
         }
-        Err(error) => json!({"account":account,"block":block,"abi":"","abi_hex":abi_hex,"actions":[],"tables":[],"protocol":provider.id(),"abi_decode_error":format!("{error:#}")}).to_string()
+        Err(error) => json!({"account":account,"block":block,"block_id":block_id,"ordinal":ordinal,
+            "protocol_profile":provider.id(),"abi_scope":"block-final-state",
+            "abi":"","abi_hex":abi_hex,"actions":[],"tables":[],"abi_decode_error":format!("{error:#}")}).to_string()
     }
 }
 

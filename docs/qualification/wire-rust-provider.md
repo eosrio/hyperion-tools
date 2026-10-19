@@ -35,6 +35,15 @@ timestamp profile; altered programmatic fields fail validation. Block and chain-
 formatters share that implementation with the selected nested Wire value codec parameters.
 The default Antelope 2000 epoch and existing output bodies remain unchanged.
 
+Wire ABI scanner documents retain `block_id`, `protocol_profile` and the original flattened
+delta-row `ordinal` (enumeration precedes stream filtering), alongside raw `abi_hex`. Their
+`abi_scope:"block-final-state"` distinguishes account-delta snapshots from an intra-block action
+ABI epoch. The row ordinal is source provenance; the host's `protocolDeployment` uses
+`from:{blockNum:reference.block,ordinal:0}` for that block's final KV snapshot, verifies the
+same-height `block_id` and profile, and derives a deployment identity from block/account/ABI hash.
+Do not reinterpret the source row index as the action at which `setabi` executed. Antelope scanner
+document fields are unchanged.
+
 ## Affected entrypoints and current support
 
 | Entry point | What this integration proves | Remaining mandatory work |
