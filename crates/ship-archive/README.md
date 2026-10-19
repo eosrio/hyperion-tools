@@ -22,6 +22,11 @@ tests against a model of a Spring node (see [Validation](#validation)). Qualify 
 own logs before relying on it. [CONTRACT.md](CONTRACT.md) states exactly what a client can
 rely on.
 
+For a frozen archive and live-node deployment, use the
+[fleet-router deployment guide](https://eosrio.github.io/fleet-router/frozen-ship.html) and
+the [archive preparation companion](FLEET_ROUTER.md). Fleet-router v0.7+ presents the frozen
+ranges and live tier through one stitched SHiP listener, with automatic range handoffs.
+
 **Contents:**
 [Install](#install) ·
 [Quick start](#quick-start) ·

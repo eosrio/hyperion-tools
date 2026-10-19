@@ -36,6 +36,10 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 | [**action-proto**](crates/action-proto) | experimental | Direct-from-disk action reader: decodes `action_traces` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Next-gen indexer read path. |
 | [**delta-proto**](crates/delta-proto) | experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas into Hyperion-shaped delta NDJSON. |
 
+Deploy frozen SHiP archives beside live nodes with the
+[fleet-router v0.7+ topology guide](https://eosrio.github.io/fleet-router/frozen-ship.html) and
+[archive preparation instructions](crates/ship-archive/FLEET_ROUTER.md).
+
 ### Log recovery
 
 | crate | status | what it does |
