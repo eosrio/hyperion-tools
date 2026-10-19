@@ -693,7 +693,8 @@ or refusal.
 See [VALIDATION.md](VALIDATION.md) for exactly what is and is not covered: Rust unit
 and fault-injection tests, a real-nodeos smoke test, and a real-kernel `EIO` test.
 [FORMAT.md](FORMAT.md) documents the on-disk formats, plan and source files, and
-upstream references.
+upstream references. [PERFORMANCE.md](PERFORMANCE.md) records real-log tail-inspection
+measurements and their cache and hardware limits.
 
 ## Development
 
@@ -707,6 +708,10 @@ python3 crates/log-repair/tests/nodeos_smoke.py --tool ./target/release/antelope
 # Optional: torn copies of that development chain, then real-nodeos replay of recovered files
 python3 crates/log-repair/tests/tail_smoke.py --tool ./target/release/antelope-log-repair \
   --source-smoke /tmp/repair-smoke --nodeos /usr/bin/nodeos --out /tmp/repair-tail-smoke
+# Optional, Linux: time read-only inspection of a stable retained log or frozen copy
+python3 crates/log-repair/tests/tail_bench.py --tool ./target/release/antelope-log-repair \
+  --log /scratch/frozen/blocks.log --out /tmp/tail-benchmark \
+  --cache-note "ordinary page cache; no global cache eviction"
 # Optional, Linux, root: real kernel EIO through ext4 and device-mapper
 sudo python3 crates/log-repair/tests/eio_smoke.py --tool ./target/release/antelope-log-repair \
   --blocks-log /tmp/repair-smoke/source/blocks/blocks.log --out /root/repair-eio
