@@ -88,7 +88,8 @@ restored-tail hashes, declared recovery range, and omitted/unclassified bytes.
 `complete.json` repeats that report, binds it by `recovery_sha256`, and records the
 read-back log/index hashes and output range. It is created last in a new staging
 directory. This is not an `apply` bundle or an activation journal. Original files
-are never mutated; absent/invalid completion evidence means output is incomplete.
+are never mutated by `recover-tail`; absent/invalid completion evidence means output
+is incomplete.
 
 - A **record** is the unit of failure and of writing. Its size is a power of two,
   512 B to 16 MiB: `--record-size`, or the file's `st_blksize` by default.
@@ -276,3 +277,47 @@ In-place `apply` has no salvage-by-skipping, force overwrite, missing-index
 recovery, pruning support, head truncation, or automatic fallback to a guessed
 encoding. Use the separate `recover-tail` workflow for copy-out prefix recovery
 and index rebuilding, with its own validation and disk-space requirements.
+
+## Journaled suffix-only trim
+
+`trim-tail` is a separate Linux-only operation on non-pruned block-log v3. It reuses
+`recover-tail` framing and hash inspection, requires a complete anchor and a
+matching retained index prefix, and saves 1 byte through 256 MiB of combined
+excluded log/index bytes. No retained bytes are written and no index slots are
+rebuilt. Read errors, missing/incorrect retained slots and unsupported framing are
+refused; copy-out recovery remains available.
+
+The new private journal directory contains immutable `log.tail`, `index.tail`,
+`intent.json`, and `intent.sha256`, plus a locked `lock` file. Intent schema 1 names
+operation `trim_tail` and binds target paths/identities, original and retained
+lengths, first/last block, indexed head hint, rejection reason, and full, prefix,
+and suffix hashes for both targets. The checksum is SHA-256 of the exact intent
+bytes, stored as 64 lowercase hexadecimal bytes without a newline. Each artifact
+is written to a new temporary file, fsynced, published by a non-overwriting hard
+link, and followed by directory fsync. `intent.sha256` is published last; targets
+are not modified before all artifacts are committed and verified. Leftover
+`.pending` files are not authoritative and are retained on failure.
+
+Both targets have exclusive advisory locks. Linux `/proc` opener checks require
+root for full visibility; stopping all readers/writers remains an operator
+requirement. Transient target guards include ctime as well as size/mtime and file
+identity. Pinned artifacts are re-read and fingerprinted before mutations and
+completion publication. The journal is trusted operator input: its checksums do
+not protect against an owner rewriting all of its contents consistently.
+
+The durable order is log truncate/fsync, index truncate/fsync, full parser/hash
+read-back, then `receipt.json`. Receipts bind the intent checksum and action.
+`resume-tail-trim` verifies both prefix hashes and any suffix bytes still present;
+each file may be at its original or retained length. File identity must match the
+intent. A valid receipt enables a verified no-op only if both final lengths match.
+There is no atomic transaction spanning the pair: nodeos must stay stopped while
+an incomplete journal exists.
+
+`--rollback` first commits `rollback-intent.json`, appends/fsyncs missing saved index
+bytes, then missing saved log bytes, verifies the exact original hashes and sizes,
+and publishes `rollback-receipt.json`. The rollback marker prevents a later trim
+resume. Partial rollback appends are accepted only when they exactly match the
+corresponding saved suffix prefix. Rollback restores the damaged originals, not
+missing history. Receipt publication and all subsequent invocations refuse target
+or journal changes. Read-back and flush calls are software guarantees; actual
+power-loss durability still depends on the filesystem and storage hardware.

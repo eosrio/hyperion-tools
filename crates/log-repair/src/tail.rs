@@ -15,6 +15,8 @@ use crate::io::{self, Disk, MAX_BYTES, Stamp};
 use crate::repair::{Loaded, Sources};
 use crate::report::Out;
 
+pub mod trim;
+
 #[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -92,6 +94,19 @@ fn hash_range(disk: &Disk, mut from: u64, to: u64, hash: &mut Sha256) -> Result<
     Ok(())
 }
 
+fn hash_suffix(disk: &Disk, mut at: u64, end: u64, all: &mut Sha256) -> Result<String> {
+    let mut tail = Sha256::new();
+    while at < end {
+        let count = (end - at).min(16 << 20);
+        let bytes = disk.read(at, count)?;
+        all.update(&bytes);
+        tail.update(&bytes);
+        at += count;
+    }
+    Ok(hex::encode(tail.finalize()))
+}
+
+#[cfg(test)]
 fn disk_hash(disk: &Disk) -> Result<String> {
     let mut hash = Sha256::new();
     hash_range(disk, 0, disk.stamp()?.size, &mut hash)?;
@@ -255,6 +270,8 @@ struct Summary {
     last_block: Option<u32>,
     entries: u64,
     physical_prefix_end: u64,
+    physical_prefix_sha256: String,
+    excluded_suffix_sha256: String,
     excluded_suffix_bytes: u64,
     omitted_fork_entries: u64,
     reference_checked_entries: u64,
@@ -265,6 +282,8 @@ struct Summary {
     index_partial_bytes: u64,
     index_discrepancies: u64,
     index_sha256: Option<String>,
+    index_prefix_sha256: Option<String>,
+    index_suffix_sha256: Option<String>,
     indexed_head_hint: Option<u32>,
     failure: Option<Failure>,
 }
@@ -278,11 +297,16 @@ fn walk(
     kind: Kind,
     begin: &Start,
     refs: Option<&Loaded>,
+    phase: &str,
     mut accept: impl FnMut(&Entry) -> Result<()>,
 ) -> Result<Summary> {
     let actual = start(disk, kind)?;
     ensure!(actual == *begin, "input preamble changed during recovery");
     let size = disk.stamp()?.size;
+    eprintln!(
+        "recover-tail [{phase}]: checking {}",
+        crate::report::bytes(size)
+    );
     let index_bytes = index
         .map(|i| i.stamp().map(|s| s.size))
         .transpose()?
@@ -390,7 +414,7 @@ fn walk(
         previous = Some(e.id);
         if at >= progress {
             eprintln!(
-                "recover-tail: checked {} of {}",
+                "recover-tail [{phase}]: checked {} of {}",
                 crate::report::bytes(at),
                 crate::report::bytes(size)
             );
@@ -398,7 +422,19 @@ fn walk(
         }
     }
     // Include unclassified bytes in the input fingerprint; they remain in the original.
-    hash_range(disk, at, size, &mut hash)?;
+    let physical_prefix_sha256 = hex::encode(hash.clone().finalize());
+    let excluded_suffix_sha256 = hash_suffix(disk, at, size, &mut hash)?;
+    let index_hashes = index
+        .map(|disk| -> Result<_> {
+            let mut hash = Sha256::new();
+            let cut = (entries * 8).min(index_bytes);
+            hash_range(disk, 0, cut, &mut hash)?;
+            let prefix = hex::encode(hash.clone().finalize());
+            let suffix = hash_suffix(disk, cut, index_bytes, &mut hash)?;
+            Ok((hex::encode(hash.finalize()), prefix, suffix))
+        })
+        .transpose()?;
+    eprintln!("recover-tail [{phase}]: finished {} entries", entries);
     let slots = index_bytes.div_ceil(8);
     discrepancies += slots.saturating_sub(entries);
     let indexed_head_hint = if slots == 0 {
@@ -414,6 +450,8 @@ fn walk(
         last_block: (entries > 0).then_some(next - 1),
         entries,
         physical_prefix_end: at,
+        physical_prefix_sha256,
+        excluded_suffix_sha256,
         excluded_suffix_bytes: size - at,
         omitted_fork_entries: orphans,
         reference_checked_entries: compared,
@@ -423,7 +461,9 @@ fn walk(
         index_bytes,
         index_partial_bytes: index_bytes % 8,
         index_discrepancies: discrepancies,
-        index_sha256: index.map(disk_hash).transpose()?,
+        index_sha256: index_hashes.as_ref().map(|h| h.0.clone()),
+        index_prefix_sha256: index_hashes.as_ref().map(|h| h.1.clone()),
+        index_suffix_sha256: index_hashes.map(|h| h.2),
         indexed_head_hint,
         failure,
     })
@@ -688,6 +728,11 @@ pub fn run(options: Options<'_>) -> Result<Out> {
         kind,
         &begin,
         refs.as_ref(),
+        if out.is_some() {
+            "inspect original (1/3)"
+        } else {
+            "inspect original (1/1)"
+        },
         |e| {
             check_prefix_donors(e, kind, &donors)?;
             left_anchor = Some(e.id);
@@ -835,6 +880,7 @@ pub fn run(options: Options<'_>) -> Result<Out> {
         kind,
         &begin,
         refs.as_ref(),
+        "write recovered pair (2/3)",
         |e| {
             check_prefix_donors(e, kind, &donors)?;
             output.append(e.body())
@@ -858,6 +904,7 @@ pub fn run(options: Options<'_>) -> Result<Out> {
         kind,
         &start(&result_log, kind)?,
         refs.as_ref(),
+        "verify recovered pair (3/3)",
         |e| check_prefix_donors(e, kind, &donors),
     )?;
     ensure!(
@@ -894,15 +941,15 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    struct Fixture {
-        dir: TempDir,
-        log: std::path::PathBuf,
-        offsets: Vec<u64>,
-        bytes: Vec<u8>,
+    pub(super) struct Fixture {
+        pub(super) dir: TempDir,
+        pub(super) log: std::path::PathBuf,
+        pub(super) offsets: Vec<u64>,
+        pub(super) bytes: Vec<u8>,
     }
 
     impl Fixture {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let log = dir.path().join("blocks.log");
             let mut bytes = 3u32.to_le_bytes().to_vec();
@@ -1069,7 +1116,7 @@ mod tests {
         let pin = Pin::new(&f.log, false).unwrap();
         let disk = pin.disk.as_ref().unwrap();
         let begin = start(disk, Kind::Blocks).unwrap();
-        let before = walk(disk, None, Kind::Blocks, &begin, None, |_| Ok(())).unwrap();
+        let before = walk(disk, None, Kind::Blocks, &begin, None, "test", |_| Ok(())).unwrap();
         assert_eq!(before.input_sha256, disk_hash(disk).unwrap());
         let modified = disk.file.metadata().unwrap().modified().unwrap();
         let mut changed = f.bytes.clone();
@@ -1082,7 +1129,7 @@ mod tests {
             .set_modified(modified)
             .unwrap();
         pin.check().unwrap();
-        assert!(walk(disk, None, Kind::Blocks, &begin, None, |_| Ok(())).is_err());
+        assert!(walk(disk, None, Kind::Blocks, &begin, None, "test", |_| Ok(())).is_err());
     }
 
     #[test]

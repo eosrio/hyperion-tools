@@ -13,7 +13,9 @@ reviewed plan.
 For a power loss during an append, a truncated final entry, or a missing/torn index,
 use [Recover a crash-damaged tail](#recover-a-crash-damaged-tail). This separate
 workflow shows restoration and salvage choices and stages a **new log/index pair**.
-It preserves the damaged originals.
+It preserves the damaged originals. Linux also has an explicit
+[suffix-only in-place trim](#trim-a-small-tail-in-place-linux) with saved bytes,
+a recovery journal, resume, and rollback.
 
 Part of the [Hyperion Tools](../../README.md) Cargo workspace, MIT licensed
 ([LICENSE](../../LICENSE)). Status: **experimental**. Qualify it on copies of your own
@@ -30,6 +32,7 @@ logs before relying on it in production (see [Validation](#validation)).
 [5. After the repair](#5-after-the-repair) ·
 [Multiple damaged records](#multiple-damaged-records) ·
 [Recover a crash-damaged tail](#recover-a-crash-damaged-tail) ·
+[Trim a small tail in place](#trim-a-small-tail-in-place-linux) ·
 [Check for silent corruption](#check-for-silent-corruption) ·
 [Troubleshooting](#troubleshooting) ·
 [Command reference](#command-reference) ·
@@ -109,21 +112,22 @@ illustrative numbers. Every command also accepts `--json` for automation.
 
 The in-place media workflow repairs bytes the operating system **refuses to read**:
 reads that fail with `EIO` or `ENODATA`. Only those errors authorize a write into the
-original log. The separate `recover-tail` workflow writes new files.
+original log through `apply`. The separate `recover-tail` workflow writes new files;
+`trim-tail` explicitly shortens a readable block-log pair after saving both suffixes.
 
 | Situation | Supported? |
 |---|---|
 | ZFS permanent data error (checksum/IO) on a log file | Yes: the design target. Healed real on-disk damage (see [Validation](#validation)) |
 | btrfs checksum error on a log file | Yes, with 4 KiB records. Healed real checksum damage; see [After the repair](#5-after-the-repair) for scrub |
 | ext4/xfs on a disk with unreadable sectors | Yes, with 4 KiB records, the filesystem default. Healed real sector errors on dm-integrity (see [Validation](#validation)) |
-| Silent corruption: the bytes read back, but wrong | In-place writes are refused. [`verify`](#check-for-silent-corruption) detects it; `recover-tail` can rebuild a suffix into new files from trusted sources |
-| Damage in the first entry, the head (last) entry, or the file header | In-place repair requires neighbors on both sides. `recover-tail` handles a readable damaged suffix after a complete anchor; invalid preambles/first entries are refused |
+| Silent corruption: the bytes read back, but wrong | Media writes are refused. [`verify`](#check-for-silent-corruption) detects it; `recover-tail` can rebuild a suffix into new files from trusted sources |
+| Damage in the first entry, the head (last) entry, or the file header | Media repair requires neighbors on both sides. `recover-tail` handles a readable damaged suffix after a complete anchor; invalid preambles/first entries are refused |
 | Readable damaged or missing `.index` | `recover-tail` reconstructs an index in new files from checked entries; the media workflow still requires an intact index |
 | SHIP damage inside orphaned fork entries (abandoned entries nodeos leaves after a fork) | No: no other node, endpoint, or replay holds those bytes. Damage next to them is repaired, and they are kept as they are (see [FORMAT.md](FORMAT.md#target-logs)) |
 | Pruned block logs, SHIP logs with feature flags | No: refused as unsupported formats |
 | SHIP logs written by EOSIO 2.1 or 2.2 (state-history log version 1) | No: their trace entries split out prunable transaction data that SHIP does not serve. Refused by name |
 | State history from nodeos 1.5 to 1.7 (no `ship` magic) | No: an older header format. Refused by name |
-| A truncated log, or readable damage at the end of the file | [`recover-tail`](#recover-a-crash-damaged-tail) stages restored or explicitly salvaged files; originals are preserved |
+| A truncated log, or readable damage at the end of the file | [`recover-tail`](#recover-a-crash-damaged-tail) stages restored or explicitly salvaged files; Linux `trim-tail` can instead save and remove a small suffix in place |
 
 It runs on Linux and other Unix systems. On Windows, read-only inspection, source
 staging, bundle building, and copy-out tail recovery work; in-place writes are disabled.
@@ -577,14 +581,78 @@ least one complete anchor entry, and bounds a single entry and the restored suff
 to 256 MiB, with at most 10,000 restored entries and one million elements per FC
 vector. The prefix is streamed, with bounded read-ahead. It reads the whole log and
 index during inspection, repeats validation while staging, and reads the output
-back. Allow space for the new pair. It checks complete outer `signed_block` framing,
+back. Progress names the three phases: inspect original (1/3), write recovered
+pair (2/3), and verify recovered pair (3/3). Each phase starts its own byte counter.
+Allow space for the new pair. It checks complete outer `signed_block` framing,
 header links and SHIP checksums; it does not authenticate transaction bodies,
 signatures, action roots, or SHIP payload semantics. Use trusted independent sources.
 
-Direct endpoint acquisition and snapshot replay against a broken target, in-place
-tail activation, recovery without any anchor, and salvage past an interior gap are
-not implemented. Local donor files produced by a controlled replay can be supplied.
+Direct endpoint acquisition and snapshot replay against a broken target, automatic
+activation of staged pairs, recovery without any anchor, and salvage past an interior
+gap are not implemented. Local donor files produced by a controlled replay can be supplied.
 Media read errors remain on the existing `scan`/`prepare`/`apply` path.
+
+## Trim a small tail in place (Linux)
+
+When restoration is unavailable and the operator chooses to keep the complete
+prefix, `trim-tail` avoids copying the whole log. **It modifies the existing log
+and index.** Stop nodeos and every reader/writer first, keep them stopped through
+completion, and run as root so `/proc` can inspect other users' file descriptors:
+
+```sh
+antelope-log-repair trim-tail --log /data/blocks/blocks.log \
+  --journal /scratch/tail-trim-1 --node-stopped
+```
+
+This supports non-pruned block-log v3 with at least one complete anchor block.
+The existing index must contain every retained slot and agree with the checked
+physical entries; extra whole or partial slots may be removed. **It trims an
+already correct index prefix; it does not rebuild a missing or inconsistent index.**
+Use copy-out `recover-tail` for those cases, SHIP logs, media read errors, or more
+than 256 MiB of combined excluded log/index bytes. A clean pair is refused as a
+no-op. `--index PATH` selects a non-default index.
+
+The tool inspects and hashes the complete input pair, saves exactly the bytes it
+will remove, commits the journal, truncates and fsyncs the log, then truncates and
+fsyncs the index. It reads the resulting pair back through the full parser and
+writes `receipt.json` last. The retained prefix is never rewritten. Initial trim
+uses two complete passes, with named progress phases. Read-back can use cache;
+this does not establish that the storage hardware honors flushes on power loss.
+
+The NEW journal directory contains `log.tail`, `index.tail`, `intent.json`,
+`intent.sha256`, and `lock`. The intent binds absolute paths, device/inode identity,
+original and retained lengths, block range, and whole/prefix/suffix SHA-256 hashes.
+Keep the journal private and retain it until node acceptance is established.
+Checksums detect changes; they do not authenticate a journal rewritten by its owner.
+The tool locks both targets and the journal, checks for other openers and path
+replacement, and checks target modification/change times around its work.
+
+If interrupted after the intent checksum is committed, keep both files at their
+recorded paths and resume with nodeos still stopped:
+
+```sh
+antelope-log-repair resume-tail-trim --journal /scratch/tail-trim-1 --node-stopped
+# Restore the exact saved, damaged originals instead:
+antelope-log-repair resume-tail-trim --journal /scratch/tail-trim-1 \
+  --rollback --node-stopped
+```
+
+Resume hashes both retained prefixes and accepts only the original or trimmed
+length of each file. Rollback appends the saved index suffix and then the log
+suffix; an interrupted partial append can resume only when every byte matches the
+saved suffix. Once rollback starts, continue with `--rollback`; restarting trim
+from that journal is refused. Completed operations are verified without rewriting
+the files. Changed prefixes, unexpected lengths, replaced files, invalid journal
+artifacts, or another opener cause refusal. If preparation stops before a complete
+`intent.sha256` exists, no truncation has started; inspect that incomplete journal
+and use a new directory. Do not edit or discard a committed journal to bypass a
+refusal.
+
+Rollback restores the damaged input, including its torn entry and stale index.
+Trimming does not recover missing blocks or SHIP payloads, and the index head is
+only a hint about missing history. Prefer restoration from trusted sources where
+possible. After a successful trim, qualify the pair with the matching node utility,
+then check node startup/replay and history coverage before returning it to service.
 
 ## Check for silent corruption
 
@@ -657,6 +725,8 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 | Command | Purpose | Writes |
 |---|---|---|
 | `recover-tail` | Inspect crash tails/indexes; restore or explicitly salvage to new files | Nothing without `--out`; otherwise a new staging directory |
+| `trim-tail` | Save and remove a small readable block-log/index suffix (Linux) | Existing log/index lengths and a new recovery journal |
+| `resume-tail-trim` | Finish a journaled trim or append saved bytes with `--rollback` | The recorded pair and journal completion markers |
 | `scan` (alias `inspect`) | Find and classify damage | Nothing |
 | `verify` | Find entries that read back but are wrong | Nothing |
 | `prepare` | Locate, acquire (`--ship`, replay options, or local files), and build | A new `--out` directory |

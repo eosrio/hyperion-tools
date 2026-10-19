@@ -45,7 +45,10 @@ use target::Selection;
         antelope-log-repair recover-tail --log LOG\n  \
         antelope-log-repair recover-tail --log LOG --blocks-log DONOR/blocks.log \
         --through-block N --out DIR --node-stopped\n\n\
-        recover-tail shows restoration and explicit salvage options and stages new files only."
+        recover-tail shows restoration and explicit salvage options and stages new files only.\n\n\
+        Linux suffix-only salvage with saved bytes and a recovery journal:\n  \
+        antelope-log-repair trim-tail --log LOG --journal NEW_DIR --node-stopped\n  \
+        antelope-log-repair resume-tail-trim --journal DIR [--rollback] --node-stopped."
 )]
 struct Cli {
     /// Print one JSON document on stdout instead of a human summary.
@@ -234,6 +237,29 @@ impl ReplayArgs {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Linux only: trim a small blocks.log tail and excess index slots in place.
+    /// Saves removed bytes and a durable journal first. Requires a matching index prefix.
+    TrimTail {
+        #[arg(long)]
+        log: PathBuf,
+        #[arg(long)]
+        index: Option<PathBuf>,
+        /// NEW recovery-journal directory; keep it to resume or undo the trim.
+        #[arg(long)]
+        journal: PathBuf,
+        #[arg(long)]
+        node_stopped: bool,
+    },
+    /// Complete an interrupted tail trim, or restore its saved original suffixes.
+    ResumeTailTrim {
+        #[arg(long)]
+        journal: PathBuf,
+        /// Restore the original damaged files instead of completing the trim.
+        #[arg(long)]
+        rollback: bool,
+        #[arg(long)]
+        node_stopped: bool,
+    },
     /// Inspect crash-damaged tails and inconsistent indexes. Shows restoration and salvage
     /// options. With --out, stages a verified NEW log/index pair; never changes originals.
     RecoverTail {
@@ -411,6 +437,17 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<Out> {
     match cli.command {
+        Command::TrimTail {
+            log,
+            index,
+            journal,
+            node_stopped,
+        } => tail::trim::run(&log, index.as_deref(), &journal, node_stopped),
+        Command::ResumeTailTrim {
+            journal,
+            rollback,
+            node_stopped,
+        } => tail::trim::resume(&journal, rollback, node_stopped),
         Command::RecoverTail {
             log,
             index,
