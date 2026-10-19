@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-73 tests on Linux; 61 on Windows, where the scan-with-faults, media-write,
+85 tests on Linux; 61 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -341,3 +341,58 @@ The Linux benchmark recorder captures artifact identity, input stamps, elapsed a
 CPU time, peak RSS, process read counters and the operator's cache description.
 These measurements cover read-only `recover-tail`, not media scanning or copy-out
 restoration.
+
+## In-place tail trim qualification
+
+Linux unit tests cover exact saved suffixes, retained-prefix preservation,
+interruption after journal commit, either truncate/fsync and final read-back;
+resume or rollback from every durable boundary; rollback interruptions and partial
+appends; idempotent completion; wrong/missing/aliased indexes; competing locks;
+missing stop acknowledgement; changed prefixes, paths, intent and saved bytes;
+appends after preparation/read-back; and same-length writes followed by mtime
+restoration to both journal artifacts and targets. The target guards include Linux
+ctime. An intact log with excess whole/partial index slots is also trimmed and
+rolled back exactly.
+
+`tests/libre_trim_smoke.py` is an optional destructive test for the disposable,
+frozen Libre benchmark copy described in PERFORMANCE.md. It requires an explicit
+`--discard-copy-history`, refuses copies outside `/tmp` and aliases/hard links to
+the live source, and verifies the exact reported incident hashes before invoking
+the tool. It tests trim, a manually constructed log-trimmed/index-original resume
+state, and byte-exact rollback; it retains journal and per-stage evidence. This is
+not an actual power-cut or storage-flush fault qualification.
+
+On 2026-10-19, the real Libre benchmark copy was reduced to exactly the incident's
+48,477,356,032 log bytes and 1,853,814,976 index bytes. Independent SHA-256 matched
+the operator's damaged files before testing. The live node stayed running and its
+historical samples and file identities remained unchanged; only the disposable
+copy was modified.
+
+| Operation | Elapsed | User CPU | System CPU |
+|---|---:|---:|---:|
+| Inspect, save suffixes, trim, full parser read-back | 131.75 s | 104.27 s | 27.28 s |
+| Resume simulated log-trimmed/index-original state | 96.25 s | 71.08 s | 25.05 s |
+| Rollback and verify damaged originals | 61.48 s | 37.55 s | 23.83 s |
+
+The retained pair contained blocks 1..231726802, with 327 saved log bytes and 560
+saved index bytes. Both target inodes were preserved. Independent hashes checked
+the trimmed output, the resumed output and the rolled-back originals. Timing
+excludes fixture preparation and the independent Python hash oracles. Normal page
+cache conditions were used, without a global cache flush. This qualifies the
+software recovery sequence on this corpus; node startup/replay and storage power
+loss behavior remain separate acceptance checks.
+
+- Damaged/restored-original log SHA-256:
+  `b5e68e7aaac92ab15863a00dab57a2afdc4ad0367262cd6b35ba8155691c094a`.
+- Damaged/restored-original index SHA-256:
+  `af4a7a66594d5c49039589dc03590d92b3f6fe94b0551291f5f16c99ebd1e9a7`.
+- Trimmed log SHA-256:
+  `04f7f212f2cd5bf3b28ed3ee4c9d2a08131687ebd7512d8ed3989f19b1622b1a`.
+- Trimmed index SHA-256:
+  `257f719c34b6f583991971d2e6d3219addf1d42194f40e7e6dca98c3c2c51e87`.
+- Qualification binary SHA-256:
+  `7b63c983752de9f986ce47fcef58ca234802e701fbe7c54c424e9abad99ea3d8`.
+
+The final operator-help/summary wording was updated afterward; the qualified trim,
+resume and rollback implementation is unchanged. The harness's safety checks also
+reject an aliased fixture under optimized Python (`-O`).
