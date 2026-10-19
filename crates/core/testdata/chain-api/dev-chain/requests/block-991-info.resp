@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 603
+
+{"block_num":991,"ref_block_num":991,"id":"000003df4d01690cdd8e14a0f55efdb46e394cba563cf49088b83ac0a2123570","timestamp":"2026-10-17T13:46:36.500","producer":"eosio","confirmed":0,"previous":"000003de25bbe8b4d6ac63b69878266604e27763c92a4d86daaa28a6b2018626","transaction_mroot":"9e7c329a7ce4033584715f981c114bebc3cafabf895c6e2e8d2c29d94f1674dd","action_mroot":"298c9d18c67cd6b76aa45d3f65dddeb238278e32dda8e66abd9336cf8207e688","schedule_version":1,"producer_signature":"SIG_K1_KfgypFAomssFmjLtafaTsMvKRtrs7nkVDUxUZ6FEpDHD2QrThPndYekTDM9pQmmtDi1PtmWMNVDFFLD7732meK71Zzg5Cn","ref_block_prefix":2685701853}

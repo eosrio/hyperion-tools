@@ -17,7 +17,8 @@ build. The zero-copy deserializer at the core originated in EOS Rio's
 
 The [architecture definition](docs/architecture/hyperion-4.5.md) records the accepted release contracts.
 Use the [roadmap](docs/roadmap/hyperion-4.5.md) for repository ownership, milestones and the linked
-issue frontier. These documents distinguish accepted scope from implementation and qualification.
+issue frontier. Track cross-repository delivery in [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24).
+These documents distinguish accepted scope from implementation and qualification.
 The [TypeScript toolchain policy](docs/architecture/hyperion-4.5-typescript-toolchain.md) defines the
 TypeScript 7 and Bun checker baseline for the History API, SDK, and TypeScript extensions.
 
@@ -31,6 +32,7 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 |---|---|---|
 | [**abi-scanner**](crates/abi-scanner) | stable | Extracts every contract ABI version (`setabi`) across a chain's history into a portable, Elasticsearch-ingestible snapshot — via SHiP or directly off disk. (~168k blk/s on 24 cores.) |
 | [**archive-server**](crates/archive-server) | v4.5 | On-demand tiered-storage archive: serves action `act.data` and `contract_row` delta values from frozen logs over HTTP, so cold-tier ES docs can drop the heavy payloads and hydrate on read. |
+| [**antelope-ship-archive**](crates/ship-archive) | preview | Serves frozen state-history and block logs over the SHiP WebSocket protocol exactly as a Spring node does, without nodeos, so a SHiP-aware router or proxy can stitch archived ranges and live nodes into one history. Strict, read-only, fail-closed readers; bounded memory; `check` and `index` for preparing archives. |
 | [**action-proto**](crates/action-proto) | experimental | Direct-from-disk action reader: decodes `action_traces` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Next-gen indexer read path. |
 | [**delta-proto**](crates/delta-proto) | experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas into Hyperion-shaped delta NDJSON. |
 

@@ -1,0 +1,4 @@
+POST /v1/chain/get_block_info HTTP/1.1
+Host: 127.0.0.1
+Content-Length: 0
+

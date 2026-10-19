@@ -1,0 +1,6 @@
+HTTP/1.1 500 Internal Server Error
+Server: nodeos/v1.2.2
+Content-Type: application/json
+Content-Length: 309
+
+{"code":500,"message":"Internal Service Error","error":{"code":3010008,"name":"block_id_type_exception","what":"Invalid block ID","details":[{"message":"Invalid Block number or ID, must be greater than 0 and less than 65 characters","file":"chain_plugin.cpp","line_number":1990,"method":"get_block_header"}]}}

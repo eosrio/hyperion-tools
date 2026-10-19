@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-18 06:37:38 UTC",
+  "sourceCommit": "b571c5fb2e7c1422aa5bff31c45c1c7ac54caddc",
+  "dependencies": {
+    "uWebSockets.js": "20.67.0",
+    "@eosrio/node-abieos": "4.2.0-f7d5b45"
+  },
+  "scope": "Windows x64 prerequisite smoke only; no full-stack or performance qualification",
+  "records": [
+    {
+      "runtime": "node",
+      "version": "24.19.0",
+      "modules": "137",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "cluster",
+      "ok": true,
+      "child": {
+        "pong": true,
+        "isWorker": true,
+        "runtime": "node"
+      },
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "version": "24.19.0",
+      "modules": "137",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "uws",
+      "ok": true,
+      "exercised": "native HTTP loopback request/listen/close",
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "version": "24.19.0",
+      "modules": "137",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "abieos",
+      "ok": true,
+      "exercised": "native ABI load/encode/decode/cleanup",
+      "hex": "2A000000",
+      "decoded": {
+        "value": 42
+      },
+      "exitCode": 0
+    },
+    {
+      "runtime": "node",
+      "version": "24.19.0",
+      "modules": "137",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "heap",
+      "ok": true,
+      "used": 5141312,
+      "limit": 4496293888,
+      "note": "Runtime-specific heap semantics; not cross-VM capacity equivalence",
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "version": "1.4.3",
+      "modules": "147",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "cluster",
+      "ok": true,
+      "child": {
+        "pong": true,
+        "isWorker": true,
+        "runtime": "bun"
+      },
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "version": "1.4.3",
+      "modules": "147",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "uws",
+      "ok": false,
+      "error": "This version of uWS.js (v20.67.0) supports only Node.js versions 22, 24 and 26 on (glibc) Linux, macOS and Windows, on Tier 1 platforms (https://github.com/nodejs/node/blob/master/BUILDING.md#platform-list).\n\nTypeError: symbol 'napi_register_module_v1' not found in native module. Is this a Node API (napi) module?",
+      "exitCode": 1
+    },
+    {
+      "runtime": "bun",
+      "version": "1.4.3",
+      "modules": "147",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "abieos",
+      "ok": true,
+      "exercised": "native ABI load/encode/decode/cleanup",
+      "hex": "2A000000",
+      "decoded": {
+        "value": 42
+      },
+      "exitCode": 0
+    },
+    {
+      "runtime": "bun",
+      "version": "1.4.3",
+      "modules": "147",
+      "platform": "win32",
+      "arch": "x64",
+      "mode": "heap",
+      "ok": true,
+      "used": 402093,
+      "limit": 747642880,
+      "note": "Runtime-specific heap semantics; not cross-VM capacity equivalence",
+      "exitCode": 0
+    }
+  ]
+}

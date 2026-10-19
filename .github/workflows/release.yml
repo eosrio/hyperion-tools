@@ -1,9 +1,10 @@
 name: Release
 
 # Cut a release on a `v*` tag: build the whole toolkit (abi-scanner, action-proto, delta-proto,
-# archive-server, es-load, antelope-log-repair) for portable Linux targets — musl-static binaries run on ANY Linux
-# regardless of glibc — attach the tarballs (+ sha256) to the GitHub Release, and publish a ghcr
-# image for the archive-server service.
+# archive-server, es-load, antelope-log-repair, antelope-ship-archive) for portable Linux
+# targets — musl-static binaries run on ANY Linux regardless of glibc — attach the tarballs
+# (+ sha256) to the GitHub Release, and publish ghcr images for the archive-server and
+# antelope-ship-archive services.
 on:
   push:
     tags: ["v*"]
@@ -15,7 +16,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  BINS: abi-scanner action-proto delta-proto archive-server es-load antelope-log-repair
+  BINS: abi-scanner action-proto delta-proto archive-server es-load antelope-log-repair antelope-ship-archive
 
 jobs:
   binaries:
@@ -55,6 +56,8 @@ jobs:
           [ -f LICENSE ] && cp LICENSE "dist/$name/" || true
           mkdir -p "dist/$name/docs/log-repair"
           cp crates/log-repair/{README,FORMAT,VALIDATION}.md "dist/$name/docs/log-repair/"
+          mkdir -p "dist/$name/docs/ship-archive"
+          cp crates/ship-archive/{README,CONTRACT}.md "dist/$name/docs/ship-archive/"
           tar -C dist -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       - name: Upload to release
@@ -96,3 +99,37 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  image-ship-archive:
+    name: ghcr image (antelope-ship-archive)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/antelope-ship-archive
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      # Same shape as the archive-server image: amd64 only, from the repository root, with its own
+      # cache scope so the two images do not evict each other's layers.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/ship-archive/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=antelope-ship-archive
+          cache-to: type=gha,mode=max,scope=antelope-ship-archive

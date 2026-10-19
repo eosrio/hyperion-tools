@@ -1,0 +1,45 @@
+[package]
+name = "antelope-ship-archive"
+description = "Serve frozen Antelope state-history and block logs over the SHiP WebSocket protocol exactly as a Spring node does, so that a SHiP-aware router or proxy can stitch archived ranges and live nodes into one history."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# The library holds the whole server, so integration tests run it in-process; the binary is a
+# thin CLI over it. The library name does not repeat the package name.
+[lib]
+name = "ship_archive"
+
+[dependencies]
+# `chain-api` renders the nodeos block endpoints the `--api` listener serves.
+hyperion-ship = { workspace = true, features = ["archive", "chain-api"] }
+anyhow = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }   # --abi files, /health and `check --json`
+# /health, /ready and /metrics (--http): a blocking thread beside the SHiP listener.
+tiny_http = { workspace = true }
+# The chain API listener (--api): HTTP/1.1 with exact request-target dispatch, any method, no
+# `Date`, title-case header names and a header-read timeout, as nodeos's Beast server answers.
+# Crate-local, as light-api's HTTP stack; already in the lock through it.
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+# TCP keepalive timing on accepted connections, which tokio does not expose. Pure Rust (libc and
+# windows-sys); already in the lock through tokio, which enables the same "all" feature.
+socket2 = { version = "0.6", features = ["all"] }
+# Leveled, structured server logs (per-session close lines, per-read warnings, text or JSON),
+# filtered with RUST_LOG. Crate-local, as in light-api, until other crates adopt them.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+hyperion-ship = { workspace = true, features = ["testkit"] }
+tempfile = "3"

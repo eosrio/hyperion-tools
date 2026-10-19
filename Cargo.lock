@@ -126,6 +126,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "antelope-ship-archive"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "hyperion-ship",
+ "serde_json",
+ "socket2",
+ "tempfile",
+ "tiny_http",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1140,11 +1162,14 @@ name = "hyperion-ship"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bs58",
  "flate2",
  "futures",
  "hex",
+ "ripemd",
  "rs_abieos",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tokio-tungstenite",
 ]
@@ -2741,6 +2766,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2750,12 +2785,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

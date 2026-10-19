@@ -1,0 +1,3 @@
+# Raw HTTP requests and answers, byte for byte (CRLF heads, bodies with raw control bytes and
+# invalid UTF-8): never convert line endings.
+* -text
