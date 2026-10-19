@@ -6,7 +6,7 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-54 tests on Linux; 42 on Windows, where the scan-with-faults, media-write,
+72 tests on Linux; 60 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
@@ -89,6 +89,51 @@ A write covering a whole damaged range heals it, as a full-record write does on 
 - **Replay and CLI:** the snapshot-head limit, and a blocklog slice that reopens as a
   valid v3 log with rebased entries and the source chain ID. Value parsers and clap's
   consistency check also run.
+
+## Copy-out tail recovery (2026-10-19)
+
+Tracked in [issue #38](https://github.com/eosrio/hyperion-tools/issues/38).
+The checks above include 18 added framing/recovery tests. They exercise byte-by-byte
+cuts through the final signed block and both SHIP kinds, explicit restoration versus
+salvage, missing/empty/torn/ahead/behind/incorrect indexes, readable corruption and
+zero suffixes, canonical fork selection, conflicting donors, wrong chains and
+anchors, source aliases, changed inputs, existing output refusal, and entries larger
+than the read-ahead window. Review regressions cover source log/index/container
+pathname replacement, preamble tampering with restored metadata, and donor conflicts
+inside the retained prefix. Whole-block framing also checks a real EOS mainnet block,
+WebAuthn producer/signature fields, and packed receipts.
+
+Windows and Linux Clippy (`--all-targets -- -D warnings`), formatting, the full scoped
+Rust suites, and release builds pass. A separate Windows CLI matrix restored all
+30 fixtures (including intact controls) byte for byte through the declared block;
+the damaged fixture inputs remained hash-identical.
+
+`tests/tail_smoke.py` ran against a fresh `tests/nodeos_smoke.py` development chain
+with Spring `v1.2.3-alpha1-9f6e4496db1ebffec088f9206b645ef9571f2889`:
+
+- Both choices were available for block, trace and chain-state logs with a torn last
+  entry and an independently torn index. Restoration reached block 80; explicit
+  salvage ended at block 79.
+- `verify --against` passed for all restored pairs. A separate real nodeos process
+  read copies of all three pairs and replayed through its configured block 80 limit,
+  then exited successfully.
+- Source logs/indexes, damaged copies, and staged recovery outputs remained unchanged.
+  The completion receipts matched the staged log/index hashes.
+- The existing real-nodeos smoke also passed WebSocket acquisition, local donor
+  preparation, verified no-op apply, and snapshot replay for both SHIP kinds.
+
+The final Linux tool SHA-256 for the tail smoke was
+`6f88ba3ca8dfb683fc1c499bc08953c48f20762424aa78e7bd433dbb382bdef1`;
+the nodeos SHA-256 was
+`797315f70c789bd2d8d439f9907f86702d1c8066937c8fd12b696d271ab2b0f3`.
+The run produced `result.json`, per-operation JSON/stderr, completion receipts and
+`restart.log` in `/tmp/hyperion-tail-recovery-review-20261019`.
+
+These are simulated torn files and a disposable development chain, not real
+power-cut/storage-reordering qualification or production acceptance. Output
+activation is manual, so interruption-safe replacement of an active log/index pair
+is not claimed. Direct endpoint/replay acquisition against a broken target,
+anchorless recovery, and salvage beyond an interior gap remain unimplemented.
 
 ## Real-nodeos smoke test
 

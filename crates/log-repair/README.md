@@ -10,6 +10,11 @@ affected entries from independent sources. It proves that they fit the surroundi
 readable data, and it writes back only the unreadable bytes, after you approve a
 reviewed plan.
 
+For a power loss during an append, a truncated final entry, or a missing/torn index,
+use [Recover a crash-damaged tail](#recover-a-crash-damaged-tail). This separate
+workflow shows restoration and salvage choices and stages a **new log/index pair**.
+It preserves the damaged originals.
+
 Part of the [Hyperion Tools](../../README.md) Cargo workspace, MIT licensed
 ([LICENSE](../../LICENSE)). Status: **experimental**. Qualify it on copies of your own
 logs before relying on it in production (see [Validation](#validation)).
@@ -24,6 +29,7 @@ logs before relying on it in production (see [Validation](#validation)).
 [4. Apply](#4-apply) ·
 [5. After the repair](#5-after-the-repair) ·
 [Multiple damaged records](#multiple-damaged-records) ·
+[Recover a crash-damaged tail](#recover-a-crash-damaged-tail) ·
 [Check for silent corruption](#check-for-silent-corruption) ·
 [Troubleshooting](#troubleshooting) ·
 [Command reference](#command-reference) ·
@@ -101,25 +107,26 @@ illustrative numbers. Every command also accepts `--json` for automation.
 
 ## What it can repair
 
-The tool repairs bytes the operating system **refuses to read**: reads that fail with
-`EIO` or `ENODATA`. Only those errors authorize a write.
+The in-place media workflow repairs bytes the operating system **refuses to read**:
+reads that fail with `EIO` or `ENODATA`. Only those errors authorize a write into the
+original log. The separate `recover-tail` workflow writes new files.
 
 | Situation | Supported? |
 |---|---|
 | ZFS permanent data error (checksum/IO) on a log file | Yes: the design target. Healed real on-disk damage (see [Validation](#validation)) |
 | btrfs checksum error on a log file | Yes, with 4 KiB records. Healed real checksum damage; see [After the repair](#5-after-the-repair) for scrub |
 | ext4/xfs on a disk with unreadable sectors | Yes, with 4 KiB records, the filesystem default. Healed real sector errors on dm-integrity (see [Validation](#validation)) |
-| Silent corruption: the bytes read back, but wrong | **No.** It never overwrites readable data. [`verify`](#check-for-silent-corruption) detects it |
-| Damage in the first entry, the head (last) entry, or the file header | No: a readable neighbor entry is needed on both sides |
-| Damaged or missing `.index` | No: the index defines entry boundaries |
+| Silent corruption: the bytes read back, but wrong | In-place writes are refused. [`verify`](#check-for-silent-corruption) detects it; `recover-tail` can rebuild a suffix into new files from trusted sources |
+| Damage in the first entry, the head (last) entry, or the file header | In-place repair requires neighbors on both sides. `recover-tail` handles a readable damaged suffix after a complete anchor; invalid preambles/first entries are refused |
+| Readable damaged or missing `.index` | `recover-tail` reconstructs an index in new files from checked entries; the media workflow still requires an intact index |
 | SHIP damage inside orphaned fork entries (abandoned entries nodeos leaves after a fork) | No: no other node, endpoint, or replay holds those bytes. Damage next to them is repaired, and they are kept as they are (see [FORMAT.md](FORMAT.md#target-logs)) |
 | Pruned block logs, SHIP logs with feature flags | No: refused as unsupported formats |
 | SHIP logs written by EOSIO 2.1 or 2.2 (state-history log version 1) | No: their trace entries split out prunable transaction data that SHIP does not serve. Refused by name |
 | State history from nodeos 1.5 to 1.7 (no `ship` magic) | No: an older header format. Refused by name |
-| A truncated log, or damage at the end of the file | No: use your node's normal recovery for the head of the log |
+| A truncated log, or readable damage at the end of the file | [`recover-tail`](#recover-a-crash-damaged-tail) stages restored or explicitly salvaged files; originals are preserved |
 
-It runs on Linux and other Unix systems. On Windows, `scan`, `prepare`, `build`, and
-the fetch commands work for review on copied files, but writing is disabled.
+It runs on Linux and other Unix systems. On Windows, read-only inspection, source
+staging, bundle building, and copy-out tail recovery work; in-place writes are disabled.
 
 ### Logs written by several nodeos versions
 
@@ -482,6 +489,103 @@ If a region's anchors or readable gaps turn out to be unreadable too, the refusa
 so: scan a wider range (or the whole file), so the neighboring damage is included in
 the plan.
 
+## Recover a crash-damaged tail
+
+`recover-tail` reads physical entries independently of the target's index. It can
+inspect a missing, empty, truncated, stale, or incorrect index, a partial final
+header/payload/trailer, trailing zeros, and other readable corruption. It stops at
+the **first invalid or unsupported entry** and labels the remaining bytes
+unclassified; it does not assume corruption is confined to the last entry.
+
+Start with read-only inspection:
+
+```sh
+antelope-log-repair recover-tail --log /data/blocks/blocks.log
+```
+
+The report shows the complete prefix, first rejected offset and reason, index
+discrepancies, and **both** recovery choices. Restoration is preferred. To restore
+the suffix and regenerate the index from trusted local block data:
+
+```sh
+antelope-log-repair recover-tail --log /data/blocks/blocks.log \
+  --blocks-log /backup/blocks/blocks.log --through-block 1234567 \
+  --out /scratch/tail-restored --node-stopped
+```
+
+- `--through-block` is the intended final block verified by the operator. A torn
+  file cannot prove how many entries were never written. Restoration refuses an
+  end before the complete prefix or the index's head hint, missing source coverage,
+  conflicting sources, or an ID chain that does not join the prefix.
+- The default `--mode restore` **never falls back to salvage**. If restoration
+  lacks data, inspection still shows why, and staging refuses before creating output.
+- `--blocks-log`, `--blocks`, `--donor-log`, and `--sources` accept the same local
+  source types as `build`. Block sources may be combined; overlapping packed blocks
+  must agree. SHIP donors may use different encodings, but their decompressed
+  payloads must agree throughout the retained and restored range. Where a donor
+  covers the retained prefix, its payload must also match the target. Donor logs
+  and block logs still need usable indexes.
+
+For SHIP, supply canonical block evidence covering the prefix and restoration
+range, plus a trusted donor of the target kind for missing payloads:
+
+```sh
+antelope-log-repair recover-tail --log /data/state-history/trace_history.log \
+  --blocks-log /backup/blocks/blocks.log \
+  --donor-log /backup/state-history/trace_history.log --through-block 1234567 \
+  --out /scratch/trace-restored --node-stopped
+```
+
+Physical SHIP entries alone cannot identify the canonical fork. With block evidence,
+the tool omits intact noncanonical entries and rebuilds canonical positions; without
+it, SHIP inspection is provisional and output is refused. A final unindexed entry
+is examined instead of being silently assumed to be an abandoned fork.
+
+To keep only the complete prefix, select salvage explicitly:
+
+```sh
+antelope-log-repair recover-tail --log /data/blocks/blocks.log \
+  --mode salvage --out /scratch/tail-salvaged --node-stopped
+```
+
+SHIP salvage also needs `--blocks-log` or `--blocks`. Review the excluded suffix
+bytes and missing declared/indexed block ranges. Without a verified intended head,
+the total missing history is unknown. Catching up blocks after restarting nodeos
+does not itself regenerate old SHIP traces or deltas; restoring that history may
+require a donor or replay.
+
+**Output and activation.** Stop the target node and every writer before staging.
+The NEW `--out` directory holds `recovery.json`, `recovered/LOG.log`,
+`recovered/LOG.index`, and, only after flushing, syncing and verifying the generated
+pair byte for byte, `complete.json`. The reports record input fingerprints, source
+paths/stamps, selected mode, output hashes and validation limits. Read-back can be
+served by the filesystem cache. Directory fsync is supported on Unix; Windows
+staging does not establish power-loss durability of directory entries.
+
+Source reads use the same open file handles that are pinned and checked for
+identity changes. Each target pass re-reads its preamble and verifies the input
+fingerprint before accepting completion.
+
+If staging fails or is interrupted, keep its incomplete output for investigation;
+an existing output directory is never reused. Require a valid `complete.json` and
+matching output hashes before considering activation. Activation is manual and
+must coordinate both files with nodeos stopped: two separate file renames do not
+make an atomic pair. Keep the damaged originals until node acceptance is verified.
+
+This first recovery path supports non-pruned block-log v3 and SHIP v0, requires at
+least one complete anchor entry, and bounds a single entry and the restored suffix
+to 256 MiB, with at most 10,000 restored entries and one million elements per FC
+vector. The prefix is streamed, with bounded read-ahead. It reads the whole log and
+index during inspection, repeats validation while staging, and reads the output
+back. Allow space for the new pair. It checks complete outer `signed_block` framing,
+header links and SHIP checksums; it does not authenticate transaction bodies,
+signatures, action roots, or SHIP payload semantics. Use trusted independent sources.
+
+Direct endpoint acquisition and snapshot replay against a broken target, in-place
+tail activation, recovery without any anchor, and salvage past an interior gap are
+not implemented. Local donor files produced by a controlled replay can be supplied.
+Media read errors remain on the existing `scan`/`prepare`/`apply` path.
+
 ## Check for silent corruption
 
 `scan` finds bytes the system **refuses** to read. On ZFS and btrfs that covers rotten
@@ -525,8 +629,8 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 | Message | Meaning | What to do |
 |---|---|---|
 | `no unreadable data found in the selected range` | Every byte read back | Check the path. Scan a wider range or the whole file. On ext4 or ZFS, damage seen earlier may have been rewritten or remapped since |
-| `touches the log's first or head entry` | No readable entry on one side | Out of scope. For the head, use your node's normal recovery for the end of the log |
-| `overlaps the log header` / `reaches past the last entry` | Damage in the file header or tail | Out of scope |
+| `touches the log's first or head entry` | No readable entry on one side for in-place media repair | For a readable damaged tail, use `recover-tail`. It still requires a complete prefix anchor |
+| `overlaps the log header` / `reaches past the last entry` | Damage in the file header or tail | A readable tail can use `recover-tail`; a damaged/unsupported preamble is refused |
 | `byte N near this damage is unreadable too` | An anchor or readable gap also fails | Scan a wider range or the whole file so all nearby damage is in one plan |
 | `stopped after N failed reads` | Widespread damage | Check the device and pool health. Raise `--max-bad-reads` only if you are sure |
 | `this platform reports no filesystem block size` | Windows, or an unusual filesystem | Pass `--record-size` |
@@ -552,6 +656,7 @@ backup, or resync. Run `scan` too: an I/O error during `verify` is reported as
 
 | Command | Purpose | Writes |
 |---|---|---|
+| `recover-tail` | Inspect crash tails/indexes; restore or explicitly salvage to new files | Nothing without `--out`; otherwise a new staging directory |
 | `scan` (alias `inspect`) | Find and classify damage | Nothing |
 | `verify` | Find entries that read back but are wrong | Nothing |
 | `prepare` | Locate, acquire (`--ship`, replay options, or local files), and build | A new `--out` directory |
@@ -580,7 +685,8 @@ or refusal.
 - Per region: up to 9,998 affected blocks and 256 MiB of affected entries.
 - 256 MiB caps on a single entry, a per-endpoint SHIP transfer, and a decompressed
   payload; block sources up to 1 GiB in total.
-- 64-bit platforms only. Writes on Linux/Unix only.
+- 64-bit platforms only. In-place media writes on Linux/Unix only; copy-out tail
+  staging also works on Windows, with the directory-durability limitation above.
 
 ## Validation
 
@@ -598,6 +704,9 @@ cargo test --locked --package antelope-log-repair
 # Optional, Linux: a NEW development chain with real nodeos (under a minute)
 python3 crates/log-repair/tests/nodeos_smoke.py --tool ./target/release/antelope-log-repair \
   --nodeos /usr/bin/nodeos --out /tmp/repair-smoke
+# Optional: torn copies of that development chain, then real-nodeos replay of recovered files
+python3 crates/log-repair/tests/tail_smoke.py --tool ./target/release/antelope-log-repair \
+  --source-smoke /tmp/repair-smoke --nodeos /usr/bin/nodeos --out /tmp/repair-tail-smoke
 # Optional, Linux, root: real kernel EIO through ext4 and device-mapper
 sudo python3 crates/log-repair/tests/eio_smoke.py --tool ./target/release/antelope-log-repair \
   --blocks-log /tmp/repair-smoke/source/blocks/blocks.log --out /root/repair-eio
@@ -606,7 +715,8 @@ sudo python3 crates/log-repair/tests/eio_smoke.py --tool ./target/release/antelo
 `.github/workflows/log-repair.yml` runs the Rust checks on Ubuntu and Windows. The
 crate is not published to crates.io.
 
-Keep this restricted parser separate from the general `hyperion-ship` indexing reader
-unless their safety contracts are reconciled. Repair must reject pruning, unsupported
-framing, missing anchors, and truncated files, even where an indexer could tolerate or
-skip them.
+Keep these restricted parsers separate from the general `hyperion-ship` indexing
+reader unless their safety contracts are reconciled. In-place media repair rejects
+pruning, unsupported framing, missing anchors, and truncated files. `recover-tail`
+may inspect an inconsistent index or truncated suffix, but emits only entries whose
+complete framing has been checked and reports all excluded bytes.

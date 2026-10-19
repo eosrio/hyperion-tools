@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::codec::Codec;
 use crate::format::{
-    Blocks, Kind, Log, block_header, container, encode_ship_with, orphans, ship_marker,
+    Blocks, Kind, Log, block_header, container_disk, encode_ship_with, orphans, ship_marker,
     ship_payload,
 };
 use crate::io::{Disk, MAX_BYTES, Stamp, create_dir, create_file, hash, media_error, sync_dir};
@@ -377,6 +377,14 @@ impl Sources {
     }
 
     pub fn load(&self, kind: Kind) -> Result<Loaded> {
+        self.load_with(kind, |path| Disk::open(path, false))
+    }
+
+    pub fn load_with(
+        &self,
+        kind: Kind,
+        mut open_disk: impl FnMut(&Path) -> Result<Disk>,
+    ) -> Result<Loaded> {
         ensure!(
             !self.blocks.is_empty() || !self.block_logs.is_empty(),
             "no block sources; pass --sources DIR, --blocks FILE, or --blocks-log FILE"
@@ -384,7 +392,9 @@ impl Sources {
         let mut containers = Blocks::new();
         let mut total = 0u64;
         for path in &self.blocks {
-            for (n, body) in container(path).with_context(|| format!("{}", path.display()))? {
+            for (n, body) in
+                container_disk(&open_disk(path)?).with_context(|| format!("{}", path.display()))?
+            {
                 total += body.len() as u64;
                 ensure!(total <= 4 * MAX_BYTES, "block sources exceed 1 GiB");
                 match containers.get(&n) {
@@ -398,9 +408,19 @@ impl Sources {
                 }
             }
         }
-        let open = |list: &[LogFile]| {
+        let mut open = |list: &[LogFile]| {
             list.iter()
-                .map(|f| Log::open(&f.log, f.index.as_deref(), false))
+                .map(|f| {
+                    Log::from_disks(
+                        Kind::from_path(&f.log)?,
+                        open_disk(&f.log)?,
+                        open_disk(
+                            &f.index
+                                .clone()
+                                .unwrap_or_else(|| f.log.with_extension("index")),
+                        )?,
+                    )
+                })
                 .collect::<Result<Vec<_>>>()
         };
         let block_logs = open(&self.block_logs)?;
