@@ -32,10 +32,13 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
+use serde::de::{MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use tiny_http::{Header, Request, Response, Server};
 
 use hyperion_ship::delta::read_varuint;
 use hyperion_ship::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::sequence::{parse_sequence, push_sequence_json, sequence_from_json};
 use hyperion_ship::trace::{self, Tx};
 
 #[derive(Parser, Debug)]
@@ -666,6 +669,14 @@ fn handle_health(info: &LogInfo, delta_info: Option<&LogInfo>) -> Reply {
 /// `GET /action?block_num=N&global_sequence=G` — find the single action_trace in block N whose
 /// receipt.global_sequence == G, decode its act.data, return one JSON object.
 fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
+    if query
+        .split('&')
+        .filter(|pair| pair.split('=').next() == Some("global_sequence"))
+        .count()
+        > 1
+    {
+        return Reply::err(400, "global_sequence must occur exactly once");
+    }
     let params = parse_query(query);
     let (Some(bn), Some(gs)) = (params.get("block_num"), params.get("global_sequence")) else {
         return Reply::err(400, "missing block_num or global_sequence");
@@ -673,8 +684,11 @@ fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
     let Ok(block_num) = bn.parse::<u32>() else {
         return Reply::err(400, "block_num must be a u32");
     };
-    let Ok(global_sequence) = gs.parse::<u64>() else {
-        return Reply::err(400, "global_sequence must be a u64");
+    let Some(global_sequence) = parse_sequence(gs) else {
+        return Reply::err(
+            400,
+            "global_sequence must be a canonical decimal uint64 string",
+        );
     };
     if block_num < info.first_block || block_num > info.last_block {
         return Reply::err(
@@ -720,7 +734,7 @@ fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
     body.push_str("{\"block_num\":");
     body.push_str(&block_num.to_string());
     body.push_str(",\"global_sequence\":");
-    body.push_str(&global_sequence.to_string());
+    push_sequence_json(&mut body, global_sequence);
     body.push_str(",\"account\":");
     push_json_str(&mut body, &name_str(&w.names, code));
     body.push_str(",\"name\":");
@@ -945,13 +959,44 @@ const MAX_BATCH_BODY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_BLOCKS_PER_BATCH: usize = 4096;
 const BATCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Extract a u64 from a JSON value that may be a number or a decimal string (global_sequence arrives
-/// either way over the wire). Returns `None` for anything else.
+/// Legacy delta primary-key parsing. Sequence requests deliberately use the stricter shared
+/// `sequence_from_json` parser; changing sequence types does not redefine arbitrary primary keys.
 fn json_u64(v: &serde_json::Value) -> Option<u64> {
     if let Some(n) = v.as_u64() {
         return Some(n);
     }
     v.as_str().and_then(|s| s.trim().parse::<u64>().ok())
+}
+
+/// Reject ambiguous duplicate request-metadata keys before sequence validation. Contract payloads
+/// are not part of these request objects; they are read from the immutable archive separately.
+struct RequestMetadata(serde_json::Map<String, serde_json::Value>);
+
+impl<'de> Deserialize<'de> for RequestMetadata {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct MetadataVisitor;
+        impl<'de> Visitor<'de> for MetadataVisitor {
+            type Value = RequestMetadata;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a request metadata object with unique keys")
+            }
+
+            fn visit_map<M: MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> std::result::Result<Self::Value, M::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry()? {
+                    if fields.insert(key, value).is_some() {
+                        return Err(serde::de::Error::custom("duplicate request metadata key"));
+                    }
+                }
+                Ok(RequestMetadata(fields))
+            }
+        }
+        deserializer.deserialize_map(MetadataVisitor)
+    }
 }
 
 /// Read the request body bounded to `MAX_BATCH_BODY_BYTES` and parse it as a JSON array, applying the
@@ -973,18 +1018,22 @@ fn read_batch_array(req: &mut Request) -> std::result::Result<Vec<serde_json::Va
         return Err(Reply::err(413, "request body too large"));
     }
 
-    let value: serde_json::Value =
-        serde_json::from_slice(&buf).map_err(|_| Reply::err(400, "malformed JSON body"))?;
-    let serde_json::Value::Array(arr) = value else {
-        return Err(Reply::err(400, "request body must be a JSON array"));
-    };
+    let arr: Vec<RequestMetadata> = serde_json::from_slice(&buf).map_err(|_| {
+        Reply::err(
+            400,
+            "request body must be a JSON array of metadata objects with unique keys",
+        )
+    })?;
     if arr.len() > MAX_BATCH_ITEMS {
         return Err(Reply::err(
             413,
             &format!("too many items (max {MAX_BATCH_ITEMS})"),
         ));
     }
-    Ok(arr)
+    Ok(arr
+        .into_iter()
+        .map(|item| serde_json::Value::Object(item.0))
+        .collect())
 }
 
 /// Parse the JSON array request body into `BatchItem`s. `Err(Reply)` carries the right status code:
@@ -996,11 +1045,11 @@ fn parse_batch_body(req: &mut Request) -> std::result::Result<Vec<BatchItem>, Re
     for el in &arr {
         let (Some(bn), Some(gs)) = (
             el.get("block_num").and_then(|x| x.as_u64()),
-            el.get("global_sequence").and_then(json_u64),
+            el.get("global_sequence").and_then(sequence_from_json),
         ) else {
             return Err(Reply::err(
                 400,
-                "each item needs numeric block_num and number-or-string global_sequence",
+                "each item needs numeric block_num and canonical uint64 global_sequence text (legacy integer numbers must be <= 9007199254740991)",
             ));
         };
         items.push(BatchItem {
@@ -1111,7 +1160,7 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
                 body.push_str("{\"block_num\":");
                 body.push_str(&r.block_num.to_string());
                 body.push_str(",\"global_sequence\":");
-                body.push_str(&r.global_sequence.to_string());
+                push_sequence_json(&mut body, r.global_sequence);
                 body.push_str(",\"account\":");
                 push_json_str(&mut body, &name_str(&w.names, r.code));
                 body.push_str(",\"name\":");
@@ -1135,7 +1184,7 @@ fn handle_actions_batch(w: &mut Worker, info: &LogInfo, req: &mut Request) -> Re
                 body.push_str("{\"block_num\":");
                 body.push_str(&item.block_num.to_string());
                 body.push_str(",\"global_sequence\":");
-                body.push_str(&item.global_sequence.to_string());
+                push_sequence_json(&mut body, item.global_sequence);
                 body.push_str(",\"found\":false}");
             }
         }
@@ -1173,7 +1222,7 @@ struct ResolvedDelta {
 
 /// Parse the JSON array request body into `DeltaItem`s. `Err(Reply)` carries the right status code:
 /// 400 for malformed/over-size body or bad item shape, 413 when the array exceeds the caps. The
-/// `primary_key` accepts a u64 number OR a decimal string (like /actions' global_sequence).
+/// `primary_key` retains its existing u64 number-or-string contract; it is not a sequence field.
 fn parse_deltas_body(
     req: &mut Request,
     names: &Abieos,
@@ -1557,4 +1606,231 @@ fn main() -> Result<()> {
         let _ = h.join();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyperion_ship::testkit::ship::{Encoding, LogBuilder, synthetic_id};
+    use hyperion_ship::testkit::traces::{SEQUENCE_BOUNDARIES, transaction};
+    use std::io::Write;
+    use std::net::TcpStream;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn with_worker(check: impl FnOnce(&mut Worker, &LogInfo)) {
+        let path = std::env::temp_dir().join(format!(
+            "hyperion-sequence-archive-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        // Only a newly created, test-owned path is ever removed below.
+        std::fs::create_dir(&path).unwrap();
+        let sequences: Vec<_> = SEQUENCE_BOUNDARIES
+            .iter()
+            .map(|(n, _)| (*n, *n, *n))
+            .collect();
+        let mut log = LogBuilder::new(Encoding::SizedStored);
+        log.push(synthetic_id(42, 0), &transaction(&sequences));
+        log.write(&path, "trace_history").unwrap();
+        let info = open_log_info(path.to_str().unwrap(), "trace_history").unwrap();
+        let index = AbiIndex::new();
+        let mut worker = Worker {
+            reader: LogReader::open(&info).unwrap(),
+            cache: BlockCache::new(2),
+            delta_reader: None,
+            delta_cache: DeltaCache::new(2),
+            reg: Registry::new(&index),
+            names: Abieos::new(),
+            scratch: String::new(),
+        };
+        check(&mut worker, &info);
+        drop(worker);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    /// Actual tiny_http request framing + route dispatch, with owned loopback ephemeral sockets.
+    fn request(
+        worker: &mut Worker,
+        info: &LogInfo,
+        method: &str,
+        target: &str,
+        body: &str,
+    ) -> Reply {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+        client
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            client,
+            "{method} {target} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut incoming = server
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        handle(worker, info, None, &mut incoming)
+    }
+
+    #[test]
+    fn sequence_public_json_handlers() {
+        with_worker(|worker, info| {
+            for (_, text) in SEQUENCE_BOUNDARIES {
+                let reply = request(
+                    worker,
+                    info,
+                    "GET",
+                    &format!("/action?block_num=42&global_sequence={text}"),
+                    "",
+                );
+                assert_eq!(reply.code, 200);
+                let body: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+                assert_eq!(body["global_sequence"].as_str(), Some(*text));
+                assert_eq!(body["block_num"].as_u64(), Some(42));
+                assert_eq!(body["data"]["hex"].as_str(), Some("DEAD"));
+                println!(
+                    "HYPERION_SEQUENCE_JSON:{}",
+                    serde_json::json!({"source":"archive-action","body":body})
+                );
+            }
+            let block = request(worker, info, "GET", "/block/42", "");
+            assert_eq!(block.code, 200);
+            let body: serde_json::Value = serde_json::from_str(&block.body).unwrap();
+            for (action, (_, text)) in body.as_array().unwrap().iter().zip(SEQUENCE_BOUNDARIES) {
+                assert_eq!(action["receipt"]["global_sequence"].as_str(), Some(*text));
+                assert_eq!(action["receipt"]["recv_sequence"].as_str(), Some(*text));
+                assert_eq!(
+                    action["receipt"]["auth_sequence"][0]["sequence"].as_str(),
+                    Some(*text)
+                );
+                assert_eq!(
+                    action["receipt"]["code_sequence"].as_u64(),
+                    Some(4_294_967_295)
+                );
+                assert_eq!(
+                    action["receipt"]["abi_sequence"].as_u64(),
+                    Some(4_294_967_295)
+                );
+            }
+            println!(
+                "HYPERION_SEQUENCE_JSON:{}",
+                serde_json::json!({"source":"archive-block","body":body})
+            );
+            let mut items: Vec<_> = SEQUENCE_BOUNDARIES
+                .iter()
+                .rev()
+                .map(|(_, text)| serde_json::json!({"block_num":42,"global_sequence":text}))
+                .collect();
+            items
+                .push(serde_json::json!({"block_num":43,"global_sequence":"18446744073709551615"}));
+            items.push(serde_json::json!({"block_num":42,"global_sequence":"9007199254740994"}));
+            items.push(serde_json::json!({"block_num":42,"global_sequence":1}));
+            let batch = request(
+                worker,
+                info,
+                "POST",
+                "/actions",
+                &serde_json::to_string(&items).unwrap(),
+            );
+            assert_eq!(batch.code, 200);
+            let body: serde_json::Value = serde_json::from_str(&batch.body).unwrap();
+            let actions = body["actions"].as_array().unwrap();
+            assert_eq!(actions.len(), items.len());
+            for (action, (_, text)) in actions.iter().zip(SEQUENCE_BOUNDARIES.iter().rev()) {
+                assert_eq!(action["global_sequence"].as_str(), Some(*text));
+                assert_eq!(action["found"].as_bool(), Some(true));
+            }
+            assert_eq!(
+                actions[9]["global_sequence"].as_str(),
+                Some("18446744073709551615")
+            );
+            assert_eq!(actions[9]["found"].as_bool(), Some(false));
+            assert_eq!(
+                actions[10]["global_sequence"].as_str(),
+                Some("9007199254740994")
+            );
+            assert_eq!(actions[10]["found"].as_bool(), Some(false));
+            assert_eq!(actions[11]["global_sequence"].as_str(), Some("1"));
+            println!(
+                "HYPERION_SEQUENCE_JSON:{}",
+                serde_json::json!({"source":"archive-actions","body":body})
+            );
+        });
+    }
+
+    #[test]
+    fn malformed_query_and_batch_sequence_requests_are_refused() {
+        with_worker(|worker, info| {
+            for text in [
+                "",
+                "+1",
+                "-1",
+                "01",
+                "00",
+                "1.0",
+                "1e3",
+                "18446744073709551616",
+                "%201",
+            ] {
+                let reply = request(
+                    worker,
+                    info,
+                    "GET",
+                    &format!("/action?block_num=42&global_sequence={text}"),
+                    "",
+                );
+                assert_eq!(reply.code, 400, "accepted query {text:?}");
+            }
+            assert_eq!(
+                request(
+                    worker,
+                    info,
+                    "GET",
+                    "/action?block_num=42&global_sequence=1&global_sequence=2",
+                    ""
+                )
+                .code,
+                400
+            );
+            for body in [
+                r#"[{"block_num":42,"global_sequence":"1","global_sequence":"2"}]"#,
+                r#"[{"block_num":42,"global_sequence":"1","global_\u0073equence":"2"}]"#,
+            ] {
+                assert_eq!(request(worker, info, "POST", "/actions", body).code, 400);
+            }
+            for raw in [
+                "9007199254740992",
+                "9007199254740993",
+                "9223372036854775808",
+                "18446744073709551615",
+                "-1",
+                "-0",
+                "1.0",
+                "1e3",
+                "true",
+                "null",
+                "[]",
+                "{}",
+                "\"+1\"",
+                "\"01\"",
+                "\" 1\"",
+                "\"1 \"",
+                "\"18446744073709551616\"",
+            ] {
+                let reply = request(
+                    worker,
+                    info,
+                    "POST",
+                    "/actions",
+                    &format!("[{{\"block_num\":42,\"global_sequence\":{raw}}}]"),
+                );
+                assert_eq!(reply.code, 400, "accepted batch {raw}");
+            }
+        });
+    }
 }

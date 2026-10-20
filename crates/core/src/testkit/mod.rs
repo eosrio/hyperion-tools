@@ -9,6 +9,7 @@
 
 pub mod blocks;
 pub mod ship;
+pub mod traces;
 
 use std::collections::HashMap;
 use std::fs;

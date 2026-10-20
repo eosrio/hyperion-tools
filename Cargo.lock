@@ -171,6 +171,7 @@ dependencies = [
  "hex",
  "hyperion-ship",
  "rs_abieos",
+ "serde",
  "serde_json",
  "tiny_http",
 ]
@@ -767,7 +768,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hyperion-ship",
  "minreq",
+ "serde",
  "serde_json",
 ]
 

@@ -91,6 +91,11 @@ including Antelope and Wire. Queries, aliases, caches, streams and archive excha
 identities. This is an intentional public type change; client migration and retained-history query
 qualification are required. See [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md).
 
+The derived `action_count` in `/v2/stats/get_action_usage` also returns an exact decimal string at
+every magnitude, including `"0"`, computed from exact sequence bounds. Cached responses follow the
+same contract. Other counts remain unchanged. See
+[ADR 0054](../adr/0054-return-action-usage-count-as-decimal-string.md).
+
 ## Contract configuration and lifecycle
 
 Configuration should be simple for operators. In full auto-map mode, operators allow contract

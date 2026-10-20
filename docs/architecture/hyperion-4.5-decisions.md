@@ -1682,6 +1682,22 @@ history reindex. Rounded retained values alone cannot establish exact sequence c
 Rationale and qualification requirements are recorded in
 [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Implementation is tracked in
 [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219).
+
+## D22 — Exact decimal action usage count
+
+Status: Accepted on 2026-10-20 UTC. Implementation and qualification remain open.
+
+`/v2/stats/get_action_usage.action_count` always returns a canonical decimal string, including
+`"0"`. Compute it using exact integer subtraction of the sequence bounds and preserve the type in
+cached responses. This intentional 4.5 public type change settles the derived action count question
+left open in D21; `tx_count`, `unique_actors` and unrelated count fields keep their existing types.
+The unresolved legacy `parent` filter remains a separate question. Missing exact coverage must
+produce an explicit error, while unrelated history and indexing remain usable.
+
+Rationale and qualification requirements are recorded in
+[ADR 0054](../adr/0054-return-action-usage-count-as-decimal-string.md). Implementation is tracked in
+[History API #219](https://github.com/eosrio/hyperion-history-api/issues/219).
+
 ## Supporting documents
 
 - `benchmark/atomicassets/REQUIREMENTS.md` — existing requirements and two-track plan.

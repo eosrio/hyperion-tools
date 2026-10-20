@@ -9,7 +9,9 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-serde_json = { workspace = true }
+hyperion-ship = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 minreq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }

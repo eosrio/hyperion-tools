@@ -30,3 +30,15 @@ The batch endpoints group requested positions by block so each block is read and
 request (shared per-thread cache), and process blocks in ascending order for sequential disk reads and
 deterministic results under the per-request work cap. See the Hyperion **tiered-storage** docs for the full
 wire contract and the API-side hydration flow.
+
+Uint64 sequence metadata always uses canonical decimal JSON strings in `/action`, `/block` receipts
+and `/actions` responses, including `found:false` entries. Send `global_sequence` as canonical
+decimal text, such as `"18446744073709551615"` in a batch. The GET parameter is the same unquoted
+decimal text. Signs, whitespace, leading zeroes, fractions, exponents, overflow and duplicate
+metadata keys are refused. Legacy integer JSON numbers are accepted only through 9007199254740991;
+their responses still use strings. Larger numbers are rejected even if their token looks exact,
+because a JavaScript sender may already have rounded them.
+
+Block numbers, ordinals and uint32 ABI/code counters remain numeric. Contract data and the existing
+delta primary-key contract are unchanged. See the
+[sequence JSON checks](../../docs/qualification/lossless-sequence-json.md).

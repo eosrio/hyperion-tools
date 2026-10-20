@@ -17,3 +17,15 @@ es-load --file deltas.ndjson --mode delta --chain wax
 
 (`bench/` also ships a small Python `bulk-load.py` for quick checks, but it's GIL-bound — use `es-load`
 for the actual ceiling.)
+
+Action input validates root and receipt/auth uint64 sequence metadata before deriving `_id`.
+Canonical decimal strings cover the full uint64 range. Legacy integer JSON numbers are accepted
+only through 9007199254740991 and are converted to strings at the known metadata paths. Malformed,
+unsafe or ambiguous duplicate metadata is rejected and makes the command exit unsuccessfully;
+valid rows in the same file can still be posted. Contract JSON tokens are forwarded unchanged,
+including integer/float/exponent tokens. Delta payload/key behavior is unchanged.
+
+The selected Elasticsearch generation must separately qualify full-range sequence storage and
+queries under [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219). JSON
+validation alone does not make a legacy signed-long mapping support uint64. See the
+[sequence JSON checks](../../docs/qualification/lossless-sequence-json.md).

@@ -25,6 +25,10 @@ This decision does not implicitly change uint32 code/ABI counters, block numbers
 or unrelated counts to strings. Overflow behavior for derived counts and the ambiguous legacy
 `parent` filter require their own concrete contract; sequence-string approval does not settle them.
 
+The operator subsequently settled `/v2/stats/get_action_usage.action_count` in
+[ADR 0054](0054-return-action-usage-count-as-decimal-string.md): always an exact decimal string.
+Other counts and the legacy `parent` question remain outside this identifier decision.
+
 Keep existing Elasticsearch history usable without a mandatory full reindex under ADR 0040. Use
 additive/versioned storage, exact metadata or qualified retained inputs to recover precision where
 possible. Rounded retained numbers alone do not prove their original identity. Missing exact
