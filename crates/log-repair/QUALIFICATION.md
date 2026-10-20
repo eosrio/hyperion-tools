@@ -58,6 +58,10 @@ was added. This is indexed-command coverage and an explicit recovery refusal,
 not full recovery qualification for Ultra. Other pruned logs were excluded.
 Linux page-cache residency does not measure ZFS ARC residency.
 
+The header refusal above describes the PR #49 benchmark artifact. The subsequent
+2026-10-20 header qualification below adds support for Ultra mainnet's exact
+genesis; it does not turn those earlier timings into a full recovery benchmark.
+
 ```sh
 python3 crates/log-repair/tests/qualify.py snapshot \
   --blocks /node/blocks --ship /node/state-history \
@@ -350,3 +354,79 @@ python3 -m unittest discover -s crates/log-repair/tests -p test_qualification.py
 
 The Linux-specific cases are skipped on Windows. All destructive preconditions use
 explicit exceptions and remain enabled under optimized Python.
+
+## Ultra and FIO header qualification, 2026-10-20
+
+Michael's Ultra separator error was reproduced on the unchanged 10,000-block
+copy used above. Ultra's own `spring-util` v6.2.2-3.0.0 accepts that copy and
+extracts a genesis configuration containing `ultra_veto_enabled`. Its packed
+configuration is 69 bytes; classic Spring expects 68 and reads the separator one
+byte early. The tool now recognizes the exact Ultra mainnet and testnet genesis by
+their chain IDs, preserving all original bytes. A changed genesis or separator is
+still refused. Classic v1/v2 and partial v3 parsing is format-based; it has no
+mainnet-only restriction. The Ultra allowlist applies to its different genesis.
+
+A read-only FIO mainnet sample independently established version 2, with first
+block 407169178 and a full genesis in its header. FIO's
+[writer supports versions 1 and 2](https://github.com/fioprotocol/fio/blob/d529643fc742cdb9b1a62a2e19f82be198461c90/libraries/chain/block_log.cpp).
+Recovery now handles those layouts. Version 1 has no first-block field or header
+separator. Version 2 always stores genesis, including partial logs. Replay slices
+of legacy inputs remain version 2 so FIO can read their headers. These facts do
+not establish the version or damage in Michael's particular FIO file.
+
+Testnet coverage uses four real FIO v2 blocks at 398291606..398291609 and four
+current Ultra partial-v3 blocks at 326151844..326151847, with IDs from each chain's
+native `get_block`. A separate historical Ultra testnet prefix retains the packed
+genesis and blocks 1..4, decoded by Ultra's native utility. Its genesis hashes to
+`7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9`.
+
+The [qualification record](../../docs/performance/evidence/log-repair-20261020-headers/qualification.json)
+binds the initial and testnet-followup release binaries and native utility hashes. Captured four-block
+Ultra and FIO samples live in `testdata/`; their IDs were checked against Ultra's
+utility and FIO's `get_block` responses. A synthetic v1 header with captured Ultra
+blocks supplies format conformance coverage, not historical-v1 corpus evidence.
+
+- 95 Linux and 71 Windows Rust tests passed; Windows Clippy with all features and
+  warnings denied passed. Python harness tests: 3 passed, 17 Linux-only skips on Windows.
+- Thirty CLI tail cuts covered aligned EOF, first byte, middle of block, missing
+  trailer and partial trailer across Ultra/FIO mainnets and testnets, Ultra genesis
+  and partial v3 headers, and synthetic v1.
+  Restoration and salvage matched independent original-byte/index oracles;
+  trim and rollback reproduced both damaged inputs exactly.
+- Ultra's utility accepted the Ultra outputs, and stock Spring's utility accepted
+  FIO v2 outputs: 60 recovered pairs plus six intact conformance pairs passed
+  smoke tests. These are format acceptance tests, not FIO transaction replay.
+- Six missing-index cases rebuilt the exact expected indexes. Twelve pruned,
+  unknown-version or damaged-separator cases refused before creating output.
+- The original 10,000-block Ultra recovery inspection now completes with no
+  failure. No production log was modified. No full Ultra/FIO damaged-log recovery,
+  new large-file performance result or physical power-cut qualification is claimed.
+
+A read-only inspection pilot on the existing 64 GiB Ultra copy, using the initial
+mainnet-fix binary, reached the configured 480 s limit after reporting 61 GiB.
+The runner terminated that process; it emitted no JSON completion report. This
+is incomplete evidence, not full validation or a completed throughput result.
+No such process is left running. A longer budget and phase CPU/I/O profiling are
+needed before drawing a performance conclusion for the whole-entry recovery walk.
+
+## Finality-history backfill investigation
+
+Michael proposed preserving existing trace/delta history while generating missing
+`finality_data_history` from the Savanna transition onward. This is a separate
+feature: the repair tool currently recognizes only blocks, traces and deltas.
+
+Spring's [history writer](https://github.com/AntelopeIO/spring/blob/e6a99f68b67abc4d89fe716755b2e1394a4991f7/plugins/state_history_plugin/state_history_plugin.cpp)
+can enable finality logging independently of trace/delta logging. Its
+[payload builder](https://github.com/AntelopeIO/spring/blob/e6a99f68b67abc4d89fe716755b2e1394a4991f7/libraries/chain/block_state.cpp)
+uses finality state and an execution-derived action root. A raw header-extension
+copy is insufficient. Selective replay into a fresh directory could avoid
+regenerating trace/delta files, but still needs a suitable snapshot and execution
+from the missing history's start. A newer snapshot cannot supply earlier finality
+entries. Reconstruction using existing traces plus block history needs a separate
+proof and must not be presented as an implemented block-log-only generator.
+
+Qualification should identify the exact transition and node version, compare
+generated payloads and IDs with native SHIP over policy changes and transition
+blocks, then test restart from a later snapshot with copied existing trace/delta
+history and the staged finality pair. Activation must coordinate all history files
+with the node stopped. None of those finality backfill checks were performed here.

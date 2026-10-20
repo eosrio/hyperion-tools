@@ -1,0 +1,445 @@
+{
+  "ok": true,
+  "tool_sha256": "b7e0e25aad1f14d7412530fd07878f02a4a8c4a78ad0ad8c799a4ecb7b687f1f",
+  "cases": [
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 703,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 704,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 799,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 887,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 894,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 702,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 703,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 798,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 886,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 893,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 691,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 692,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 787,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 875,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 882,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    }
+  ],
+  "extra_checks": [
+    "three missing-index rebuilds",
+    "six unsupported/damaged header refusals",
+    "native utilities accept three intact and 30 recovered pairs",
+    "original Ultra 10000-block reproduction passes"
+  ],
+  "scope": "Real Ultra/FIO captured blocks; v1 header is synthetic conformance. Copies only; no full production recovery or power cut.",
+  "rust_tests": {
+    "linux": 95,
+    "windows": 71
+  },
+  "native_utilities": {
+    "ultra": {
+      "sha256": "a3a85a9d4d62de3d0683c10e8df77f7a79986e702d6fcb7f022fa6117a82198e",
+      "version": "v6.2.2-3.0.0"
+    },
+    "classic": {
+      "sha256": "cafc18676fa2f98ac3a58e53353419a1c1e95b88f17afcd96668b2ce9a481fad",
+      "version": "stock Spring; binary identity recorded by hash"
+    }
+  },
+  "unit_log_sha256": "0ac8c71ff5ec7e8c08cd4aea6cccfc7e1676519646232c790608c77b045847f8",
+  "captured_samples": {
+    "ultra-mainnet-v3.json": "281e82a4be140efe16f58c3f2a4514d1ec01394e13e0833e8892739b55ebeece",
+    "fio-mainnet-v2.json": "c028e55ff301d94bdc93826aa500621ad013bfc1283784f2b0625ef0e117fb1a"
+  },
+  "date": "2026-10-20",
+  "sample_hash_encoding": "captured_samples hashes the tested CRLF fixture bytes; repository_samples_lf_sha256 hashes the Git-normalized LF fixture bytes. JSON values are identical.",
+  "repository_samples_lf_sha256": {
+    "ultra-mainnet-v3.json": "78ec12d438e689e82b33e14e5d9522279af2e16c45a4588f4527ecd535a4f5e0",
+    "fio-mainnet-v2.json": "cbfdc641ddd2ccbae490daa8c973ada1ce5af143adf85fbb62a92e182ae5c208"
+  },
+  "network_followup": {
+    "ok": true,
+    "tool_sha256": "dd582aa4b5cfe2e986d45466f37c7ac08e8fbd8b926972216401da73f88fa1b8",
+    "cases": [
+      {
+        "fixture": "ultra-mainnet-v3",
+        "cut": 703,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-mainnet-v3",
+        "cut": 704,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-mainnet-v3",
+        "cut": 799,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-mainnet-v3",
+        "cut": 887,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-mainnet-v3",
+        "cut": 894,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-mainnet-v2",
+        "cut": 702,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-mainnet-v2",
+        "cut": 703,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-mainnet-v2",
+        "cut": 798,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-mainnet-v2",
+        "cut": 886,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-mainnet-v2",
+        "cut": 893,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-v1-conformance",
+        "cut": 691,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-v1-conformance",
+        "cut": 692,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-v1-conformance",
+        "cut": 787,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-v1-conformance",
+        "cut": 875,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-v1-conformance",
+        "cut": 882,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-v3",
+        "cut": 703,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-v3",
+        "cut": 704,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-v3",
+        "cut": 799,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-v3",
+        "cut": 887,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-v3",
+        "cut": 894,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-partial-v3",
+        "cut": 1275,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-partial-v3",
+        "cut": 1276,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-partial-v3",
+        "cut": 1479,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-partial-v3",
+        "cut": 1676,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "ultra-testnet-partial-v3",
+        "cut": 1683,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-testnet-v2",
+        "cut": 702,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-testnet-v2",
+        "cut": 703,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-testnet-v2",
+        "cut": 798,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-testnet-v2",
+        "cut": 886,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      },
+      {
+        "fixture": "fio-testnet-v2",
+        "cut": 893,
+        "restore": true,
+        "salvage": true,
+        "trim_rollback": true,
+        "native_smoke_tests": 2
+      }
+    ],
+    "extra_checks": [
+      "six missing-index rebuilds",
+      "twelve unsupported/damaged header refusals",
+      "native utilities accept six intact and 60 recovered pairs",
+      "original Ultra 10000-block reproduction passes"
+    ],
+    "scope": "Real Ultra/FIO captured blocks; v1 header is synthetic conformance. Copies only; no full production recovery or power cut.",
+    "rust_tests": {
+      "linux": 95,
+      "windows": 71
+    },
+    "unit_log_sha256": "35e817a1305c6bf8c71268b9b9b62c394da173685a19c2ff2fcf520ee77d5860",
+    "captured_samples": {
+      "fio-testnet-v2.json": "d265cc645ce98c59ada2547554ff5dd74e1b43307ab9a9ad2b84168bc7a67cee",
+      "fio-mainnet-v2.json": "c028e55ff301d94bdc93826aa500621ad013bfc1283784f2b0625ef0e117fb1a",
+      "ultra-testnet-partial-v3.json": "67711d5207fdbba57ecd0d575928549e269eea648c9bcfe8147c59ad718a1dde",
+      "ultra-testnet-v3.json": "6a410a34e64c9b627d0d4bcf5531bcfd9bcbd870e2257d03f794ce0ba858a388",
+      "ultra-mainnet-v3.json": "281e82a4be140efe16f58c3f2a4514d1ec01394e13e0833e8892739b55ebeece"
+    },
+    "repository_samples_lf_sha256": {
+      "fio-testnet-v2.json": "d265cc645ce98c59ada2547554ff5dd74e1b43307ab9a9ad2b84168bc7a67cee",
+      "fio-mainnet-v2.json": "cbfdc641ddd2ccbae490daa8c973ada1ce5af143adf85fbb62a92e182ae5c208",
+      "ultra-testnet-partial-v3.json": "67711d5207fdbba57ecd0d575928549e269eea648c9bcfe8147c59ad718a1dde",
+      "ultra-testnet-v3.json": "6a410a34e64c9b627d0d4bcf5531bcfd9bcbd870e2257d03f794ce0ba858a388",
+      "ultra-mainnet-v3.json": "78ec12d438e689e82b33e14e5d9522279af2e16c45a4588f4527ecd535a4f5e0"
+    },
+    "runtime_source_sha256_lf": {
+      "format.rs": "828b4dd02d2a7a2c9db388a2421b0c71fd0d071901466e2a55082c0615d04742",
+      "framing.rs": "3a376f32be751db9f2b4f276c001bf6d9de340556409eead1cb12b858ea4eb05",
+      "replay.rs": "50ed8ce0b5e6bd02b0aed6e5fe09820da8b27d2cbd00c754e8cffe5e4890ff2b",
+      "tail.rs": "4bccf58d6a43e5f2328e752fb5e2cf75389442f8390a743f6bdb64e83f319991"
+    }
+  },
+  "large_ultra_inspection_pilot": {
+    "complete": false,
+    "outcome": "terminated at the configured 480 second limit; no JSON report or completion receipt",
+    "tool_sha256": "b7e0e25aad1f14d7412530fd07878f02a4a8c4a78ad0ad8c799a4ecb7b687f1f",
+    "log_bytes": 68719476814,
+    "last_reported_gib": 61,
+    "expected_input_sha256": "84a86b6dabb760c6b8d1638d1ca1bcdf72a8298b2285803ffe6b6b882d733c47",
+    "qualification": "incomplete; neither full validation nor throughput established"
+  }
+}

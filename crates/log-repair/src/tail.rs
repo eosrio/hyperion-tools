@@ -1025,7 +1025,7 @@ pub fn run(options: Options<'_>) -> Result<Out> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{block_header, u64le};
+    use crate::format::{block_header, u32le, u64le};
     use std::fs;
     use tempfile::TempDir;
 
@@ -1106,6 +1106,138 @@ mod tests {
                     index: None,
                 }],
                 ..Sources::default()
+            }
+        }
+    }
+
+    #[test]
+    fn captured_ultra_and_fio_headers_preserve_identity_through_tail_recovery() {
+        let ultra: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-mainnet-v3.json")).unwrap();
+        let fio: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/fio-mainnet-v2.json")).unwrap();
+        let ultra_testnet: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-testnet-v3.json")).unwrap();
+        let ultra_partial: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-testnet-partial-v3.json"))
+                .unwrap();
+        let fio_testnet: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/fio-testnet-v2.json")).unwrap();
+        // The v1 case is a format-conformance fixture, not a captured historical v1 log.
+        for (fixture, version) in [
+            (&ultra, 3u32),
+            (&fio, 2),
+            (&ultra, 1),
+            (&ultra_testnet, 3),
+            (&ultra_partial, 3),
+            (&fio_testnet, 2),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let donor_dir = dir.path().join("donor");
+            fs::create_dir(&donor_dir).unwrap();
+            let donor = donor_dir.join("blocks.log");
+            let captured_header = hex::decode(fixture["header_hex"].as_str().unwrap()).unwrap();
+            let mut bytes = if version == 1 {
+                let mut header = 1u32.to_le_bytes().to_vec();
+                header.extend(&captured_header[8..captured_header.len() - 8]);
+                header
+            } else {
+                captured_header
+            };
+            let first = fixture["first_block"].as_u64().unwrap() as u32;
+            let mut offsets = Vec::new();
+            let mut index = Vec::new();
+            for (i, entry) in fixture["entries_hex"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+            {
+                let body = hex::decode(entry.as_str().unwrap()).unwrap();
+                let (header, end) = framing::signed_block(&body).unwrap();
+                assert_eq!(end, body.len());
+                assert_eq!(hex::encode(header.id), fixture["native_ids"][i]["id"]);
+                assert_eq!(
+                    hex::encode(header.previous),
+                    fixture["native_ids"][i]["previous"]
+                );
+                let at = bytes.len() as u64;
+                offsets.push(at);
+                index.extend(at.to_le_bytes());
+                bytes.extend(body);
+                bytes.extend(at.to_le_bytes());
+            }
+            fs::write(&donor, &bytes).unwrap();
+            fs::write(donor.with_extension("index"), &index).unwrap();
+            let source = Log::open(&donor, None, false).unwrap();
+            assert_eq!((source.first, source.last), (first, first + 3));
+            let set = crate::replay::BlockSet::from_logs(vec![source]).unwrap();
+            for slice_first in [first, first + 1] {
+                let slice = dir.path().join(format!("slice-{slice_first}"));
+                fs::create_dir(&slice).unwrap();
+                crate::replay::write_slice(&set, slice_first, first + 2, &slice).unwrap();
+                let sliced = Log::open(&slice.join("blocks.log"), None, false).unwrap();
+                let p = framing::preamble(&fs::read(slice.join("blocks.log")).unwrap()).unwrap();
+                assert_eq!(hex::encode(p.chain_id), fixture["chain_id"]);
+                assert_eq!(p.first, slice_first);
+                assert_eq!(p.end as u64, sliced.pos(slice_first).unwrap());
+                assert_eq!(u32le(&sliced.log.read(0, 4).unwrap()), version.max(2));
+                // A slice beginning at genesis must preserve the full genesis, too.
+                let sliced_set = crate::replay::BlockSet::from_logs(vec![sliced]).unwrap();
+                assert_eq!(sliced_set.first(), slice_first);
+            }
+            let damaged = dir.path().join("blocks.log");
+            let cut = offsets[3] as usize + 20;
+            fs::write(&damaged, &bytes[..cut]).unwrap();
+            fs::write(damaged.with_extension("index"), &index).unwrap();
+            let sources = Sources {
+                block_logs: vec![crate::repair::LogFile {
+                    log: donor,
+                    index: None,
+                }],
+                ..Sources::default()
+            };
+            for (mode, name, count) in
+                [(Mode::Restore, "restore", 4), (Mode::Salvage, "salvage", 3)]
+            {
+                let out = dir.path().join(name);
+                let report = run(Options {
+                    log: &damaged,
+                    index: None,
+                    sources: &sources,
+                    through: Some(first + 3),
+                    mode,
+                    out: Some(&out),
+                    node_stopped: true,
+                })
+                .unwrap();
+                assert_eq!(report.json["chain_id"], fixture["chain_id"]);
+                let recovered = out.join("recovered/blocks.log");
+                let end = if count == 4 {
+                    bytes.len()
+                } else {
+                    offsets[3] as usize
+                };
+                assert_eq!(fs::read(&recovered).unwrap(), bytes[..end]);
+                assert_eq!(
+                    fs::read(recovered.with_extension("index")).unwrap(),
+                    index[..count * 8]
+                );
+                assert_eq!(fs::read(&damaged).unwrap(), bytes[..cut]);
+                assert_eq!(fs::read(damaged.with_extension("index")).unwrap(), index);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let journal = dir.path().join("trim-journal");
+                super::trim::run(&damaged, None, &journal, true).unwrap();
+                assert_eq!(fs::read(&damaged).unwrap(), bytes[..offsets[3] as usize]);
+                assert_eq!(
+                    fs::read(damaged.with_extension("index")).unwrap(),
+                    index[..24]
+                );
+                super::trim::resume(&journal, true, true).unwrap();
+                assert_eq!(fs::read(&damaged).unwrap(), bytes[..cut]);
+                assert_eq!(fs::read(damaged.with_extension("index")).unwrap(), index);
             }
         }
     }
