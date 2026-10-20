@@ -93,6 +93,11 @@ instead of waiting for a speculative complete SDK.
   Qualify the unchanged definitions and plugin queries against the same applicable conformance,
   recovery and parity requirements. If the effort is too high, record an explicit MongoDB-only
   release decision; permanent backend support remains the architecture direction.
+- **Sequence identity and client migration:** [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219)
+  implements exact decimal-string uint64 sequence fields on all chains, including Antelope, under
+  [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
+  query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
+  document the intentional 4.5 response-type change without requiring a full history reindex.
 - **Distribution and operator lifecycle:** independent SDK/plugin/adapter releases, tested versions
   pinned for Hyperion, bundled first-party plugins disabled by default, catalog compatibility checks,
   one-package Wire installation and controlled executable updates. Qualify backend cutover after
