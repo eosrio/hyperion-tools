@@ -249,6 +249,9 @@ enum Command {
         /// NEW recovery-journal directory; keep it to resume or undo the trim.
         #[arg(long)]
         journal: PathBuf,
+        /// Reuse a saved inspection of these unchanged files (Linux, same boot and binary).
+        #[arg(long)]
+        inspection: Option<PathBuf>,
         #[arg(long)]
         node_stopped: bool,
     },
@@ -281,6 +284,9 @@ enum Command {
         /// NEW staging directory. Omit to inspect only. Activation remains manual.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Save a reusable inspection in a NEW directory (Linux blocks.log only).
+        #[arg(long, conflicts_with = "out", requires = "node_stopped")]
+        save_inspection: Option<PathBuf>,
         /// Confirm the target node and every writer are stopped before staging recovered files.
         #[arg(long)]
         node_stopped: bool,
@@ -446,8 +452,14 @@ async fn run(cli: Cli) -> Result<Out> {
             log,
             index,
             journal,
+            inspection,
             node_stopped,
-        } => tail::trim::run(&log, index.as_deref(), &journal, node_stopped),
+        } => match inspection {
+            Some(saved) => {
+                tail::trim::run_inspected(&log, index.as_deref(), &journal, &saved, node_stopped)
+            }
+            None => tail::trim::run(&log, index.as_deref(), &journal, node_stopped),
+        },
         Command::ResumeTailTrim {
             journal,
             rollback,
@@ -460,16 +472,24 @@ async fn run(cli: Cli) -> Result<Out> {
             through_block,
             mode,
             out,
+            save_inspection,
             node_stopped,
-        } => tail::run(tail::Options {
-            log: &log,
-            index: index.as_deref(),
-            sources: &sources.resolve()?,
-            through: through_block,
-            mode,
-            out: out.as_deref(),
-            node_stopped,
-        }),
+        } => {
+            let sources = sources.resolve()?;
+            let options = tail::Options {
+                log: &log,
+                index: index.as_deref(),
+                sources: &sources,
+                through: through_block,
+                mode,
+                out: out.as_deref(),
+                node_stopped,
+            };
+            match save_inspection {
+                Some(saved) => tail::run_saving(options, Some(&saved)),
+                None => tail::run(options),
+            }
+        }
         Command::Scan { target } => {
             let (log, located) = target.locate()?;
             repair::scan_report(&log, &located)

@@ -347,3 +347,36 @@ corresponding saved suffix prefix. Rollback restores the damaged originals, not
 missing history. Receipt publication and all subsequent invocations refuse target
 or journal changes. Read-back and flush calls are software guarantees; actual
 power-loss durability still depends on the filesystem and storage hardware.
+
+## Saved tail inspection checkpoints (Linux)
+
+`recover-tail --save-inspection NEW_DIR --node-stopped` takes exclusive advisory
+locks through pinned read-only handles before inspection. This is inspection only:
+`--out` and recovery sources are refused. A present index, complete anchor,
+consistent retained slots, and 1 byte through 256 MiB of removable suffix data are
+required. Checkpoints are restricted to ext4, XFS, Btrfs, ZFS and tmpfs.
+
+The private directory contains `inspection.json` and `inspection.sha256`. Schema 1
+names operation `tail_inspection`, the complete walker summary and its full/prefix/
+suffix hashes, canonical log/index paths, device/inode/size/mtime/ctime stamps,
+Linux boot ID, SHA-256 of `/proc/self/exe`, preamble hash and final complete entry
+hash (including its trailer). The checksum is the SHA-256 of the exact JSON bytes,
+64 hexadecimal bytes without a newline. Atomic publication uses the journal's
+fsync/non-overwriting hard-link protocol; the checksum is committed last.
+
+`trim-tail --inspection DIR` verifies the checkpoint checksums, schema, boot,
+executable, target stamps, header and final-entry framing/hash before preparing
+any mutation. It reads and checks the small excluded suffixes against the saved
+summary. A separate journal commits those bytes before truncation. Its intent
+uses schema 2 with `inspection_sha256` binding the exact checkpoint JSON; ordinary
+trim journals retain schema 1. Older tools refuse schema 2. Both schemas support
+the same resume/rollback protocol, independently of checkpoint availability.
+
+Reuse omits the initial whole-input walk, never the full post-trim parser/hash
+verification or receipt guards. Progress labels identify this remaining pass.
+File metadata is not a cryptographic oracle for latent media damage, and checksum
+files are not authentication against an operator rewriting the checkpoint.
+Changed retained bytes cause verification failure without a success receipt;
+preserve the journal for investigation. Reboots, binary updates and any ordinary
+file change require a fresh inspection. Existing terminal output and reports
+lack the pre-inspection guards and are not accepted as checkpoints.

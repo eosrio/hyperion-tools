@@ -321,14 +321,14 @@ impl ReadAhead<'_> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Failure {
     offset: u64,
     next_block: u32,
     reason: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Summary {
     first_block: u32,
     last_block: Option<u32>,
@@ -709,6 +709,10 @@ impl Output {
 }
 
 pub fn run(options: Options<'_>) -> Result<Out> {
+    run_saving(options, None)
+}
+
+pub fn run_saving(options: Options<'_>, save_inspection: Option<&Path>) -> Result<Out> {
     let Options {
         log: path,
         index,
@@ -731,6 +735,29 @@ pub fn run(options: Options<'_>) -> Result<Out> {
             .unwrap_or_else(|| disk.path.with_extension("index")),
         true,
     )?;
+    ensure!(
+        save_inspection.is_none() || (out.is_none() && sources == &Sources::default()),
+        "--save-inspection requires inspection only, without --out or recovery sources"
+    );
+    #[cfg(not(target_os = "linux"))]
+    ensure!(
+        save_inspection.is_none(),
+        "saved inspection reuse is supported on Linux only"
+    );
+    #[cfg(target_os = "linux")]
+    let checkpoint = save_inspection
+        .map(|dir| {
+            trim::Inspection::begin(
+                disk,
+                index
+                    .disk
+                    .as_ref()
+                    .context("saving an inspection requires an existing index")?,
+                dir,
+                node_stopped,
+            )
+        })
+        .transpose()?;
     let begin = start(disk, kind)?;
     let sources = sources.canonicalize()?;
     let mut pins = Vec::new();
@@ -932,6 +959,13 @@ pub fn run(options: Options<'_>) -> Result<Out> {
         text.push_str("The original intended head is unknown; excluded bytes do not establish the total missing history.\n");
     }
     let Some(out) = out else {
+        #[cfg(target_os = "linux")]
+        if let Some(checkpoint) = checkpoint {
+            checkpoint.save(&summary)?;
+            report["saved_inspection"] = json!(save_inspection.unwrap().canonicalize()?);
+            text.push_str(&format!("Saved inspection in {}. Reuse with trim-tail --inspection; one full post-trim verification remains.\n",
+                save_inspection.unwrap().display()));
+        }
         return Ok(Out { json: report, text });
     };
     let tail = match mode {
@@ -1236,6 +1270,33 @@ mod tests {
                     index[..24]
                 );
                 super::trim::resume(&journal, true, true).unwrap();
+                assert_eq!(fs::read(&damaged).unwrap(), bytes[..cut]);
+                assert_eq!(fs::read(damaged.with_extension("index")).unwrap(), index);
+                let checkpoint = dir.path().join("inspection");
+                run_saving(
+                    Options {
+                        log: &damaged,
+                        index: None,
+                        sources: &Sources::default(),
+                        through: None,
+                        mode: Mode::Restore,
+                        out: None,
+                        node_stopped: true,
+                    },
+                    Some(&checkpoint),
+                )
+                .unwrap();
+                let cached_journal = dir.path().join("cached-trim-journal");
+                let trimmed =
+                    super::trim::run_inspected(&damaged, None, &cached_journal, &checkpoint, true)
+                        .unwrap();
+                assert_eq!(trimmed.json["inspection_reused"], true);
+                assert_eq!(fs::read(&damaged).unwrap(), bytes[..offsets[3] as usize]);
+                assert_eq!(
+                    fs::read(damaged.with_extension("index")).unwrap(),
+                    index[..24]
+                );
+                super::trim::resume(&cached_journal, true, true).unwrap();
                 assert_eq!(fs::read(&damaged).unwrap(), bytes[..cut]);
                 assert_eq!(fs::read(damaged.with_extension("index")).unwrap(), index);
             }
