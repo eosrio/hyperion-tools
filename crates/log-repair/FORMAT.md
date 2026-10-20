@@ -10,6 +10,8 @@ Reviewed against these primary sources on 2026-10-15:
 - [Spring block_log.cpp](https://github.com/AntelopeIO/spring/blob/main/libraries/chain/block_log.cpp):
   v3 header, first block number, genesis/chain ID, all-ones header separator,
   u64 little-endian entry positions and trailers, pruning flag.
+- [FIO block_log.cpp](https://github.com/fioprotocol/fio/blob/d529643fc742cdb9b1a62a2e19f82be198461c90/libraries/chain/block_log.cpp):
+  legacy v1/v2 headers, including genesis in partial v2 logs. Reviewed 2026-10-20.
 - [Spring state_history/log.hpp](https://github.com/AntelopeIO/spring/blob/main/libraries/state_history/include/eosio/state_history/log.hpp):
   `ship` name magic, version 0, pruning feature, 48-byte entry header, zlib payload,
   three payload-size preambles, absolute position trailer. The Leap 4+ preamble
@@ -27,9 +29,24 @@ Reviewed against these primary sources on 2026-10-15:
 
 ## Target logs
 
-**`blocks.log` (v3, non-pruned).** The header is `[version=3:u32][first_block:u32]`,
-then the packed genesis state (when `first_block` is 1) or the 32-byte chain ID,
-then 8 bytes of `0xff`. Each entry is a packed `signed_block` followed by its own
+**`blocks.log` (v1, v2, v3; non-pruned).** The headers are:
+
+| Version | Header |
+|---|---|
+| 1 | `[version=1:u32][packed genesis]`; first block is implicitly 1, no separator |
+| 2 | `[version=2:u32][first_block:u32][packed genesis][0xff × 8]`, even when first block is greater than 1 |
+| 3 | `[version=3:u32][first_block:u32][packed genesis if first=1, otherwise chain_id:32][0xff × 8]` |
+
+Genesis normally contains a timestamp, public key and 68-byte `chain_config_v0`.
+Ultra mainnet has a 69-byte configuration including `ultra_veto_enabled`. Its
+layout is accepted only when the entire packed genesis hashes to chain ID
+`a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097`.
+The captured header and four real blocks are in `testdata/ultra-mainnet-v3.json`;
+Ultra's own `spring-util` v6.2.2-3.0.0 independently accepted and decoded them.
+The extra byte is preserved. Recovery does not search for separators, infer a
+header length from a damaged index, or accept arbitrary fork layouts.
+
+Each entry is a packed `signed_block` followed by its own
 absolute position as a u64 trailer. `blocks.index` holds one u64 position per block.
 A block ID is the SHA-256 of the FC-packed header prefix, with its first four bytes
 replaced by the big-endian block number. The pruning flag and other versions are
@@ -236,13 +253,13 @@ reproduced exactly by level 6.
 
 ## Replay blocklog slice
 
-`replay-ship` writes a new v3 `blocks.log` holding the snapshot head through the
-last region's right anchor: `[3:u32][first:u32][chain_id:32][0xff × 8]`, then the
-source entries with position trailers and `blocks.index` rebased. The chain ID is
-copied from a source log that does not start at block 1. For a source that starts at
-genesis, it is the SHA-256 of the packed genesis state stored in that header, which
-is how Antelope derives the chain ID. nodeos rejects a chain ID that disagrees with
-the snapshot, so a wrong ID cannot produce a donor.
+`replay-ship` writes a new `blocks.log` holding the snapshot head through the
+last region's right anchor, with entry trailers and `blocks.index` rebased. For
+v3 inputs, partial slices carry the chain ID and slices beginning at block 1
+preserve the genesis. Legacy v1/v2 inputs produce v2 slices retaining their packed
+genesis, because older writers such as FIO do not support v3. The chain ID is the
+SHA-256 of the packed genesis for every v1/v2 input, including partial v2 logs;
+partial v3 inputs store it directly. nodeos checks it against the snapshot.
 
 ## Review bundle
 
@@ -280,7 +297,7 @@ and index rebuilding, with its own validation and disk-space requirements.
 
 ## Journaled suffix-only trim
 
-`trim-tail` is a separate Linux-only operation on non-pruned block-log v3. It reuses
+`trim-tail` is a separate Linux-only operation on non-pruned block-log v1/v2/v3. It reuses
 `recover-tail` framing and hash inspection, requires a complete anchor and a
 matching retained index prefix, and saves 1 byte through 256 MiB of combined
 excluded log/index bytes. No retained bytes are written and no index slots are

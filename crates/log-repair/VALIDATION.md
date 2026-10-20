@@ -6,16 +6,24 @@ the real-server runs establish, and what they do not. Commands are listed in
 
 ## Rust tests
 
-85 tests on Linux; 61 on Windows, where the scan-with-faults, media-write,
+95 tests on Linux; 71 on Windows, where the scan-with-faults, media-write,
 page-cache, and process-inspection tests are compiled out. Faults are injected on exact byte ranges.
 A write covering a whole damaged range heals it, as a full-record write does on ZFS.
 
 - **Formats:** a real EOS mainnet packed block whose header ID matches the ID nodeos
-  reports independently. Also covered: block-log v3 and both SHIP log kinds; all
+  reports independently. Also covered: block-log v1/v2/v3 and both SHIP log kinds; all
   three SHIP payload markers; corrupt zlib, sizes, magic, and pruning flags; truncated
   indexes, malformed varints, and oversized lengths. Re-encoded SHIP payloads use
   32 KiB stored blocks, checked at 0 B, one block, 49,349 B, an exact 64 KiB, and
   70,000 B.
+- **Ultra and FIO headers (2026-10-20):** captured Ultra mainnet v3 genesis and
+  blocks 1..4, plus FIO mainnet v2 partial-log genesis and blocks
+  407169178..407169181. Block IDs match Ultra's native `spring-util` output and
+  FIO's native `get_block` responses. Synthetic v1 headers cover the implicit
+  first block and absence of a separator. Tests preserve original headers and
+  chain identity through salvage, donor restoration, replay slicing and Linux
+  trim/rollback. They reject truncated headers, every single-byte change to the
+  pinned Ultra genesis/separator, pruning and unknown versions.
 - **Encodings (translation):**
   - *Real entries.* Seven real SHIP entries are reproduced byte for byte from their
     decompressed payloads (`testdata/ship/`): EOS mainnet compressed traces and deltas

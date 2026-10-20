@@ -138,7 +138,9 @@ Upgrading nodeos never rewrites a log: a log started on an older release and now
 written by Spring keeps each part as it was first written. The tool works out how each
 damaged part was written from the log itself, so it does not need to know your history.
 
-- **`blocks.log`:** the format (v3) and the packed blocks are the same across releases.
+- **`blocks.log`:** non-pruned versions 1, 2 and 3 are supported. Their headers
+  differ; recovery preserves the original header and version. Classic genesis
+  layouts and Ultra mainnet's exact genesis are recognized (see [FORMAT.md](FORMAT.md#target-logs)).
   Any intact copy, any retained `blocks-FIRST-LAST.log` file, or any state-history
   endpoint can supply the blocks.
 - **Finding damage** (`scan`, `verify`) works on every part of a log.
@@ -350,8 +352,9 @@ antelope-log-repair prepare --log /data/state-history/chain_state_history.log \
   `blocks.log` and any retained `blocks-FIRST-LAST.log` files, each with its index, for
   example your node's `blocks-dir` and `blocks-retained-dir`. Together they must cover
   the snapshot head through the last damaged region, without gaps, and belong to one
-  chain. The tool copies **only that range** into a fresh, valid v3 blocklog in the
+  chain. The tool copies **only that range** into a fresh blocklog in the
   sandbox, so space and time grow with the distance from the snapshot to the damage.
+  Legacy sources use v2 slices with their genesis; v3 sources use v3 slices.
   Pick a recent snapshot.
 - The replayed payloads are re-encoded the way your log was written, so a current
   release can replay a stretch that an older one compressed, as long as it produces
@@ -583,7 +586,7 @@ matching output hashes before considering activation. Activation is manual and
 must coordinate both files with nodeos stopped: two separate file renames do not
 make an atomic pair. Keep the damaged originals until node acceptance is verified.
 
-This first recovery path supports non-pruned block-log v3 and SHIP v0, requires at
+This recovery path supports non-pruned block-log v1/v2/v3 and SHIP v0, requires at
 least one complete anchor entry, and bounds a single entry and the restored suffix
 to 256 MiB, with at most 10,000 restored entries and one million elements per FC
 vector. The prefix is streamed, with bounded read-ahead. It reads the whole log and
@@ -611,7 +614,7 @@ antelope-log-repair trim-tail --log /data/blocks/blocks.log \
   --journal /scratch/tail-trim-1 --node-stopped
 ```
 
-This supports non-pruned block-log v3 with at least one complete anchor block.
+This supports non-pruned block-log v1/v2/v3 with at least one complete anchor block.
 The existing index must contain every retained slot and agree with the checked
 physical entries; extra whole or partial slots may be removed. **It trims an
 already correct index prefix; it does not rebuild a missing or inconsistent index.**
@@ -754,7 +757,7 @@ or refusal.
 
 ## Limits
 
-- Formats: non-pruned block-log v3 (including retained range files), and non-pruned
+- Formats: non-pruned block-log v1/v2/v3 (including retained range files), and non-pruned
   SHIP v0, including legacy payload size markers and Leap 4+ uncompressed-size headers,
   compressed or stored. Unknown features fail closed.
 - Record size: a power of two from 512 B to 16 MiB.

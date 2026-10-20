@@ -1,0 +1,153 @@
+{
+  "ok": true,
+  "tool_sha256": "b7e0e25aad1f14d7412530fd07878f02a4a8c4a78ad0ad8c799a4ecb7b687f1f",
+  "cases": [
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 703,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 704,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 799,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 887,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-mainnet-v3",
+      "cut": 894,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 702,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 703,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 798,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 886,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "fio-mainnet-v2",
+      "cut": 893,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 691,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 692,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 787,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 875,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    },
+    {
+      "fixture": "ultra-v1-conformance",
+      "cut": 882,
+      "restore": true,
+      "salvage": true,
+      "trim_rollback": true,
+      "native_smoke_tests": 2
+    }
+  ],
+  "extra_checks": [
+    "three missing-index rebuilds",
+    "six unsupported/damaged header refusals",
+    "native utilities accept three intact and 30 recovered pairs",
+    "original Ultra 10000-block reproduction passes"
+  ],
+  "scope": "Real Ultra/FIO captured blocks; v1 header is synthetic conformance. Copies only; no full production recovery or power cut.",
+  "rust_tests": {
+    "linux": 95,
+    "windows": 71
+  },
+  "native_utilities": {
+    "ultra": {
+      "sha256": "a3a85a9d4d62de3d0683c10e8df77f7a79986e702d6fcb7f022fa6117a82198e",
+      "version": "v6.2.2-3.0.0"
+    },
+    "classic": {
+      "sha256": "cafc18676fa2f98ac3a58e53353419a1c1e95b88f17afcd96668b2ce9a481fad",
+      "version": "stock Spring; binary identity recorded by hash"
+    }
+  },
+  "unit_log_sha256": "0ac8c71ff5ec7e8c08cd4aea6cccfc7e1676519646232c790608c77b045847f8",
+  "captured_samples": {
+    "ultra-mainnet-v3.json": "281e82a4be140efe16f58c3f2a4514d1ec01394e13e0833e8892739b55ebeece",
+    "fio-mainnet-v2.json": "c028e55ff301d94bdc93826aa500621ad013bfc1283784f2b0625ef0e117fb1a"
+  },
+  "date": "2026-10-20"
+}

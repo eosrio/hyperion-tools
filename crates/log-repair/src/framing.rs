@@ -3,7 +3,7 @@
 use anyhow::{Result, bail, ensure};
 use sha2::{Digest, Sha256};
 
-use crate::format::{Header, num, u32le};
+use crate::format::{Header, check_block_log_version, num, u32le};
 use crate::io::MAX_BYTES;
 
 #[derive(Debug)]
@@ -101,27 +101,38 @@ pub struct Preamble {
     pub chain_id: [u8; 32],
 }
 
+// Ultra mainnet's packed genesis has a 69-byte chain configuration, including
+// ultra_veto_enabled. Recognize this exact genesis by its chain ID, rather than
+// accepting an arbitrary extra byte or searching for a nearby separator.
+const ULTRA_MAINNET: [u8; 32] = [
+    0xa9, 0xc4, 0x81, 0xdf, 0xbc, 0x7d, 0x95, 0x06, 0xdc, 0x7e, 0x87, 0xe9, 0xa1, 0x37, 0xc9, 0x31,
+    0xb0, 0xa9, 0x30, 0x3f, 0x64, 0xfd, 0x7a, 0x1d, 0x08, 0xb8, 0x23, 0x01, 0x33, 0x92, 0x00, 0x97,
+];
+
 pub fn preamble(bytes: &[u8]) -> Result<Preamble> {
     let mut c = Walk { bytes, pos: 0 };
-    ensure!(
-        u32le(c.take(4)?) == 3,
-        "only non-pruned blocks.log v3 is supported"
-    );
-    let first = u32le(c.take(4)?);
+    let version = u32le(c.take(4)?);
+    check_block_log_version(version)?;
+    let first = if version == 1 { 1 } else { u32le(c.take(4)?) };
     ensure!(first > 0 && first < u32::MAX, "invalid first block");
-    let chain_id = if first == 1 {
+    let chain_id = if version <= 2 || first == 1 {
         let start = c.pos;
         c.take(8)?; // initial timestamp
         c.key()?;
-        c.take(68)?; // chain_config_v0
+        let ultra = bytes
+            .get(start..c.pos + 69)
+            .is_some_and(|g| <[u8; 32]>::from(Sha256::digest(g)) == ULTRA_MAINNET);
+        c.take(if ultra { 69 } else { 68 })?; // chain_config_v0 or pinned Ultra genesis
         Sha256::digest(&bytes[start..c.pos]).into()
     } else {
         c.take(32)?.try_into()?
     };
-    ensure!(
-        c.take(8)? == [255; 8],
-        "blocks.log header separator missing"
-    );
+    if version != 1 {
+        ensure!(
+            c.take(8)? == [255; 8],
+            "blocks.log header separator missing; damaged header or unsupported genesis layout"
+        );
+    }
     Ok(Preamble {
         first,
         end: c.pos,
@@ -259,5 +270,66 @@ mod tests {
         let mut bad = bytes;
         bad[16] = 7; // unknown initial_key variant
         assert!(preamble(&bad).is_err());
+    }
+
+    #[test]
+    fn legacy_headers_keep_genesis_for_partial_v2_and_omit_separator_for_v1() {
+        let mut genesis = vec![0; 8];
+        genesis.push(0);
+        genesis.extend([255; 33]);
+        genesis.extend([0; 68]);
+        let chain_id: [u8; 32] = Sha256::digest(&genesis).into();
+        for version in [1u32, 2] {
+            let mut bytes = version.to_le_bytes().to_vec();
+            let first = if version == 1 { 1u32 } else { 407169178 };
+            if version != 1 {
+                bytes.extend(first.to_le_bytes());
+            }
+            bytes.extend(&genesis);
+            if version != 1 {
+                bytes.extend([255; 8]);
+            }
+            let p = preamble(&bytes).unwrap();
+            assert_eq!(p.first, first);
+            assert_eq!(p.end, bytes.len());
+            assert_eq!(p.chain_id, chain_id);
+            for cut in 0..bytes.len() {
+                assert!(preamble(&bytes[..cut]).is_err(), "v{version} cut {cut}");
+            }
+        }
+    }
+
+    #[test]
+    fn ultra_mainnet_genesis_is_recognized_without_trusting_the_index() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-mainnet-v3.json")).unwrap();
+        let bytes = hex::decode(fixture["header_hex"].as_str().unwrap()).unwrap();
+        let p = preamble(&bytes).unwrap();
+        assert_eq!(p.first, 1);
+        assert_eq!(p.end, 127);
+        assert_eq!(hex::encode(p.chain_id), fixture["chain_id"]);
+        for cut in 0..bytes.len() {
+            assert!(preamble(&bytes[..cut]).is_err(), "cut {cut}");
+        }
+        // A nearby separator or an extra byte cannot authorize a different genesis.
+        for offset in 8..bytes.len() {
+            let mut changed = bytes.clone();
+            changed[offset] ^= 1;
+            assert!(preamble(&changed).is_err(), "changed byte {offset}");
+        }
+    }
+
+    #[test]
+    fn unsupported_block_versions_name_the_observed_format() {
+        for version in [0u32, 4, 0x8000_0001, 0x8000_0003] {
+            let mut bytes = version.to_le_bytes().to_vec();
+            bytes.extend([0; 128]);
+            let error = preamble(&bytes).err().unwrap().to_string();
+            assert!(error.contains(if version & 0x8000_0000 != 0 {
+                "pruned"
+            } else {
+                "version"
+            }));
+        }
     }
 }

@@ -6,9 +6,8 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
-use crate::format::{Blocks, Kind, Log, encode_container, u64le};
+use crate::format::{Blocks, Kind, Log, encode_container, u32le, u64le};
 use crate::io::{Disk, Stamp, create_dir, create_file, hash, sync_dir};
 use crate::repair::{LogFile, Sources, rebuild, target_flags};
 use crate::report::{Out, arg};
@@ -346,28 +345,51 @@ fn is_block_log(path: &Path) -> bool {
 /// the packed genesis state it holds.
 fn chain_id_of(src: &Log) -> Result<[u8; 32]> {
     let first_pos = src.pos(src.first)?;
-    Ok(if src.first == 1 {
-        Sha256::digest(src.log.read(8, first_pos - 16)?).into()
-    } else {
-        ensure!(first_pos == 48, "unexpected blocks.log v3 header length");
-        src.log.read(8, 32)?.try_into().unwrap()
-    })
+    ensure!(
+        first_pos <= 1 << 20,
+        "blocks.log preamble exceeds safety limit"
+    );
+    let bytes = src.log.read(0, first_pos)?;
+    let header = crate::framing::preamble(&bytes)?;
+    ensure!(
+        header.end as u64 == first_pos,
+        "first index position disagrees with blocks.log preamble"
+    );
+    ensure!(header.first == src.first, "blocks.log first block changed");
+    Ok(header.chain_id)
 }
 
-/// Write a nodeos-readable v3 `blocks.log` + `blocks.index` holding `first..=last`, with
+/// Write a nodeos-readable `blocks.log` + `blocks.index` holding `first..=last`, with
 /// trailers and index rebased, copied across as many source files as the range spans. The
-/// header carries the chain ID, which nodeos checks against the snapshot before replaying.
+/// header preserves the source chain identity. Legacy sources use v2 with their genesis,
+/// so writers such as FIO which do not support v3 can read the slice.
 pub fn write_slice(src: &BlockSet, first: u32, last: u32, dir: &Path) -> Result<()> {
     ensure!(first <= last, "empty blocklog slice {first}..{last}");
     src.check_covers(first, last)
         .with_context(|| format!("blocklog slice {first}..{last}"))?;
     let mut log = BufWriter::new(new_file(&dir.join("blocks.log"))?);
     let mut index = BufWriter::new(new_file(&dir.join("blocks.index"))?);
-    log.write_all(&3u32.to_le_bytes())?;
-    log.write_all(&first.to_le_bytes())?;
-    log.write_all(&src.chain_id)?;
-    log.write_all(&[255; 8])?;
-    let mut pos = 48u64;
+    let from = src.log_for(first).context("block coverage was checked")?;
+    let version = u32le(&from.log.read(0, 4)?);
+    let header = if version <= 2 {
+        let begin = if version == 1 { 4 } else { 8 };
+        let end = from.pos(from.first)? - if version == 1 { 0 } else { 8 };
+        let mut header = 2u32.to_le_bytes().to_vec();
+        header.extend(first.to_le_bytes());
+        header.extend(from.log.read(begin, end - begin)?);
+        header.extend([255; 8]);
+        header
+    } else if first == 1 {
+        from.log.read(0, from.pos(from.first)?)?
+    } else {
+        let mut header = 3u32.to_le_bytes().to_vec();
+        header.extend(first.to_le_bytes());
+        header.extend(src.chain_id);
+        header.extend([255; 8]);
+        header
+    };
+    log.write_all(&header)?;
+    let mut pos = header.len() as u64;
     for n in first..=last {
         let from = src.log_for(n).context("block coverage was checked")?;
         let (a, b) = from.bounds(n)?;

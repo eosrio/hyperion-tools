@@ -38,6 +38,18 @@ pub fn unsupported_ship_magic(magic: u64) -> Option<String> {
 }
 pub const MAX_BLOCKS: u32 = 10_000;
 
+pub fn check_block_log_version(version: u32) -> Result<()> {
+    ensure!(
+        version & 0x8000_0000 == 0,
+        "pruned blocks.log is not supported (raw version {version:#010x})"
+    );
+    ensure!(
+        (1..=3).contains(&version),
+        "unsupported blocks.log version {version}; supported non-pruned versions are 1, 2 and 3"
+    );
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
@@ -195,16 +207,17 @@ impl Log {
             count_bytes > 0 && count_bytes % 8 == 0,
             "index is empty or truncated"
         );
-        let first = if kind == Kind::Blocks {
+        let (first, has_separator) = if kind == Kind::Blocks {
             let h = log.read(0, 8)?;
-            ensure!(u32le(&h) == 3, "only non-pruned blocks.log v3 is supported");
-            u32le(&h[4..])
+            let version = u32le(&h);
+            check_block_log_version(version)?;
+            (if version == 1 { 1 } else { u32le(&h[4..]) }, version != 1)
         } else {
             let h = log.read(0, 48)?;
             if let Some(problem) = unsupported_ship_magic(u64le(&h)) {
                 bail!("{problem}");
             }
-            u32::from_be_bytes(h[8..12].try_into()?)
+            (u32::from_be_bytes(h[8..12].try_into()?), false)
         };
         ensure!(first > 0, "invalid first block");
         let last = u64::from(first)
@@ -231,7 +244,7 @@ impl Log {
             },
             "invalid first index position"
         );
-        if kind == Kind::Blocks {
+        if has_separator {
             ensure!(
                 out.log.read(first_pos - 8, 8)? == [255; 8],
                 "blocks.log header separator missing"
