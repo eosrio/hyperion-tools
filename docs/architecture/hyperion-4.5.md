@@ -1,6 +1,6 @@
 # Hyperion 4.5 architecture definition
 
-Status: Working architecture draft, based on operator-approved decisions through 2026-10-17.
+Status: Working architecture draft, based on operator-approved decisions through 2026-10-20 UTC.
 
 Start here. This document defines the system boundaries, release obligations, and operator workflows
 that implementation agents follow. The [detailed decision record](hyperion-4.5-decisions.md) and
@@ -85,6 +85,11 @@ automatically multi-record transactions. Validate required backend capabilities 
 
 State and history progress independently. Endpoint contracts may require coordination, but there
 is no global same-block read barrier. Snapshot consistency is declared per endpoint.
+
+Hyperion 4.5 returns uint64 sequence identifiers as exact canonical decimal strings on every chain,
+including Antelope and Wire. Queries, aliases, caches, streams and archive exchanges preserve those
+identities. This is an intentional public type change; client migration and retained-history query
+qualification are required. See [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md).
 
 ## Contract configuration and lifecycle
 

@@ -1663,6 +1663,25 @@ fork rollback still apply.
 
 Rationale recorded in [ADR 0043](../adr/0043-bound-recovery-retention-and-report-unavailable-inputs.md).
 
+## D21 — Lossless sequence identifiers on every chain
+
+Status: Accepted on 2026-10-20 UTC. Implementation and release qualification remain open.
+
+Use canonical decimal strings for uint64 sequence identifiers and aliases across every supported
+chain, including Antelope and Wire. Apply the same exact semantics through queries, caches, streams,
+archives and the applicable Node/Rust paths. The operator explicitly rejected limiting this change
+to Wire, so preserving numeric Antelope sequence responses is superseded as a proposal. This is an
+intentional 4.5 public response-type change requiring client migration documentation.
+
+Preserve the original identity rather than rounding through JavaScript Number. This decision does
+not stringify uint32 code/ABI counters, blocks, ordinals or unrelated counts. Derived count overflow
+and unresolved legacy parent-filter semantics remain separate. Existing Elasticsearch history stays
+usable under D19; additive exact coverage and qualified recovery must not become a mandatory full
+history reindex. Rounded retained values alone cannot establish exact sequence coverage.
+
+Rationale and qualification requirements are recorded in
+[ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Implementation is tracked in
+[History API #219](https://github.com/eosrio/hyperion-history-api/issues/219).
 ## Supporting documents
 
 - `benchmark/atomicassets/REQUIREMENTS.md` — existing requirements and two-track plan.
