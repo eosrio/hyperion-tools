@@ -1,4 +1,5 @@
 //! Recover crash-damaged tails to new files, independently of the target index.
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -168,6 +169,67 @@ impl Entry {
     }
 }
 
+// A fork can be followed by another copy of already selected canonical records.
+// Keep the original owned bytes, rather than rereading possibly changed input.
+// Oversize or old repeats retain the conservative ambiguity refusal.
+const RECENT_CANONICAL_BLOCKS: u32 = 4096;
+const RECENT_CANONICAL_BYTES: usize = 4 << 20;
+
+struct RememberedEntry {
+    entry: Entry,
+    unmatched_index: Option<u64>,
+}
+
+#[derive(Default)]
+struct RecentCanonical {
+    entries: VecDeque<RememberedEntry>,
+    bytes: usize,
+}
+impl RecentCanonical {
+    fn forget_first(&mut self) {
+        if let Some(old) = self.entries.pop_front() {
+            self.bytes -= old.entry.bytes.capacity();
+        }
+    }
+
+    fn remember(&mut self, entry: Entry, unmatched_index: Option<u64>) {
+        while self.entries.front().is_some_and(|old| {
+            entry.number().saturating_sub(old.entry.number()) >= RECENT_CANONICAL_BLOCKS
+        }) {
+            self.forget_first();
+        }
+        let cost = entry.bytes.capacity();
+        if cost > RECENT_CANONICAL_BYTES {
+            return;
+        }
+        while self.bytes + cost > RECENT_CANONICAL_BYTES {
+            self.forget_first();
+        }
+        self.bytes += cost;
+        self.entries.push_back(RememberedEntry {
+            entry,
+            unmatched_index,
+        });
+    }
+
+    // Some means byte-identical; true also resolves one earlier index mismatch.
+    fn duplicate(&mut self, entry: &Entry) -> Option<bool> {
+        let old = self
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|old| old.entry.number() == entry.number())?;
+        if old.entry.body() != entry.body() {
+            return None;
+        }
+        let indexed = old.unmatched_index == Some(entry.offset);
+        if indexed {
+            old.unmatched_index = None;
+        }
+        Some(indexed)
+    }
+}
+
 fn full_block(body: &[u8]) -> Result<Header> {
     let (header, end) = framing::signed_block(body)?;
     ensure!(end == body.len(), "bytes after signed_block");
@@ -292,7 +354,8 @@ struct Summary {
 
 /// Walk physical entries, choosing canonical SHIP entries only when block evidence is
 /// available. The callback and report use the same parser, so output cannot use a weaker
-/// definition of a complete entry than inspection does. Memory is bounded per entry.
+/// definition of a complete entry than inspection does. Recent canonical SHIP
+/// bodies additionally occupy at most 4 MiB plus 4096 small bookkeeping records.
 fn walk(
     disk: &Disk,
     index: Option<&Disk>,
@@ -320,6 +383,7 @@ fn walk(
     let (mut next, mut entries, mut orphans, mut compared, mut discrepancies) =
         (begin.first, 0u64, 0u64, 0u64, 0u64);
     let mut previous = None;
+    let mut recent = RecentCanonical::default();
     let mut failure = None;
     let mut progress = 1u64 << 30;
     let mut reader = ReadAhead {
@@ -376,6 +440,19 @@ fn walk(
             });
             break;
         }
+        if kind != Kind::Blocks
+            && reference.is_some()
+            && n < next
+            && let Some(indexed) = recent.duplicate(&e)
+        {
+            if indexed {
+                discrepancies -= 1;
+            }
+            hash.update(&e.bytes);
+            at += e.bytes.len() as u64;
+            orphans += 1;
+            continue;
+        }
         let problem = if n != next {
             Some(format!(
                 "expected block {next}, found {n}; fork/gap selection is ambiguous without sufficient canonical evidence"
@@ -401,11 +478,16 @@ fn walk(
             compared += 1;
         }
         let slot = u64::from(n - begin.first) * 8;
-        if let Some(index) = &mut index_reader {
-            if slot + 8 > index_bytes || index.index_position(slot, index_bytes)? != e.offset {
-                discrepancies += 1;
+        let indexed = if let Some(index) = &mut index_reader {
+            if slot + 8 <= index_bytes {
+                Some(index.index_position(slot, index_bytes)?)
+            } else {
+                None
             }
         } else {
+            None
+        };
+        if indexed != Some(e.offset) {
             discrepancies += 1;
         }
         accept(&e)?;
@@ -414,6 +496,10 @@ fn walk(
         entries += 1;
         next = n.checked_add(1).context("block number overflow")?;
         previous = Some(e.id);
+        if kind != Kind::Blocks && reference.is_some() {
+            let unmatched_index = indexed.filter(|&position| position != e.offset);
+            recent.remember(e, unmatched_index);
+        }
         if at >= progress {
             eprintln!(
                 "recover-tail [{phase}]: checked {} of {}",
@@ -1501,6 +1587,138 @@ mod tests {
                 assert_eq!(fs::read(&f.log).unwrap(), f.bytes[..cut]);
             }
         }
+    }
+
+    #[test]
+    fn identical_canonical_ship_repeats_recover_and_accept_equivalent_index_positions() {
+        for kind in [Kind::Trace, Kind::ChainState] {
+            for index_variant in 0..5 {
+                let f = ShipFixture::new(kind, false);
+                let mut bytes = f.bytes[..f.offsets[3] as usize].to_vec();
+                let mut offsets = f.offsets.clone();
+                for (i, indexed) in offsets.iter_mut().enumerate().take(3).skip(1) {
+                    let at = bytes.len() as u64;
+                    bytes.extend_from_slice(
+                        &f.bytes[f.offsets[i] as usize..f.offsets[i + 1] as usize - 8],
+                    );
+                    bytes.extend(at.to_le_bytes());
+                    if index_variant == 1 {
+                        *indexed = at;
+                    }
+                }
+                offsets[3] = bytes.len() as u64;
+                bytes.extend_from_slice(&f.bytes[f.offsets[3] as usize..f.bytes.len() - 8]);
+                bytes.extend(offsets[3].to_le_bytes());
+                fs::write(&f.log, &bytes).unwrap();
+                if index_variant == 2 {
+                    // A position for another block must not be excused as equivalent.
+                    offsets[1] = offsets[2];
+                }
+                let mut index = offsets
+                    .iter()
+                    .flat_map(|p| p.to_le_bytes())
+                    .collect::<Vec<_>>();
+                if index_variant == 3 {
+                    index.truncate(index.len() - 5);
+                }
+                if index_variant == 4 {
+                    fs::remove_file(f.log.with_extension("index")).unwrap();
+                } else {
+                    fs::write(f.log.with_extension("index"), index).unwrap();
+                }
+                let out = f.blocks.dir.path().join("recovered-repeats");
+                let report = f.run(&f.sources, Mode::Salvage, Some(&out)).unwrap();
+                assert_eq!(
+                    report.json["inspection"]["failure"],
+                    serde_json::Value::Null
+                );
+                assert_eq!(report.json["inspection"]["entries"], 4);
+                assert_eq!(report.json["inspection"]["omitted_fork_entries"], 2);
+                assert_eq!(
+                    report.json["inspection"]["index_discrepancies"],
+                    [0, 0, 1, 1, 4][index_variant]
+                );
+                assert_eq!(
+                    fs::read(out.join(format!("recovered/{}.log", kind.stem()))).unwrap(),
+                    f.bytes
+                );
+                assert_eq!(fs::read(&f.log).unwrap(), bytes);
+                let no_refs = f.run(&Sources::default(), Mode::Salvage, None).unwrap();
+                assert!(no_refs.json["inspection"]["failure"].is_object());
+                assert_eq!(no_refs.json["options"]["salvage"]["available"], false);
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_ship_repeats_with_different_bytes_are_not_silently_selected() {
+        for kind in [Kind::Trace, Kind::ChainState] {
+            for change in 0..3 {
+                let f = ShipFixture::new(kind, false);
+                let old = &f.bytes[f.offsets[1] as usize..f.offsets[2] as usize - 8];
+                let (id, payload) = ship_payload(old).unwrap();
+                let repeated = match change {
+                    0 => crate::format::encode_ship(&id, &[0, 44], 1).unwrap(),
+                    1 => crate::format::encode_ship(&id, &payload, 0).unwrap(),
+                    _ => {
+                        let mut bad = old.to_vec();
+                        *bad.last_mut().unwrap() ^= 1;
+                        bad
+                    }
+                };
+                assert_ne!(repeated, old);
+                let mut bytes = f.bytes[..f.offsets[3] as usize].to_vec();
+                let at = bytes.len() as u64;
+                bytes.extend(repeated);
+                bytes.extend(at.to_le_bytes());
+                fs::write(&f.log, &bytes).unwrap();
+                let report = f.run(&f.sources, Mode::Salvage, None).unwrap();
+                assert_eq!(report.json["inspection"]["entries"], 3);
+                assert_eq!(report.json["inspection"]["omitted_fork_entries"], 0);
+                assert_eq!(report.json["inspection"]["failure"]["offset"], at);
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_repeat_memory_is_bounded_and_requires_original_body_bytes() {
+        fn entry(n: u32, size: usize) -> Entry {
+            let mut id = [0; 32];
+            id[..4].copy_from_slice(&n.to_be_bytes());
+            Entry {
+                offset: u64::from(n),
+                bytes: vec![0; size],
+                id,
+                previous: None,
+            }
+        }
+        let mut recent = RecentCanonical::default();
+        for n in 0..=RECENT_CANONICAL_BLOCKS {
+            recent.remember(entry(n, 16), Some(999));
+        }
+        assert_eq!(recent.entries.len(), RECENT_CANONICAL_BLOCKS as usize);
+        assert!(recent.duplicate(&entry(0, 16)).is_none());
+        assert_eq!(recent.duplicate(&entry(1, 16)), Some(false));
+        let mut different = entry(1, 16);
+        different.bytes[0] = 1;
+        assert!(recent.duplicate(&different).is_none());
+        let mut indexed = entry(1, 16);
+        indexed.offset = 999;
+        assert_eq!(recent.duplicate(&indexed), Some(true));
+        assert_eq!(recent.duplicate(&indexed), Some(false));
+        for n in 4097..4102 {
+            recent.remember(entry(n, 1 << 20), None);
+            assert!(recent.bytes <= RECENT_CANONICAL_BYTES);
+        }
+        assert_eq!(recent.entries.len(), 4);
+        assert!(recent.duplicate(&entry(4097, 1 << 20)).is_none());
+        recent.remember(entry(4102, RECENT_CANONICAL_BYTES + 1), None);
+        assert_eq!(recent.entries.len(), 4);
+        assert!(
+            recent
+                .duplicate(&entry(4102, RECENT_CANONICAL_BYTES + 1))
+                .is_none()
+        );
     }
 
     #[test]

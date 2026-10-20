@@ -545,6 +545,13 @@ the tool omits intact noncanonical entries and rebuilds canonical positions; wit
 it, SHIP inspection is provisional and output is refused. A final unindexed entry
 is examined instead of being silently assumed to be an abandoned fork.
 
+After a fork, SHIP may repeat an earlier canonical entry. Recovery can omit a repeat
+whose entire encoded body equals the earlier validated body, with canonical block
+evidence for both. These repeats are included in `omitted_fork_entries`. An index
+pointing to either identical copy is accepted. The comparison retains at most
+4 MiB of bodies across 4,096 blocks; older or larger repeats, conflicting payloads,
+and different encodings still stop inspection as ambiguous.
+
 To keep only the complete prefix, select salvage explicitly:
 
 ```sh
