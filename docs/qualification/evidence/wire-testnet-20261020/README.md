@@ -18,8 +18,11 @@ completeness, canonical ABI bootstrap, native workers, Rust, API and release acc
   runtime checks. `component-probe-original.mjs` preserves that original local probe, including its
   historical workspace paths; use the portable script below for reproduction.
 - `protocol-node-artifact.json` preserves all 68 exact component file hashes and source revision.
-  Fresh Git builds may have a different source-origin metadata field; their complete file list and
-  file hashes must still match. `verification.json` records the parent's independent artifact,
+  `protocol-source-receipt.json` preserves the original receipt. Git builds label that receipt's
+  source origin `git-checkout`; the installed archive labels it `npm-resolved-git-archive`. The
+  checker permits only this enumerated origin field to differ, compares every other receipt value
+  including all source/output hashes, and strictly matches the other 67 component file hashes.
+  `verification.json` records the parent's independent artifact,
   archive, member and report verification.
 
 The original preflight note intentionally retains its incomplete official-vector view. The later

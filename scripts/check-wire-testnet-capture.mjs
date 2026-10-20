@@ -22,7 +22,21 @@ const reference = JSON.parse(readFileSync(join(evidence, 'protocol-node-artifact
 const manifest = JSON.parse(readFileSync(join(wire, 'dist/protocol-node-artifact.json')));
 assert.equal(manifest.sourceRevision, '8b7d8a39f098bde77fa8d8f22a20a4fffc3e457b');
 assert.equal(manifest.sourceModified, false);
-assert.deepEqual(manifest.files, reference.files, 'The built component must match all captured component file hashes');
+const receiptPath = 'dist/protocol-source-receipt.json';
+const referenceReceiptBytes = readFileSync(join(evidence, 'protocol-source-receipt.json'));
+assert.equal(hash(referenceReceiptBytes), reference.files.find(file => file.path === receiptPath).sha256);
+const referenceReceipt = JSON.parse(referenceReceiptBytes);
+const actualReceiptBytes = readFileSync(join(wire, receiptPath));
+const actualReceipt = JSON.parse(actualReceiptBytes);
+assert.equal(referenceReceipt.sourceOrigin, 'npm-resolved-git-archive');
+assert.ok(['npm-resolved-git-archive', 'git-checkout'].includes(actualReceipt.sourceOrigin));
+assert.equal(manifest.sourceOrigin, actualReceipt.sourceOrigin);
+// The build deliberately records its source container. Permit only that metadata field to
+// differ; every source/output hash and every other receipt field must remain identical.
+assert.deepEqual({...actualReceipt, sourceOrigin: referenceReceipt.sourceOrigin}, referenceReceipt);
+const expectedFiles = reference.files.map(file => file.path === receiptPath
+    ? {...file, sha256: hash(actualReceiptBytes)} : file);
+assert.deepEqual(manifest.files, expectedFiles, 'Component file hashes must match, with only the validated origin receipt variant');
 assert.equal(manifest.files.length, 68);
 for (const file of manifest.files) {
     const path = realpathSync(join(wire, file.path));
@@ -92,5 +106,6 @@ try {
 assert.equal(hash(readFileSync(inputPath)), hash(inputBytes));
 console.log(JSON.stringify({passed: true, runtime: process.version, sourceRevision: captured.sourceRevision,
     inputSha256: hash(inputBytes), packageRevision: manifest.sourceRevision, componentFiles: manifest.files.length,
+    exactReferenceFileHashes: manifest.files.length - 1, validatedReceiptOrigin: actualReceipt.sourceOrigin,
     observations, networkAttempts, fullInitialTableCompletenessValidated: false,
     canonicalAbiBootstrapQualified: false, nativeWorkerAcceptance: false}));

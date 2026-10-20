@@ -87,8 +87,11 @@ python scripts/check-wire-testnet-evidence.py
 node scripts/check-wire-testnet-capture.mjs /path/to/exact-built-hyperion-wire-plugin
 ```
 
-The latter requires source revision `8b7d8a39f098bde77fa8d8f22a20a4fffc3e457b` and all captured
-component file hashes; it performs no network access. CI rebuilds that exact revision separately
+The latter requires source revision `8b7d8a39f098bde77fa8d8f22a20a4fffc3e457b`, all 67 other
+component file hashes, and the generated provenance receipt with all source/output hashes unchanged.
+Only its enumerated Git-checkout versus npm-archive origin label may differ. The original installed
+component's complete 68-file hash record remains unchanged. The check performs no network access.
+CI rebuilds that exact revision separately
 for Node 22 and 24. This is a Node codec regression over actual network input, not a worker run,
 performance result, complete state inventory, canonical ABI frontier or Rust acceptance.
 
