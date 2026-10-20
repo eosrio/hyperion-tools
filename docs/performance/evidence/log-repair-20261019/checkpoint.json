@@ -1442,8 +1442,7 @@
     "note": "Fresh history matched all 1998 traces and 1997 subsequent deltas; initial full-state payload is not equivalent to original delta."
   },
   "pending": [
-    "Final-candidate full trace inspection and verification pilot is running; repeated final-artifact commands and chain-state baselines remain",
-    "Ultra 64 GiB independent-corpus repeated scan/verify; recovery explicitly refuses its different genesis layout",
+    "Repeated final-artifact scan/verify/inspection and chain-state baselines; one complete final trace inspect/verify pilot passed",
     "Healthy ZFS and controlled-cache qualification; EOS 128 GiB copy stopped after a permanent source-file pool error",
     "Repeated full-size recovery operations; existing five-operation measurement is a single pilot",
     "Broader media errors, remaining journal/write/fsync/short-write boundaries and physical storage/VM power cuts; see QUALIFICATION.md"
@@ -2622,5 +2621,2323 @@
       }
     ],
     "policy": "Canonical block evidence and byte-identical encoded bodies, bounded by 4 MiB and 4096 blocks. Other repeats keep the ambiguity stop."
+  },
+  "actual_canonical_repeat_reproduction": {
+    "fixture_archive_sha256": "96b7c6c5c67e0d3015ff8b683de51619e41a9464fb812f8f8b36468fc2eb4253",
+    "proof": {
+      "ok": true,
+      "chain_id": "38b1d7815474d0c60683ecbea321d723e83f5da6ae5f1c1f9fecc69d9ba96465",
+      "range": [
+        172018800,
+        172018870
+      ],
+      "original_physical_range": [
+        55615994774,
+        55616034381
+      ],
+      "original_physical_sha256": "6d4368372a267c394caf72a871812cc2a54ef54ed3b78b3e99152f7474ce16bf",
+      "physical_records": 95,
+      "canonical_records": 71,
+      "baseline_prefix": {
+        "entries": 41,
+        "first_block": 172018800,
+        "last_block": 172018840,
+        "physical_end": 21783
+      },
+      "candidate_prefix": {
+        "entries": 71,
+        "first_block": 172018800,
+        "last_block": 172018870,
+        "physical_end": 39607
+      },
+      "omitted_fork_entries": 24,
+      "expected_log_sha256": "da4b29501d0c6b1d93a2c9c67f71029cc719235af26f201c7f07e4035d67436f",
+      "actual_log_sha256": "da4b29501d0c6b1d93a2c9c67f71029cc719235af26f201c7f07e4035d67436f",
+      "expected_index_sha256": "b0191efcfd8db62f8b74bab4938c0f38c9315943107db7f78f88bc1890dad0c6",
+      "actual_index_sha256": "b0191efcfd8db62f8b74bab4938c0f38c9315943107db7f78f88bc1890dad0c6",
+      "inputs_preserved": true,
+      "records": [
+        {
+          "block": 172018800,
+          "original_offset": 55615994774,
+          "offset": 0,
+          "body_sha256": "6de9da01130128968cfa3d11a2b2187a32216fd2d4a5ac1b540b65d4d949f629",
+          "id": "0a40cc70912be23b5d20f56da1c0c60abbe77da7678f65a7361828641738ab8e"
+        },
+        {
+          "block": 172018801,
+          "original_offset": 55615995185,
+          "offset": 411,
+          "body_sha256": "cc8024010fceef7f2ffe0764a5cfefe31944df46ddc08eefb978222a15e6b961",
+          "id": "0a40cc7152d717b22961ed4ee6f6cce1dee6a2607b6fb9e2885c3cc9f19411d3"
+        },
+        {
+          "block": 172018802,
+          "original_offset": 55615995596,
+          "offset": 822,
+          "body_sha256": "a440c8c710c2c926cc00c46a377cf5bc8d858a81b1d685a80b118081befd8a49",
+          "id": "0a40cc729f9c647594bea7abcfa1d2f1fe66bd143b905194ed972354b617d83d"
+        },
+        {
+          "block": 172018803,
+          "original_offset": 55615996007,
+          "offset": 1233,
+          "body_sha256": "41d804786e4d2196cfc21ea9fec302c75cd3f0e1869e3c508c3f003bc97bbee5",
+          "id": "0a40cc73a4f5c2ade72375c870e962926b5f1240a4ca294b9e3f70a260f9947d"
+        },
+        {
+          "block": 172018804,
+          "original_offset": 55615996418,
+          "offset": 1644,
+          "body_sha256": "9793525309fdcc1c35a77765be38f2afd4c6cdbfc7ca6f7b15633d5176cae1b4",
+          "id": "0a40cc748550d3e28e787f012ebab4d5bd5c12e3106cd66d9a444b0b3d40e2d4"
+        },
+        {
+          "block": 172018805,
+          "original_offset": 55615996829,
+          "offset": 2055,
+          "body_sha256": "f6369e9afae10bf715b384ca62e871474a716eaf5f3f6dbd3dce6e2118930c00",
+          "id": "0a40cc75996fe85e24402d466d5266ac682a29904d968f9592170875943fb92c"
+        },
+        {
+          "block": 172018806,
+          "original_offset": 55615997240,
+          "offset": 2466,
+          "body_sha256": "71b3afef3964690cdee8d5eff358bbff600f5e4305ec476b0313e8f6bbcf8d01",
+          "id": "0a40cc76cd92d1cb693d2b2e593b2f3edf3fe2f963e9da6936dd2c781d633223"
+        },
+        {
+          "block": 172018807,
+          "original_offset": 55615997651,
+          "offset": 2877,
+          "body_sha256": "91d0eaa38cfac71fb0a9f6a1caa935e1f2f19858827397b8c7fd1e7c59ec41f1",
+          "id": "0a40cc77f7d9de939627722d5e24ee66e83d18b22d0adcb2793339fbfcf42c9c"
+        },
+        {
+          "block": 172018808,
+          "original_offset": 55615998062,
+          "offset": 3288,
+          "body_sha256": "a00f2fc9be53c667bc167293e828605cfd25c680d61807167f4e77ea0aaa45e7",
+          "id": "0a40cc78ea80fa957bf70d834af9e500230635d6e15d73e11e480b92c8cac7ba"
+        },
+        {
+          "block": 172018809,
+          "original_offset": 55615998473,
+          "offset": 3699,
+          "body_sha256": "a6c0bc9f89f0cc9001a9a864f361dcb5afa80517526f79cd16c43607bd0a4abf",
+          "id": "0a40cc799da299977004220cd27314135f027e16a7291ffa7c92b5efd659bdfe"
+        },
+        {
+          "block": 172018810,
+          "original_offset": 55615998884,
+          "offset": 4110,
+          "body_sha256": "2a63448226de1c35617acf434497e3d8b86085fb5b4ae5b04b4bace896c56605",
+          "id": "0a40cc7a6d42bd8c0f93f942aa7606353f1871ecca64724258439b89d1596089"
+        },
+        {
+          "block": 172018811,
+          "original_offset": 55615999295,
+          "offset": 4521,
+          "body_sha256": "89cc282cb1e8b097e7ce29a70650ea83d48d57663af0daa9b5b2e251f782050e",
+          "id": "0a40cc7baaa36a9c194a0bab14131fa2b22bea0c5fa727fd3e78eb37ecfdbcff"
+        },
+        {
+          "block": 172018812,
+          "original_offset": 55615999706,
+          "offset": 4932,
+          "body_sha256": "8f8e65e855d1df716e689615649d9bd7c24b3ac6a4daafcdf612eab2f959f257",
+          "id": "0a40cc7c74aa9311e7fd863875a4d3668684a45ce979b27d2de55c37df00ed9f"
+        },
+        {
+          "block": 172018813,
+          "original_offset": 55616000117,
+          "offset": 5343,
+          "body_sha256": "82b39183c31db71ebf0fb14a170db79d97b5c7ae874e8345e2455c31efbffd1e",
+          "id": "0a40cc7d184d65e9f62b3348dd7d7548da73536ee90cd48ff30239d8565fc8e4"
+        },
+        {
+          "block": 172018814,
+          "original_offset": 55616000528,
+          "offset": 5754,
+          "body_sha256": "f4b134e3457ab6cf21ac9d145d4d42b8e599e85aa8c69eb3cd9c50ef058cba9b",
+          "id": "0a40cc7ef4c4077b7584ff24189fdf96955b771b4fb5a314118fbc376e5a9378"
+        },
+        {
+          "block": 172018815,
+          "original_offset": 55616000939,
+          "offset": 6165,
+          "body_sha256": "501cc8c38ddef1c9b469abb3e009b4781c8657be5bbe1fda5addc701f337a0a1",
+          "id": "0a40cc7feb0131179216cc833473d1270e9c94347de55121b2a3f5e91d76f779"
+        },
+        {
+          "block": 172018816,
+          "original_offset": 55616001350,
+          "offset": 6576,
+          "body_sha256": "d9d8faca263b3a96a5982aac123d53f2d769e1388e5400f351e04c00fb3e4be1",
+          "id": "0a40cc8081f606ff52c4ab7ad473840cb16fa1c7ab9a3d443fd46952b022cf6c"
+        },
+        {
+          "block": 172018817,
+          "original_offset": 55616001761,
+          "offset": 6987,
+          "body_sha256": "a434ef1f04a1e7883d3d1bd2d91956c328446fd3870491725193b3a2907bda47",
+          "id": "0a40cc811077fd5c91fab275dc7f8dd70222907412a41ba3a35ea7376671d4bf"
+        },
+        {
+          "block": 172018818,
+          "original_offset": 55616002172,
+          "offset": 7398,
+          "body_sha256": "f409ae3f0ce2bd84ff178dafbf0a048bbb549ee40437f651dee3dacce2603519",
+          "id": "0a40cc82288102b3605dceb3c7a1633f963fddea9b6f7afdb3eae655df0d7e4a"
+        },
+        {
+          "block": 172018819,
+          "original_offset": 55616002583,
+          "offset": 7809,
+          "body_sha256": "ffdb0ac7260c097359498e868f52a2ff5f6e7a5b7a05a5cf380c207075875357",
+          "id": "0a40cc83224671a77650754453970e04611893fd9d0fae0eb8a9eefa4ee2678e"
+        },
+        {
+          "block": 172018820,
+          "original_offset": 55616002994,
+          "offset": 8220,
+          "body_sha256": "c67f8971e098379e494867fe58e9cb92427bc758313e09064ca1e870a106340e",
+          "id": "0a40cc8495a67b30027f5491838d36a5b3fe87d016abb7cd00fce65dc0d72c5e"
+        },
+        {
+          "block": 172018821,
+          "original_offset": 55616003405,
+          "offset": 8631,
+          "body_sha256": "72230acb819683a77bfa050e6d8e04b67605c4b7c4f3c3ed91a697be9493a0b9",
+          "id": "0a40cc85f2d4041af0e2759465d8bf83baa8aedd01077d9d0b39339ee823bf9f"
+        },
+        {
+          "block": 172018822,
+          "original_offset": 55616003816,
+          "offset": 9042,
+          "body_sha256": "4e61c6f29faa5abca6e03fbfe83bb3ba0b4ff6db64e5a0adaf1ddc5be851c520",
+          "id": "0a40cc866aa4ac6526c6bcd5e46e920203dd9dc06acb3285d604343dc7d3d27e"
+        },
+        {
+          "block": 172018823,
+          "original_offset": 55616004227,
+          "offset": 9453,
+          "body_sha256": "b497a93694cf19c9fe6e936938fe330b050f952a9bc179522472ddd14d1f1e66",
+          "id": "0a40cc877eb9f5af8ab8f42a93abf4a5d56e3c34afa30d9774f5d259b47df10f"
+        },
+        {
+          "block": 172018824,
+          "original_offset": 55616004638,
+          "offset": 9864,
+          "body_sha256": "037c02b1fa7b815297e056ab4025d8b25dbb481e953dc47a16557ccb76676f1e",
+          "id": "0a40cc8841b616f5bb02c7150f13684d7297fc44a7dd9d1b68e50addc32fa3d8"
+        },
+        {
+          "block": 172018825,
+          "original_offset": 55616005049,
+          "offset": 10275,
+          "body_sha256": "72acee606db1af6011d5e25e8dc9ee75413716999e0e9fae11414837ab3f2314",
+          "id": "0a40cc893cc86eca3ffdc65b6f2f36e13faa91ae20e831be88c6840ff54d55f3"
+        },
+        {
+          "block": 172018826,
+          "original_offset": 55616005460,
+          "offset": 10686,
+          "body_sha256": "864bb4a35d687dc8eaeb2378161cf9806b89cc74471c825e94081d9052cf1bdc",
+          "id": "0a40cc8adf60a5148f8be1c070e83dc935ff79adf2c8dc24dbfbb3fd3acfe80e"
+        },
+        {
+          "block": 172018827,
+          "original_offset": 55616005871,
+          "offset": 11097,
+          "body_sha256": "1a347b252430f80daeba5a9d1e8a9b16913d372fe79d6d5bb787d22b988066dc",
+          "id": "0a40cc8b454b177a555ba1d6e8240c9633734a6f213968c7a48e3487c38c29ec"
+        },
+        {
+          "block": 172018828,
+          "original_offset": 55616006282,
+          "offset": 11508,
+          "body_sha256": "b7bad4f9ba99ddce37e78d569b17fd8142001274f6416da3bc7005614ada8387",
+          "id": "0a40cc8c6118363f67424bf084af107c66749c346d83e92a6e06da03a9779b46"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616006693,
+          "offset": 11919,
+          "body_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+          "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616007104,
+          "offset": 12330,
+          "body_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+          "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616007515,
+          "offset": 12741,
+          "body_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+          "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616007926,
+          "offset": 13152,
+          "body_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+          "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616008337,
+          "offset": 13563,
+          "body_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+          "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616008748,
+          "offset": 13974,
+          "body_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+          "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616009159,
+          "offset": 14385,
+          "body_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+          "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616009570,
+          "offset": 14796,
+          "body_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+          "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616009981,
+          "offset": 15207,
+          "body_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+          "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616010392,
+          "offset": 15618,
+          "body_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+          "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616010803,
+          "offset": 16029,
+          "body_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+          "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616011214,
+          "offset": 16440,
+          "body_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+          "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616011625,
+          "offset": 16851,
+          "body_sha256": "4a951665cc5d1aa9e783c855c130bef07b361f8a1fd3901f4b439ab0f19f9cc2",
+          "id": "0a40cc8dc59f740ff69fa128454ec39230e037099683f10ca7f7f56320d62570"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616012036,
+          "offset": 17262,
+          "body_sha256": "5953200af039bcc182edcad3c1042cc8c9a47890bbeed263daf4701b1a054c63",
+          "id": "0a40cc8eb134a2a028ce3075c7ee1224d42ec4e1b250a3f4de79466bd9004cca"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616012447,
+          "offset": 17673,
+          "body_sha256": "7bbe9fa44e60e8e30017fd9cdd11b6332a79a4685b58042df5994536107419fb",
+          "id": "0a40cc8fea4cf29d9d821d3791ff74cf95a527e50c314ea56d7e9ea459377024"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616012858,
+          "offset": 18084,
+          "body_sha256": "75a7f20dd19138dd6d8e3220bbccc72f077e741b66a9649213e931696fd36b9b",
+          "id": "0a40cc90e5c739da357fbf3984c1a33035c8a62f0078af12d3bedecf424d87fb"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616013269,
+          "offset": 18495,
+          "body_sha256": "66cf5a14d74f01fdaff7ced9055c24a75e00c3a9b69bdf9dc28372446c4f3d11",
+          "id": "0a40cc91f9ed60f0478e24b3f0ab45e56fbcf9a8df66f6ce7df0197807fad3ce"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616013680,
+          "offset": 18906,
+          "body_sha256": "6853478a472aed280ddcd156880211bf24c2af7e7b0a91f80df5f77a33a4c196",
+          "id": "0a40cc924be041645949e0246858ff4eff63649f7c57cec5c392a8e1e460afc7"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616014091,
+          "offset": 19317,
+          "body_sha256": "8cb26c9a380b1bd3fcc50ed8b1cbc77bce3bc106394ab943733eba05ddde92a9",
+          "id": "0a40cc9356c6668274c0e519ed8d9c0554d1e52789ab4231ccd1706e6b0347bb"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616014502,
+          "offset": 19728,
+          "body_sha256": "0c57b582c0afa4934ed29aa5bb565509ba63ef0bfdff0c977a1ac6e8af596b90",
+          "id": "0a40cc941cb77047c3f800a782c0ccca6a602fcb900411ca5ef7430b2791d01c"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616014913,
+          "offset": 20139,
+          "body_sha256": "05da090b0ae1e3be058ead3aebd6548305f9999ac78a953ea72704f564bd3878",
+          "id": "0a40cc95dc1cfeb9afff21396836472c49e73b6b46e53bfa4f5bb06b25360229"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616015324,
+          "offset": 20550,
+          "body_sha256": "81e48b813a1c3e67f6c59faac193fbae081ab0dfa63f145202d69ec592167107",
+          "id": "0a40cc96cb68d6a49b2c854ff52edb7b51dfa80039a16a0d2abc0cb3eedc0d23"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616015735,
+          "offset": 20961,
+          "body_sha256": "10986722b467929803685115c8b7c5926f8cd06036c03a6e6f579f5c8d4405f0",
+          "id": "0a40cc97b7ee14bb9b5c164376d8e07af1ec856f6d0a7602117a771e25814bc3"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616016146,
+          "offset": 21372,
+          "body_sha256": "89d7cede5132a0f0efd057641433fe144d26c93b57bc93c5b1c0d062b2fb439f",
+          "id": "0a40cc9883b250be89eaee9c527366f2f84788a105e45a915787e434211bf143"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616016557,
+          "offset": 21783,
+          "body_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+          "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616016968,
+          "offset": 22194,
+          "body_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+          "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616017379,
+          "offset": 22605,
+          "body_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+          "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616017790,
+          "offset": 23016,
+          "body_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+          "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616018201,
+          "offset": 23427,
+          "body_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+          "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616018612,
+          "offset": 23838,
+          "body_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+          "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616019023,
+          "offset": 24249,
+          "body_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+          "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616019434,
+          "offset": 24660,
+          "body_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+          "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616019845,
+          "offset": 25071,
+          "body_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+          "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616020256,
+          "offset": 25482,
+          "body_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+          "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616020667,
+          "offset": 25893,
+          "body_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+          "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616021078,
+          "offset": 26304,
+          "body_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+          "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+        },
+        {
+          "block": 172018841,
+          "original_offset": 55616021489,
+          "offset": 26715,
+          "body_sha256": "3893fbffaeba1a8fecdaa0033888cf405ffcd4f0b6e1ebc7fd31da10f58edb74",
+          "id": "0a40cc997fa9212a6d82ccd65380c13683d5798f2678ec0c19121961292378c4"
+        },
+        {
+          "block": 172018842,
+          "original_offset": 55616022462,
+          "offset": 27688,
+          "body_sha256": "fe2ab51dabe53973260ae6fdf39455197324b6c5cbab0e56213454f65d8dcd4a",
+          "id": "0a40cc9a23eedb44c5a5c53eddfdd7cd58ccf212aab0fba25d042601ec80aec0"
+        },
+        {
+          "block": 172018843,
+          "original_offset": 55616022873,
+          "offset": 28099,
+          "body_sha256": "b50ac70e760dac50dc51d654ee72f1e022710db4ee2adfe652032992ad139484",
+          "id": "0a40cc9b361870422570ad4f520062705edea60781457875a9a907e5c14af6d4"
+        },
+        {
+          "block": 172018844,
+          "original_offset": 55616023284,
+          "offset": 28510,
+          "body_sha256": "28cb2405b2bb1b41a621372f44bc452831ce3a56d357b83171ccc773a8283e88",
+          "id": "0a40cc9c9c63c28cb0202df8ec65ba8453ed7c84b753f6cb86fd132fe44737de"
+        },
+        {
+          "block": 172018845,
+          "original_offset": 55616023695,
+          "offset": 28921,
+          "body_sha256": "e12dc344b1b3dbffc47f956a46fbe7d3d918884a3dcd26ec22aadbe7508fdaea",
+          "id": "0a40cc9d22ac6b25b72a2f4fff6b63f061362bb88ab66d10d1858180367e29ea"
+        },
+        {
+          "block": 172018846,
+          "original_offset": 55616024106,
+          "offset": 29332,
+          "body_sha256": "f81b937ab84860be94200e369e803a6c60210f506c6afaadfc9636e77faffc54",
+          "id": "0a40cc9e8fb8a76d9df4357f497cb6c0e1d9b671953e76f850df6fa47f19efc6"
+        },
+        {
+          "block": 172018847,
+          "original_offset": 55616024517,
+          "offset": 29743,
+          "body_sha256": "cc970a1adfa21fa3d95d5af011e4112dbc855795fcb367bdebc1aafb711aaccf",
+          "id": "0a40cc9fc9558d0c5940c18c8ee1a837928dcfc7de178e8b9878e297a881baef"
+        },
+        {
+          "block": 172018848,
+          "original_offset": 55616024928,
+          "offset": 30154,
+          "body_sha256": "b30831d6987e094c1fbf62dfc6d709aaa330c655ab526c718330d4d548145b80",
+          "id": "0a40cca0919cc801dbc5a0ccc80eca6cff6d2ec93ec79b9c95c267398a26ea0d"
+        },
+        {
+          "block": 172018849,
+          "original_offset": 55616025339,
+          "offset": 30565,
+          "body_sha256": "f49bcb463d5a25a8777b81c3501d80c70b0de29c811f8bc433fe0c3e3c8d62c9",
+          "id": "0a40cca168c231e68c3087826e9ea70463f8d5348e14ae1315a23d43f5177507"
+        },
+        {
+          "block": 172018850,
+          "original_offset": 55616025750,
+          "offset": 30976,
+          "body_sha256": "18c5b5387f0dab0efc2e6a499323e71139c946f7b75c62e3ceef4c68bfedaecc",
+          "id": "0a40cca261a6640874c9b79859ca8b6ca76fab5fbd1111fa1d9666f6ed7b00e1"
+        },
+        {
+          "block": 172018851,
+          "original_offset": 55616026161,
+          "offset": 31387,
+          "body_sha256": "9f92c8f61dd58840284130826b3f5a4507b31f1c403ea118fad8ddabac708b5c",
+          "id": "0a40cca3f19b39138d308f57e6cf4015b5f4403ddcd4e82969c8e75abf1b85cb"
+        },
+        {
+          "block": 172018852,
+          "original_offset": 55616026572,
+          "offset": 31798,
+          "body_sha256": "cd3f6d452772a5a7cd6571d1a578fdce7aa89dc1d23db75f519ec42216ba4762",
+          "id": "0a40cca45ae504dc34516038b65d88062002b7ffd5dc6b3c6711287bd83c7b69"
+        },
+        {
+          "block": 172018853,
+          "original_offset": 55616026983,
+          "offset": 32209,
+          "body_sha256": "8c66102d1a9eb6cc680a44f413e8a4eb6970e4fcf203fc03e36347f6bce049be",
+          "id": "0a40cca5d165d7696d1c682d49ed30b398b23cb82b88de5c68c7ad2f0b786d03"
+        },
+        {
+          "block": 172018854,
+          "original_offset": 55616027394,
+          "offset": 32620,
+          "body_sha256": "aa992febf79478a2ba595358a0f72ec8de379486e954e364843eb8ef5cd7c51c",
+          "id": "0a40cca6ae0fa437aa25dbc1c9b00b00752c9a6ba821c2a9ff3df5130fb916e6"
+        },
+        {
+          "block": 172018855,
+          "original_offset": 55616027805,
+          "offset": 33031,
+          "body_sha256": "d89664adc279b852c03549d89e8a24c967a2cf7d81549b4ad3242de5e81b2c7a",
+          "id": "0a40cca78c6393421ad19756fd77f1b0fdb50cf25081eeb2b5705305cc3cc497"
+        },
+        {
+          "block": 172018856,
+          "original_offset": 55616028216,
+          "offset": 33442,
+          "body_sha256": "0e4accfd9d9e2419d7ec05a47a6c7c5ab7c10695bec74a5246a44f6c11531d42",
+          "id": "0a40cca8ef96c7143f8cbcf01f8ac807586411579ef865ccc89492c76980d4ea"
+        },
+        {
+          "block": 172018857,
+          "original_offset": 55616028627,
+          "offset": 33853,
+          "body_sha256": "a79fd542d9d67a2f8236f12e92acce368eab74897147e9b9f1b42d0316420d0e",
+          "id": "0a40cca9da10a8b393082f326e81bb3eb25415dc812c0bb36cf3320783821ca9"
+        },
+        {
+          "block": 172018858,
+          "original_offset": 55616029038,
+          "offset": 34264,
+          "body_sha256": "6f23f16320ce2fde861b7a7d37331263c15679ace3d291c0c3fae2c73951bb44",
+          "id": "0a40ccaaa6f6531cde7271666554eba9094105241f05edaf180fbec7fbbee16a"
+        },
+        {
+          "block": 172018859,
+          "original_offset": 55616029449,
+          "offset": 34675,
+          "body_sha256": "5c7729d50e60a6bcdf3f7dab69c1da031ec16356b29271f02cbf87676819d9a0",
+          "id": "0a40ccabaffeb67df9ed71ce49f0ce27a64f69c0a25b43dd371d3978a9ef170c"
+        },
+        {
+          "block": 172018860,
+          "original_offset": 55616029860,
+          "offset": 35086,
+          "body_sha256": "c239ea6374b67a53f1622bd7b23cdf936845fdd205ed133fac85e58535877fe2",
+          "id": "0a40ccace214b8df25c0310dbd5fd98b35fc8bb95398e5f561f8d8d79c7b6584"
+        },
+        {
+          "block": 172018861,
+          "original_offset": 55616030271,
+          "offset": 35497,
+          "body_sha256": "f6f4bf6b31f9886af351e0b99d9c1b42ef480c2e44691c4f03b1214807ed2827",
+          "id": "0a40ccadd7e0f164d8ba1da00da7e41173134732dfd75dcbfadb82f9eb5e84ec"
+        },
+        {
+          "block": 172018862,
+          "original_offset": 55616030682,
+          "offset": 35908,
+          "body_sha256": "f151bf6dc0375ec6c52683adad1006f22e8890e1cfbc8919ee917495ca0bb01f",
+          "id": "0a40ccae874c91ec696e20e53ca6fb7a08875c71713272387244b2d7a6107260"
+        },
+        {
+          "block": 172018863,
+          "original_offset": 55616031093,
+          "offset": 36319,
+          "body_sha256": "44bb622e56300c1e81bcdcf58d3d10045e2a39a2bff3fe4dd2134098bbfefb80",
+          "id": "0a40ccaff2e601098be856fef5f12783c3d9e5ff37d63232c63e5db27a080bd7"
+        },
+        {
+          "block": 172018864,
+          "original_offset": 55616031504,
+          "offset": 36730,
+          "body_sha256": "9a020c9185d77b3277f6b6a0c58b2dfce1e7f8cbbfc48e2afa382ce7e820ee0f",
+          "id": "0a40ccb0dd8a2cd3cbe8cc94a7d1a75e2bcf0699d0955e61e29350809ac61212"
+        },
+        {
+          "block": 172018865,
+          "original_offset": 55616031915,
+          "offset": 37141,
+          "body_sha256": "791e6a83b0e1a317bd0d16795480f2ec5d5e6e13a178dc915de76bff8ab7a92d",
+          "id": "0a40ccb12c38b9d616e9a0bdf0480c9f552220a42b659562dc33ec257db9f5b8"
+        },
+        {
+          "block": 172018866,
+          "original_offset": 55616032326,
+          "offset": 37552,
+          "body_sha256": "a1bf00ca93b3040ff04da03abaaaa6df07d21433a1ad3b5795e72343b814eae4",
+          "id": "0a40ccb2dd07516c7a3bfb1416250df3c20282bba19a68d7ad186572a59e9076"
+        },
+        {
+          "block": 172018867,
+          "original_offset": 55616032737,
+          "offset": 37963,
+          "body_sha256": "9a805130cbd6ca6d1195db1cfa1172ba80d680e059f53b4bdf8f4215c15dd37a",
+          "id": "0a40ccb343d6dbe63d6d474644d888331181bddfba5eb0199c47ce49851a2f01"
+        },
+        {
+          "block": 172018868,
+          "original_offset": 55616033148,
+          "offset": 38374,
+          "body_sha256": "868750286843f252918be9ab67434cb8c4dc4604b7621348dde86b9a965c4331",
+          "id": "0a40ccb4282feac90a96969b02a6745cc2e80ab30fb6d5e3e7c9b1ba83814071"
+        },
+        {
+          "block": 172018869,
+          "original_offset": 55616033559,
+          "offset": 38785,
+          "body_sha256": "1486b45f6a4d32514cb8608ad8a830b3ee574c5cd5e379ecad4f5e8a638ac1fb",
+          "id": "0a40ccb5e69e79fc4a00f916bfa098ad6e01edd2f1db48458b40047816e98edf"
+        },
+        {
+          "block": 172018870,
+          "original_offset": 55616033970,
+          "offset": 39196,
+          "body_sha256": "18b506960cec7b927b6e6923fbc1356e816ba780b0db3263451633002998197f",
+          "id": "0a40ccb62b0c5a29389b9b936a276aaeb2a89b5ee43400f7736d8eb6b154fc1d"
+        }
+      ],
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    }
+  },
+  "ultra_64gib_scan_verify": {
+    "evidence": {
+      "large-supported-corpus/ready.json": {
+        "schema": 1,
+        "ok": true,
+        "pairs": [
+          {
+            "kind": "blocks",
+            "first_block": 1,
+            "last_block": 192881743,
+            "log_bytes": 68719476814,
+            "index_bytes": 1543053944,
+            "last_position": 68719476622,
+            "log": {
+              "path": "blocks/blocks.log",
+              "source": "/mnt/data1n1/ultra-mainnet/blocks/blocks.log",
+              "source_initial": {
+                "device": 66309,
+                "inode": 142999593,
+                "size": 103604470706,
+                "modified_ns": 1792454367375699860,
+                "changed_ns": 1792454367375699860
+              },
+              "source_after": {
+                "device": 66309,
+                "inode": 142999593,
+                "size": 103604929402,
+                "modified_ns": 1792454937840224311,
+                "changed_ns": 1792454937840224311
+              },
+              "bytes": 68719476814,
+              "sha256": "84a86b6dabb760c6b8d1638d1ca1bcdf72a8298b2285803ffe6b6b882d733c47",
+              "source_prefix_sha256": "84a86b6dabb760c6b8d1638d1ca1bcdf72a8298b2285803ffe6b6b882d733c47",
+              "copy_seconds": 169.90841923840344,
+              "kernel_copy": true,
+              "identity": [
+                66309,
+                34734166
+              ]
+            },
+            "index": {
+              "path": "blocks/blocks.index",
+              "source": "/mnt/data1n1/ultra-mainnet/blocks/blocks.index",
+              "source_initial": {
+                "device": 66309,
+                "inode": 142999599,
+                "size": 2692462264,
+                "modified_ns": 1792454367375699860,
+                "changed_ns": 1792454367375699860
+              },
+              "source_after": {
+                "device": 66309,
+                "inode": 142999599,
+                "size": 2692471552,
+                "modified_ns": 1792454947916586766,
+                "changed_ns": 1792454947916586766
+              },
+              "bytes": 1543053944,
+              "sha256": "c418d4e35a84fa7b21f6ea573d172d0e178b84ad62ec38e425674afa837ffa23",
+              "source_prefix_sha256": "c418d4e35a84fa7b21f6ea573d172d0e178b84ad62ec38e425674afa837ffa23",
+              "copy_seconds": 3.133933740667999,
+              "kernel_copy": true,
+              "identity": [
+                66309,
+                34734167
+              ]
+            }
+          }
+        ],
+        "elapsed_seconds": 580.5776516068727
+      },
+      "large-supported-baseline/plan.json": {
+        "schema": 1,
+        "source_revision": "2b4ebbcc8e9e265e995d1c46670fc79c5257cae2",
+        "tool_sha256": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9",
+        "tool": "/mnt/data1n1/antelope-qualification-20261019/binaries/baseline",
+        "corpus": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus",
+        "kinds": [
+          "blocks"
+        ],
+        "commands": [
+          "scan",
+          "verify"
+        ],
+        "repeats": 3,
+        "block_range": null,
+        "cache": "ordinary",
+        "host": {
+          "system": "Linux",
+          "node": "eosrio7920",
+          "release": "5.15.0-186-generic",
+          "version": "#196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026",
+          "machine": "x86_64",
+          "processor": "x86_64"
+        },
+        "profile": "none"
+      },
+      "large-supported-baseline/complete.json": {
+        "schema": 1,
+        "ok": true,
+        "tool_sha256": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9",
+        "results": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.90667769126594,
+            "user_seconds": 0.064021,
+            "system_seconds": 49.171764,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793783,
+            "sampled_program_peak_rss_kib": 18536,
+            "major_faults": 28,
+            "input_block_ops": 54200328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.9055957570672,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27750567936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793783,
+                "major_faults": 28,
+                "user_ticks": 6,
+                "system_ticks": 4917,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27750567936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.30855623912066,
+            "user_seconds": 0.08420799999999999,
+            "system_seconds": 48.052923,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793790,
+            "sampled_program_peak_rss_kib": 18524,
+            "major_faults": 0,
+            "input_block_ops": 53884328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.30795237980783,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2373,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27588775936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793790,
+                "major_faults": 0,
+                "user_ticks": 8,
+                "system_ticks": 4805,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2373,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27588775936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 56.91608199942857,
+            "user_seconds": 0.060152,
+            "system_seconds": 47.416869,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793803,
+            "sampled_program_peak_rss_kib": 18584,
+            "major_faults": 0,
+            "input_block_ops": 53893096,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 56.91562375705689,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2364,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27593265152,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793803,
+                "major_faults": 0,
+                "user_ticks": 6,
+                "system_ticks": 4741,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2364,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27593265152,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 192.461025983,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 192.47335752565414,
+            "user_seconds": 125.12603,
+            "system_seconds": 56.086002,
+            "max_rss_kib": 50012,
+            "minor_faults": 17566716,
+            "sampled_program_peak_rss_kib": 40384,
+            "major_faults": 1,
+            "input_block_ops": 54270832,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 192.4724369291216,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27786665984,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17566716,
+                "major_faults": 1,
+                "user_ticks": 12512,
+                "system_ticks": 5608,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27786665984,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 191.22788116,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 191.23969677090645,
+            "user_seconds": 123.233325,
+            "system_seconds": 56.311449,
+            "max_rss_kib": 50012,
+            "minor_faults": 17559603,
+            "sampled_program_peak_rss_kib": 40348,
+            "major_faults": 0,
+            "input_block_ops": 54065520,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 191.23881715070456,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2287,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27681546240,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17559603,
+                "major_faults": 0,
+                "user_ticks": 12323,
+                "system_ticks": 5631,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2287,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27681546240,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 191.536993167,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 191.5816785953939,
+            "user_seconds": 124.170174,
+            "system_seconds": 55.822451,
+            "max_rss_kib": 50012,
+            "minor_faults": 17554449,
+            "sampled_program_peak_rss_kib": 40300,
+            "major_faults": 0,
+            "input_block_ops": 54064456,
+            "output_block_ops": 112,
+            "last_sample": {
+              "seconds": 191.58077875897288,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27681001472,
+                "write_bytes": 57344,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17554449,
+                "major_faults": 0,
+                "user_ticks": 12417,
+                "system_ticks": 5582,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27681001472,
+              "write_bytes": 57344,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          }
+        ],
+        "groups": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "runs": 3,
+            "median_seconds": 57.30855623912066,
+            "min_seconds": 56.91608199942857,
+            "max_seconds": 57.90667769126594,
+            "median_mib_per_second": 1143.563969766344
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "runs": 3,
+            "median_seconds": 191.5816785953939,
+            "min_seconds": 191.23969677090645,
+            "max_seconds": 192.47335752565414,
+            "median_mib_per_second": 342.0786394281317
+          }
+        ],
+        "profile": "none",
+        "cache": "ordinary"
+      },
+      "large-supported-candidate1-release/plan.json": {
+        "schema": 1,
+        "source_revision": "fb057b4f477119871f6d4fe74ac7105046ce2c8f",
+        "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+        "tool": "/mnt/data1n1/antelope-qualification-20261019/binaries/candidate1-release",
+        "corpus": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus",
+        "kinds": [
+          "blocks"
+        ],
+        "commands": [
+          "scan",
+          "verify"
+        ],
+        "repeats": 3,
+        "block_range": null,
+        "cache": "ordinary",
+        "host": {
+          "system": "Linux",
+          "node": "eosrio7920",
+          "release": "5.15.0-186-generic",
+          "version": "#196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026",
+          "machine": "x86_64",
+          "processor": "x86_64"
+        },
+        "profile": "none"
+      },
+      "large-supported-candidate1-release/complete.json": {
+        "schema": 1,
+        "ok": true,
+        "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+        "results": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 58.63323575258255,
+            "user_seconds": 0.048129,
+            "system_seconds": 48.628132,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793779,
+            "sampled_program_peak_rss_kib": 18536,
+            "major_faults": 30,
+            "input_block_ops": 49614672,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 58.63274230528623,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2366,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25402712064,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793779,
+                "major_faults": 30,
+                "user_ticks": 4,
+                "system_ticks": 4862,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2366,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25402712064,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.631466871127486,
+            "user_seconds": 0.072127,
+            "system_seconds": 47.275049,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793795,
+            "sampled_program_peak_rss_kib": 18544,
+            "major_faults": 0,
+            "input_block_ops": 49550328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.63045794237405,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25369767936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793795,
+                "major_faults": 0,
+                "user_ticks": 7,
+                "system_ticks": 4727,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25369767936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.898559919558465,
+            "user_seconds": 0.032154999999999996,
+            "system_seconds": 47.606647,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793803,
+            "sampled_program_peak_rss_kib": 18508,
+            "major_faults": 0,
+            "input_block_ops": 49550304,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.897534624673426,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25369755648,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793803,
+                "major_faults": 0,
+                "user_ticks": 3,
+                "system_ticks": 4760,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25369755648,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 188.403937569,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 188.42177704069763,
+            "user_seconds": 123.189934,
+            "system_seconds": 55.122763,
+            "max_rss_kib": 49896,
+            "minor_faults": 17562386,
+            "sampled_program_peak_rss_kib": 40316,
+            "major_faults": 1,
+            "input_block_ops": 49649056,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 188.42110162880272,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25420316672,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17562386,
+                "major_faults": 1,
+                "user_ticks": 12318,
+                "system_ticks": 5512,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25420316672,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 187.766761873,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 187.81076522916555,
+            "user_seconds": 122.789541,
+            "system_seconds": 54.766096,
+            "max_rss_kib": 49896,
+            "minor_faults": 17560159,
+            "sampled_program_peak_rss_kib": 40364,
+            "major_faults": 0,
+            "input_block_ops": 49711912,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 187.80968139413744,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25452498944,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17560159,
+                "major_faults": 0,
+                "user_ticks": 12278,
+                "system_ticks": 5476,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25452498944,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 188.14724151,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 188.16614586580545,
+            "user_seconds": 123.078671,
+            "system_seconds": 54.571559,
+            "max_rss_kib": 49896,
+            "minor_faults": 17552271,
+            "sampled_program_peak_rss_kib": 40408,
+            "major_faults": 0,
+            "input_block_ops": 49711576,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 188.16531336400658,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2287,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25452326912,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17552271,
+                "major_faults": 0,
+                "user_ticks": 12307,
+                "system_ticks": 5457,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2287,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25452326912,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          }
+        ],
+        "groups": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "runs": 3,
+            "median_seconds": 57.898559919558465,
+            "min_seconds": 57.631466871127486,
+            "max_seconds": 58.63323575258255,
+            "median_mib_per_second": 1131.910710135783
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "runs": 3,
+            "median_seconds": 188.16614586580545,
+            "min_seconds": 187.81076522916555,
+            "max_seconds": 188.42177704069763,
+            "median_mib_per_second": 348.2879433583568
+          }
+        ],
+        "profile": "none",
+        "cache": "ordinary"
+      },
+      "format-limitation.json": {
+        "observed_first_entry": 127,
+        "supported_preamble_first_entry": 126,
+        "scan_preflight": "passed",
+        "verify_preflight": "passed",
+        "tail_inspection_preflight": "refused: blocks.log header separator missing",
+        "decision": "Benchmark scan/verify only on the larger copied log. Keep tail refusal; no separator searching or guessing from the index."
+      },
+      "comparisons": {
+        "scan": {
+          "reports_equal_except_seconds_fields": true,
+          "reference_report": {
+            "damaged": false,
+            "index": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.index",
+            "kind": "blocks",
+            "log": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.log",
+            "log_blocks": [
+              1,
+              192881743
+            ],
+            "ok": true,
+            "record_size": 4096,
+            "regions": [],
+            "scan": {
+              "bytes_read": 68719476814,
+              "failed_reads": 0,
+              "from": 0,
+              "seconds": 57.860173746,
+              "to": 68719480832
+            }
+          }
+        },
+        "verify": {
+          "reports_equal_except_seconds_fields": true,
+          "reference_report": {
+            "blocks": [
+              1,
+              192881743
+            ],
+            "bytes": 68719476687,
+            "checked": [
+              "index positions and every entry's position trailer",
+              "header block numbers and the ID chain"
+            ],
+            "corrupt": false,
+            "entries": 192881743,
+            "findings": [],
+            "kind": "blocks",
+            "log": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.log",
+            "not_covered": [
+              "transaction bodies and signatures: nothing in blocks.log checks them; pass --against with another node's blocks.log"
+            ],
+            "ok": true,
+            "orphaned_fork_entries": 0,
+            "seconds": 192.461025983,
+            "skipped_entries": 0,
+            "truncated": false
+          }
+        }
+      }
+    },
+    "scope": "Independent larger block-log prefix on ext4/NVMe, three ordinary-cache repeats per command/artifact. Candidate1 runtime. Scan/verify pass; tail recovery refuses unsupported genesis. No recovery or healthy-ZFS qualification."
+  },
+  "final_trace_candidate2": {
+    "plan.json": {
+      "schema": 1,
+      "source_revision": "63f933f25cf57631ba50f2d86bed1ee498addb4e",
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "tool": "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+      "corpus": "/tmp/antelope-qualification-20261019/corpus",
+      "kinds": [
+        "trace_history"
+      ],
+      "commands": [
+        "inspect",
+        "verify"
+      ],
+      "repeats": 1,
+      "block_range": null,
+      "cache": "ordinary",
+      "host": {
+        "system": "Linux",
+        "node": "x670e-7950x",
+        "release": "6.1.10-060110-generic",
+        "version": "#202302060840 SMP PREEMPT_DYNAMIC Mon Feb  6 09:32:56 UTC 2023",
+        "machine": "x86_64",
+        "processor": "x86_64"
+      },
+      "profile": "none"
+    },
+    "complete.json": {
+      "schema": 1,
+      "ok": true,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "results": [
+        {
+          "kind": "trace_history",
+          "command": "inspect",
+          "repeat": 1,
+          "corpus_log_bytes": 104294471504,
+          "measured_bytes": 104294471504,
+          "tool_reported_seconds": null,
+          "returncode": 0,
+          "timed_out": false,
+          "elapsed_seconds": 752.6027360856533,
+          "user_seconds": 559.72737,
+          "system_seconds": 192.225157,
+          "max_rss_kib": 57984,
+          "minor_faults": 28258770,
+          "sampled_program_peak_rss_kib": 57984,
+          "major_faults": 32,
+          "input_block_ops": 309601568,
+          "output_block_ops": 720,
+          "last_sample": {
+            "seconds": 752.6024482697248,
+            "unavailable": {
+              "exe": "FileNotFoundError"
+            },
+            "io": {
+              "rchar": 170040141217,
+              "wchar": 10247,
+              "syscr": 814994889,
+              "syscw": 691,
+              "read_bytes": 158516002816,
+              "write_bytes": 368640,
+              "cancelled_write_bytes": 0
+            },
+            "memory_kib": {},
+            "stat": {
+              "state": "Z",
+              "minor_faults": 28258770,
+              "major_faults": 32,
+              "user_ticks": 55972,
+              "system_ticks": 19222,
+              "block_io_delay_ticks": 0
+            }
+          },
+          "sampled_io_max": {
+            "rchar": 170040141217,
+            "wchar": 10247,
+            "syscr": 814994889,
+            "syscw": 691,
+            "read_bytes": 158516002816,
+            "write_bytes": 368640,
+            "cancelled_write_bytes": 0
+          },
+          "sampling_interval_seconds": 0.05,
+          "phase_timing": "Polling observations, not exact internal stage boundaries.",
+          "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+          "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+        },
+        {
+          "kind": "trace_history",
+          "command": "verify",
+          "repeat": 1,
+          "corpus_log_bytes": 104294471504,
+          "measured_bytes": 104294471504,
+          "tool_reported_seconds": 447.850302218,
+          "returncode": 0,
+          "timed_out": false,
+          "elapsed_seconds": 447.8806343078613,
+          "user_seconds": 395.496571,
+          "system_seconds": 34.707929,
+          "max_rss_kib": 69580,
+          "minor_faults": 26527737,
+          "sampled_program_peak_rss_kib": 69580,
+          "major_faults": 3,
+          "input_block_ops": 86281400,
+          "output_block_ops": 208,
+          "last_sample": {
+            "seconds": 447.8801913559437,
+            "unavailable": {
+              "exe": "FileNotFoundError"
+            },
+            "io": {
+              "rchar": 106454140584,
+              "wchar": 3136,
+              "syscr": 12365,
+              "syscw": 319,
+              "read_bytes": 44176076800,
+              "write_bytes": 106496,
+              "cancelled_write_bytes": 0
+            },
+            "memory_kib": {},
+            "stat": {
+              "state": "Z",
+              "minor_faults": 26527737,
+              "major_faults": 3,
+              "user_ticks": 39549,
+              "system_ticks": 3470,
+              "block_io_delay_ticks": 0
+            }
+          },
+          "sampled_io_max": {
+            "rchar": 106454140584,
+            "wchar": 3136,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 44176076800,
+            "write_bytes": 106496,
+            "cancelled_write_bytes": 0
+          },
+          "sampling_interval_seconds": 0.05,
+          "phase_timing": "Polling observations, not exact internal stage boundaries.",
+          "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+          "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+        }
+      ],
+      "groups": [
+        {
+          "kind": "trace_history",
+          "command": "inspect",
+          "runs": 1,
+          "median_seconds": 752.6027360856533,
+          "min_seconds": 752.6027360856533,
+          "max_seconds": 752.6027360856533,
+          "median_mib_per_second": 132.15864631829945
+        },
+        {
+          "kind": "trace_history",
+          "command": "verify",
+          "runs": 1,
+          "median_seconds": 447.8806343078613,
+          "min_seconds": 447.8806343078613,
+          "max_seconds": 447.8806343078613,
+          "median_mib_per_second": 222.07470294006976
+        }
+      ],
+      "profile": "none",
+      "cache": "ordinary"
+    },
+    "trace_history-inspect-1/stdout.json": {
+      "activation": "Originals are never modified. Output is staged only; review complete.json and coordinate log/index activation with nodeos stopped.",
+      "chain_id": null,
+      "failure": null,
+      "format_version": 1,
+      "index": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index",
+      "index_stamp": {
+        "device": 66306,
+        "inode": 75650661,
+        "modified_ns": 1792446142896008390,
+        "size": 2159186216
+      },
+      "inspection": {
+        "entries": 269898277,
+        "excluded_suffix_bytes": 0,
+        "excluded_suffix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "failure": null,
+        "first_block": 2,
+        "index_bytes": 2159186216,
+        "index_discrepancies": 0,
+        "index_partial_bytes": 0,
+        "index_prefix_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+        "index_present": true,
+        "index_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+        "index_suffix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "indexed_head_hint": 269898278,
+        "input_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+        "last_block": 269898278,
+        "omitted_fork_entries": 1223326,
+        "physical_prefix_end": 104294471504,
+        "physical_prefix_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+        "reference_checked_entries": 269898277,
+        "reference_evidence_sha256": "bcc0f1e95a787bf4269dfbc868a47a25bf5d49c2a0209ae5e31c19870e88f314"
+      },
+      "kind": "trace",
+      "ok": true,
+      "operation": "recover_tail",
+      "options": {
+        "restore": {
+          "available": false,
+          "reason": "pass --through-block with the intended final block; a torn file cannot prove how many entries are missing",
+          "through_block": null
+        },
+        "salvage": {
+          "available": true,
+          "excluded_suffix_bytes": 0,
+          "last_block": 269898278,
+          "missing_block_range": null,
+          "missing_indexed_block_range": null,
+          "reason": null,
+          "total_missing_history_known": false
+        }
+      },
+      "preferred_mode": "restore",
+      "prefix": {
+        "entries": 269898277,
+        "first_block": 2,
+        "last_block": 269898278,
+        "physical_end": 104294471504
+      },
+      "restored_tail_sha256": null,
+      "selected_mode": "restore",
+      "source_inputs": [
+        {
+          "path": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log",
+          "stamp": {
+            "device": 66306,
+            "inode": 75650656,
+            "modified_ns": 1792445708910755400,
+            "size": 56409713202
+          }
+        },
+        {
+          "path": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.index",
+          "stamp": {
+            "device": 66306,
+            "inode": 75650657,
+            "modified_ns": 1792445800686110295,
+            "size": 2159186224
+          }
+        }
+      ],
+      "sources": {
+        "block_logs": [
+          {
+            "index": null,
+            "log": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log"
+          }
+        ],
+        "blocks": [],
+        "donors": []
+      },
+      "target": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+      "target_stamp": {
+        "device": 66306,
+        "inode": 75650660,
+        "modified_ns": 1792445978196970201,
+        "size": 104294471504
+      },
+      "through_block": null,
+      "tool_version": "0.1.0",
+      "validation": "Whole signed_block framing, position trailers, header ID links; SHIP payload sizes, zlib checksums and canonical IDs when references are supplied. No signature or Merkle-root validation. SHIP payloads rely on the operator's trusted donor."
+    },
+    "trace_history-inspect-1/result.json": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 752.6027360856533,
+      "user_seconds": 559.72737,
+      "system_seconds": 192.225157,
+      "max_rss_kib": 57984,
+      "minor_faults": 28258770,
+      "sampled_program_peak_rss_kib": 57984,
+      "major_faults": 32,
+      "input_block_ops": 309601568,
+      "output_block_ops": 720,
+      "last_sample": {
+        "seconds": 752.6024482697248,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 170040141217,
+          "wchar": 10247,
+          "syscr": 814994889,
+          "syscw": 691,
+          "read_bytes": 158516002816,
+          "write_bytes": 368640,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 28258770,
+          "major_faults": 32,
+          "user_ticks": 55972,
+          "system_ticks": 19222,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 170040141217,
+        "wchar": 10247,
+        "syscr": 814994889,
+        "syscw": 691,
+        "read_bytes": 158516002816,
+        "write_bytes": 368640,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.05,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "trace_history-inspect-1/started.json": {
+      "argv": [
+        "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+        "--json",
+        "recover-tail",
+        "--log",
+        "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+        "--blocks-log",
+        "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log"
+      ],
+      "pid": 642000,
+      "created_unix": 1792456046.9986365,
+      "kind": "trace_history",
+      "command": "inspect",
+      "repeat": 1,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "cache_state": {
+        "mode": "ordinary",
+        "files": {
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log": {
+            "before": {
+              "pages": 25462518,
+              "resident_pages": 21385547,
+              "resident_fraction": 0.8398834317957085
+            },
+            "after": {
+              "pages": 25462518,
+              "resident_pages": 21385547,
+              "resident_fraction": 0.8398834317957085
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log": {
+            "before": {
+              "pages": 13771903,
+              "resident_pages": 1023443,
+              "resident_fraction": 0.07431384028772203
+            },
+            "after": {
+              "pages": 13771903,
+              "resident_pages": 1023443,
+              "resident_fraction": 0.07431384028772203
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 281244,
+              "resident_fraction": 0.5335220223619263
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 281244,
+              "resident_fraction": 0.5335220223619263
+            }
+          }
+        },
+        "global_cache_eviction": false,
+        "note": "DONTNEED is advisory; resident fractions determine actual cache state."
+      }
+    },
+    "trace_history-verify-1/stdout.json": {
+      "blocks": [
+        2,
+        269898278
+      ],
+      "bytes": 104294471504,
+      "checked": [
+        "index positions and every entry's position trailer",
+        "entry block numbers, and every payload's zlib framing, sizes, and Adler-32"
+      ],
+      "corrupt": false,
+      "entries": 269898277,
+      "findings": [],
+      "kind": "trace",
+      "log": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+      "not_covered": [
+        "entry block IDs beyond their block number, and the meaning of the payloads; pass --against with a blocks.log to check the IDs"
+      ],
+      "ok": true,
+      "orphaned_fork_entries": 1223326,
+      "seconds": 447.850302218,
+      "skipped_entries": 0,
+      "truncated": false
+    },
+    "trace_history-verify-1/result.json": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 447.8806343078613,
+      "user_seconds": 395.496571,
+      "system_seconds": 34.707929,
+      "max_rss_kib": 69580,
+      "minor_faults": 26527737,
+      "sampled_program_peak_rss_kib": 69580,
+      "major_faults": 3,
+      "input_block_ops": 86281400,
+      "output_block_ops": 208,
+      "last_sample": {
+        "seconds": 447.8801913559437,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 106454140584,
+          "wchar": 3136,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 44176076800,
+          "write_bytes": 106496,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 26527737,
+          "major_faults": 3,
+          "user_ticks": 39549,
+          "system_ticks": 3470,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 106454140584,
+        "wchar": 3136,
+        "syscr": 12365,
+        "syscw": 319,
+        "read_bytes": 44176076800,
+        "write_bytes": 106496,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.05,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "trace_history-verify-1/started.json": {
+      "argv": [
+        "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+        "--json",
+        "verify",
+        "--log",
+        "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log"
+      ],
+      "pid": 645953,
+      "created_unix": 1792456805.1868298,
+      "kind": "trace_history",
+      "command": "verify",
+      "repeat": 1,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "cache_state": {
+        "mode": "ordinary",
+        "files": {
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log": {
+            "before": {
+              "pages": 25462518,
+              "resident_pages": 14856714,
+              "resident_fraction": 0.583473873243801
+            },
+            "after": {
+              "pages": 25462518,
+              "resident_pages": 14856714,
+              "resident_fraction": 0.583473873243801
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            }
+          }
+        },
+        "global_cache_eviction": false,
+        "note": "DONTNEED is advisory; resident fractions determine actual cache state."
+      }
+    },
+    "baseline_report_equal_except_seconds": true,
+    "prior_decoder_reuse_run_metrics": [
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 421.36783431470394,
+        "user_seconds": 381.521348,
+        "system_seconds": 38.054947,
+        "max_rss_kib": 68628,
+        "minor_faults": 26627496,
+        "sampled_program_peak_rss_kib": 68628,
+        "major_faults": 0,
+        "input_block_ops": 41265040,
+        "output_block_ops": 200,
+        "last_sample": {
+          "seconds": 421.36759524047375,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3133,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21127700480,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627496,
+            "major_faults": 0,
+            "user_ticks": 38152,
+            "system_ticks": 3805,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3133,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 21127700480,
+          "write_bytes": 102400,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 418.97553737461567,
+        "user_seconds": 379.966451,
+        "system_seconds": 37.288409,
+        "max_rss_kib": 68628,
+        "minor_faults": 26627503,
+        "sampled_program_peak_rss_kib": 68628,
+        "major_faults": 0,
+        "input_block_ops": 36747632,
+        "output_block_ops": 200,
+        "last_sample": {
+          "seconds": 418.9752441495657,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 18814787584,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627503,
+            "major_faults": 0,
+            "user_ticks": 37996,
+            "system_ticks": 3728,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3135,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 18814787584,
+          "write_bytes": 102400,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 431.9042729139328,
+        "user_seconds": 391.817334,
+        "system_seconds": 38.169665,
+        "max_rss_kib": 68624,
+        "minor_faults": 26627495,
+        "sampled_program_peak_rss_kib": 68624,
+        "major_faults": 0,
+        "input_block_ops": 41611344,
+        "output_block_ops": 208,
+        "last_sample": {
+          "seconds": 431.9040108323097,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21305008128,
+            "write_bytes": 106496,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627495,
+            "major_faults": 0,
+            "user_ticks": 39181,
+            "system_ticks": 3816,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3135,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 21305008128,
+          "write_bytes": 106496,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      }
+    ]
+  },
+  "final_trace_comparison_scope": {
+    "baseline_verify_pilot_seconds": 2753.828457802534,
+    "final_verify_seconds": 447.8806343078613,
+    "baseline_to_final_observed_ratio": 6.148576756523983,
+    "decoder_reuse_median_wall_seconds": 421.36783431470394,
+    "final_vs_reuse_wall_percent": 6.2920797066241985,
+    "decoder_reuse_median_cpu_seconds": 419.57629499999996,
+    "final_cpu_seconds": 430.2045,
+    "final_vs_reuse_cpu_percent": 2.5330804258138606,
+    "note": "One final-artifact pilot; different build host and cache/I/O context. CPU stayed inside provisional investigation allowance. No attribution of wall-time difference to code, no repeatability or full-release claim. Baseline inspection stopped early, so it is not a complete-inspection speed comparison."
+  },
+  "metadata_archives": {
+    "x670e": {
+      "archive": "/tmp/antelope-qualification-20261019/evidence-final-1792457427.tar.gz",
+      "sha256": "fe57985885652f6a934f77c6946694383d13d2cbe41802524a4ecd5dbaa0d091",
+      "bytes": 8015573,
+      "files": 26400
+    },
+    "ultra": {
+      "archive": "/mnt/data1n1/antelope-qualification-20261019/evidence-final-1792457426.tar.gz",
+      "sha256": "0aa335cf3151186280f99e575a4917fb8fc3555b9af7812c53ce25749f110970",
+      "bytes": 58465,
+      "files": 133
+    },
+    "eos": {
+      "archive": "/mnt/fastdata/antelope-qualification-20261019/evidence-final-1792457426.tar.gz",
+      "sha256": "1a0078f2bd9df9e9813da3fa2042430c8ae5c9591cd2050a07fe00da29195bea",
+      "bytes": 61077,
+      "files": 150
+    }
   }
 }

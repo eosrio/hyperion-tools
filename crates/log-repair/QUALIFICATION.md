@@ -39,7 +39,18 @@ The tool did not modify the original, clear errors, or initiate storage repair.
 
 A separate **64 GiB Ultra/ext4/NVMe** prefix completed independent source/copy
 hashing: blocks 1–192881743, 68,719,476,814 log bytes and 1,543,053,944 index bytes.
-Repeated baseline/candidate `scan` and `verify` measurements are in progress.
+Three ordinary-cache repeats per command completed for the baseline and first
+candidate; all reports matched apart from timing fields:
+
+| Command | Baseline wall median (min–max), s | Candidate wall median (min–max), s |
+|---|---:|---:|
+| scan | 57.309 (56.916–57.907) | 57.899 (57.631–58.633) |
+| verify | 191.582 (191.240–192.473) | 188.166 (187.811–188.422) |
+
+Median CPU time was 48.137→47.639 s for scan and 179.993→177.650 s for verify.
+These changes stay within the provisional investigation allowance below. They do
+not establish an improvement in block-log performance. Artifact identity and
+per-run CPU/RSS/I/O remain in the structured checkpoint.
 The 10,000-block preflight passed those indexed commands but tail recovery refused
 Ultra's different genesis layout: its first position is 127, versus 126 for the
 supported v3 classic genesis. No heuristic preamble search or format relaxation
@@ -172,6 +183,27 @@ on Windows for Linux/musl after WSL stopped responding, so it has separate build
 provenance and is not substituted into the earlier measured experiments. SHA-256:
 `ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381`.
 
+A small physical copy of the actual sequence, blocks 172018800–172018870,
+reproduces the old stop at 172018840. The follow-up recovered all 71 canonical
+records from 95 physical records, omitted 24 fork/repeat entries, and matched
+independent canonical-body and rebuilt-index byte oracles. All copied inputs
+remained unchanged. The structured checkpoint retains source offsets, body hashes
+and the SHA-256 of the archived, self-contained reproduction fixture.
+
+The full follow-up trace pilot then passed **269,898,277 entries**, blocks
+2–269898278: inspection took **752.603 s**, with no failure or index discrepancies,
+all input hashes matching, and 1,223,326 physical fork/repeat entries omitted.
+Verification took **447.881 s**, and its report matched the baseline except time.
+That is about 6.1× the baseline pilot's observed speed, on this workload.
+
+This is one final-artifact run, not a repeated median. Relative to the earlier
+decoder-reuse experiment, wall time was 6.3% higher but median-reference CPU time
+was only 2.5% higher, within the provisional investigation allowance. Linux input
+block operations were 86,281,400 versus 36,747,632–41,611,344 earlier; build host
+and cache/I/O context also differed. The wall-time difference is not attributed
+to code. The initial-state memory experiment and three-repeat decoder experiment
+retain their own artifact identities.
+
 The [structured checkpoint](../../docs/performance/evidence/log-repair-20261019/checkpoint.json)
 retains per-run CPU/RSS/I/O, allocation counts, input and binary hashes, and scope
 limits. It is explicitly an unfinished qualification checkpoint. Strace confirms
@@ -221,7 +253,7 @@ distinct evidence classes.
 
 Completed evidence so far:
 
-- **174 deterministic cases** over eight real Libre block/trace/delta bodies:
+- **174 deterministic cases** over eight real Libre block/trace/delta triplets:
   torn and aligned tails, zeros/garbage, malformed preambles, index variants,
   readable header/signature/checksum damage, an interior zeroed entry and canonical
   repeats with first/latest index positions or conflicting payloads/encodings.
@@ -295,6 +327,12 @@ the first candidate and independently matching recovery/rollback bytes:
 These are individual pilots, not repeated medians or a cross-version speedup claim.
 The selected original corpus remained read-only. Only disposable files whose
 independent oracles passed were retired; journals and hashes remain.
+
+The next profiling experiment should separate canonical-source/index lookups,
+copy/write and read-back costs in restoration. Its 1,091 s pilot used different
+source checks from the 288 s salvage pilot, so their difference does not isolate
+a bottleneck. Any buffering or parallelism experiment must preserve source-change,
+I/O-failure and byte-equivalence checks.
 
 The opt-in interruption matrix uses `strace` 5.16 or compatible syscall injection:
 
