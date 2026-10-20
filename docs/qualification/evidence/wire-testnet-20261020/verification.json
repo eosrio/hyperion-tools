@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "reviewer": "windows:codex:hyperion-tools",
+  "archiveSha256": "c3faa29f3980ab7309e5648177c5637dcda58543a3f7086f4eec9cffa409fcbb",
+  "ordinaryMembers": 44,
+  "detachedOriginalByteFiles": 32,
+  "artifactIds": [
+    "art_20261020T145724_7f78c236573c",
+    "art_20261020T145745_bb9106a5de23",
+    "art_20261020T145749_fc156af26c63"
+  ],
+  "installedCodecReports": [
+    {
+      "path": "installed-codec-node22.json",
+      "bytes": 2391,
+      "sha256": "a544cf742fad23c7e03ce43d47b16a63d64e7650d533c02cf1bf976e46e0fe76",
+      "runtime": "v22.23.3"
+    },
+    {
+      "path": "installed-codec-node24.json",
+      "bytes": 2396,
+      "sha256": "71ae62888ba165429ca0cb1594f5abf56a24f90e619c8fafe4e7fd24cbde7df5",
+      "runtime": "v24.19.0"
+    }
+  ],
+  "limits": "Preflight and offline installed Node codec only; initialization, workers, APIs, Rust, fork/recovery and release acceptance remain open."
+}

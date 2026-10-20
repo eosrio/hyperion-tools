@@ -16,6 +16,10 @@ jobs:
       - name: Verify Wire node setup evidence checksums
         working-directory: docs/qualification/evidence/wire-node-20261019
         run: sha256sum -c SHA256SUMS
+      - name: Verify actual Wire testnet source evidence
+        run: python3 scripts/check-wire-testnet-evidence.py
+      - name: Check actual-testnet codec regression syntax
+        run: node --check scripts/check-wire-testnet-capture.mjs
       - name: Check runtime probe syntax
         run: node --check scripts/profile-runtime-smoke.mjs
       - name: Test runtime probe failure reporting

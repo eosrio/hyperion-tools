@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "source": "actual Wire6508 Hyperion3 testnet read-only preflight",
+  "sourceRevision": "6508c9e8f4044df8d5acb082a7af3be6a80cd9a0",
+  "chainId": "9ccd94e823fda51363bd4265ad618a909c4985c445078c79f8d030fe9697b71d",
+  "members": [
+    {
+      "path": "README-20261020.md",
+      "bytes": 6346,
+      "sha256": "38bd8c2a73f2dc6c351e658bdef93ecebae14fd9cae6559faf05f0f665028768"
+    },
+    {
+      "path": "extract-original-receipts.py",
+      "bytes": 2542,
+      "sha256": "a6dbdebff94d284f0fc55d3ee35ec222696f3c9718d70bd3c429b137681b0369"
+    },
+    {
+      "path": "host-preflight-20261020.json",
+      "bytes": 9489,
+      "sha256": "7a583eec32568f20b063766a01ae9668d4e24399c70eca6b9ff48f86e5bb24d4"
+    },
+    {
+      "path": "preflight-host-read.py",
+      "bytes": 6917,
+      "sha256": "02f07e5dff7649e3900d3826b109478d36cf14a87b4f226c7542cc0d6ecc9af1"
+    },
+    {
+      "path": "preflight-ship-read.py",
+      "bytes": 11936,
+      "sha256": "23169504af8a90c7c40f32453feec0c8d825eb6a4fcb1a3a984690ba828345e6"
+    },
+    {
+      "path": "raw-receipts-manifest.json",
+      "bytes": 5453,
+      "sha256": "d6997a86e4b967a18bd7ebc8e377a40eadd9f3bb81edd6515649363965f9389b"
+    },
+    {
+      "path": "raw/block1-ack.bin",
+      "bytes": 5,
+      "sha256": "85c3f04c506cc9d764a624789b27ae0267bc61477c9f05cba2d684ddd2c06f3a"
+    },
+    {
+      "path": "raw/block1-block.bin",
+      "bytes": 120,
+      "sha256": "45dc2ae6b627bd8350a7b488b15e8e7081211b34c1b14551e9bbac59450602e6"
+    },
+    {
+      "path": "raw/block1-deltas.bin",
+      "bytes": 3474,
+      "sha256": "dbf15428a9dfb977ce2a5d6f87ac1ee2e247c861edd792b207541ecaab4855e7"
+    },
+    {
+      "path": "raw/block1-request.bin",
+      "bytes": 18,
+      "sha256": "6d4887bb7d8ff3069825b0323656c657d5b5234535becd1793d34041d122ac95"
+    },
+    {
+      "path": "raw/block1-result.bin",
+      "bytes": 3711,
+      "sha256": "5e873c4f7a29d74e2c604571e2f6077673d8069a5abfb91a6f7bb53798c1c04c"
+    },
+    {
+      "path": "raw/genesis-public-1.json",
+      "bytes": 1051,
+      "sha256": "a96c0f376ee4f5e5c36e885fe740a1e4b0f22548854457a1f374c2ab68deab47"
+    },
+    {
+      "path": "raw/host-get-info-1-request.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "raw/host-get-info-1-response.json",
+      "bytes": 929,
+      "sha256": "a61836d5d9f0128eb0695f6240904fc2a9f67aaabd449d72ed8d9db835cd8307"
+    },
+    {
+      "path": "raw/host-get-info-2-request.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "raw/host-get-info-2-response.json",
+      "bytes": 929,
+      "sha256": "358d73abd822196b91ad873d40ca5bc7cb198481ed07fc41d80b991622791827"
+    },
+    {
+      "path": "raw/ship-rpc-1-request.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "raw/ship-rpc-1-response.json",
+      "bytes": 929,
+      "sha256": "d7cfb0d3ce97c1a7337d9d948e47911305bf6bdb69c599929ce73f98f3568ea2"
+    },
+    {
+      "path": "raw/ship-rpc-2-request.json",
+      "bytes": 21,
+      "sha256": "dd5f8052d73069b375855a8b5fb863acee436b18aa353b1f01939b9a6ecaf967"
+    },
+    {
+      "path": "raw/ship-rpc-2-response.json",
+      "bytes": 573,
+      "sha256": "b9d8f1022cff4f1e7f5a7abeff74be9460f4c1fa802e098ef9fd488fc17b1fc5"
+    },
+    {
+      "path": "raw/ship-rpc-3-request.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "raw/ship-rpc-3-response.json",
+      "bytes": 929,
+      "sha256": "d7cfb0d3ce97c1a7337d9d948e47911305bf6bdb69c599929ce73f98f3568ea2"
+    },
+    {
+      "path": "raw/ship-schema.abi.json",
+      "bytes": 32580,
+      "sha256": "94c5661306467f8c49f22180213e390db10d290be9ebf512fb63314f440ef6f9"
+    },
+    {
+      "path": "raw/status-request.bin",
+      "bytes": 1,
+      "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+    },
+    {
+      "path": "raw/status-result.bin",
+      "bytes": 121,
+      "sha256": "b7bb780f41f37327e66f97dbc5c5aa4380ec652de8da4f1f62315e8eb9841a76"
+    },
+    {
+      "path": "raw/websocket-frame-1-server.bin",
+      "bytes": 32584,
+      "sha256": "d8a7540e03cc79f06d67efc1e9435fb25074ba15a584524eb993c9bacaebedff"
+    },
+    {
+      "path": "raw/websocket-frame-10-server.bin",
+      "bytes": 2,
+      "sha256": "8509b81230019d2ad970d970f791dfbdc8caf54f5c594fcd327cef9feed206c1"
+    },
+    {
+      "path": "raw/websocket-frame-11-client.bin",
+      "bytes": 11,
+      "sha256": "94763b1111f0c11300f26b6d977e6b3dedc41ae6877cd7ae157df2e607ad7300"
+    },
+    {
+      "path": "raw/websocket-frame-2-client.bin",
+      "bytes": 7,
+      "sha256": "e1dfb92be5dc98e9055234588c80c508b1cb518ebe4be9f49c1e61f0bef7a79c"
+    },
+    {
+      "path": "raw/websocket-frame-3-server.bin",
+      "bytes": 123,
+      "sha256": "3da03cea11f8de9a72a6b17cec978cfad5ac378b219f43ba827a8f81b7cfe69a"
+    },
+    {
+      "path": "raw/websocket-frame-4-client.bin",
+      "bytes": 24,
+      "sha256": "2fb428e595293a80cc206bc3bb9b30a280c4261502bffb28255d41b49997f006"
+    },
+    {
+      "path": "raw/websocket-frame-5-server.bin",
+      "bytes": 3,
+      "sha256": "da4d3da1daaceba9b72635459fd6a17da13e7530d53a4932535e6dc1d49bde3d"
+    },
+    {
+      "path": "raw/websocket-frame-6-server.bin",
+      "bytes": 236,
+      "sha256": "14d409cd0ecf9c4a3db202bd60510b24833b625f71c6557b8819d4fca4ac2505"
+    },
+    {
+      "path": "raw/websocket-frame-7-server.bin",
+      "bytes": 3,
+      "sha256": "faee935763044f124d7526755a5058a33f9402a595994d59eddd4be8546ff201"
+    },
+    {
+      "path": "raw/websocket-frame-8-server.bin",
+      "bytes": 5,
+      "sha256": "9c98aeb10f1b71c032594b3bf2ba9c9d511d22c93a28d023ad8346d118794f6e"
+    },
+    {
+      "path": "raw/websocket-frame-9-server.bin",
+      "bytes": 3478,
+      "sha256": "ff5ad94c951f171ea5fc93e2a56a39e970763a759fe9007e5605b84be1b92b35"
+    },
+    {
+      "path": "raw/websocket-upgrade-request.txt",
+      "bytes": 154,
+      "sha256": "111818fceb811f5d22b5b1dcf2a8fea8ffac30f1a15df4a8dd91102b3b05597b"
+    },
+    {
+      "path": "raw/websocket-upgrade-response.txt",
+      "bytes": 159,
+      "sha256": "2c88ec2a8cd463744915fb0fb143316ef7e86bdb96fff976af73562a985e9858"
+    },
+    {
+      "path": "read-saved-sections.py",
+      "bytes": 5910,
+      "sha256": "7efa5a01a21af64a5e530bd178e06a6019ac2f4533f8bf051b1fedb98571aa3f"
+    },
+    {
+      "path": "run-host-preflight.py",
+      "bytes": 1395,
+      "sha256": "de540f63c23b6720048f902f3f7dede96be9013fd0b8d69a8d4f854dada5fcfe"
+    },
+    {
+      "path": "run-ship-preflight.py",
+      "bytes": 1530,
+      "sha256": "bdb7790706e1f52408bbad05925e7d57d380cda2d4c646182aa6514350ac6297"
+    },
+    {
+      "path": "ship-preflight-20261020.json",
+      "bytes": 139383,
+      "sha256": "b8edf652dd0ad265917bf0111ca48789ec7a3f1976f2113783202cc3dd38acb4"
+    },
+    {
+      "path": "source-input-and-native-abi-20261020.json",
+      "bytes": 107618,
+      "sha256": "0f31e8af59c30ac40e20320fc3d29e98402fd6ee351a2750cab0fd14320f0f6c"
+    }
+  ],
+  "manifestSelfExcluded": true
+}

@@ -7,6 +7,18 @@ coordinated through [release #24](https://github.com/eosrio/hyperion-tools/issue
 
 ## Current implementation and evidence
 
+### Actual testnet input update — 2026-10-20
+
+The operator's new testnet and synced SHiP node are available on Hyperion-3. The
+[dated source record and original captures](../qualification/wire-testnet-20261020.md) bind the
+observed node6508 binary, chain/genesis and schema to an offline Node 22/24 codec regression over
+real block 1 input. The existing codec consumes all nine physical streams and 23 rows, including the
+source-specific count discrepancy, without altering source bytes. Complete initialization and
+canonical ABI coverage, contract/CDT/artifact pins, integrated Node/Rust paths and recovery
+acceptance remain open. The earlier isolated `7dede884` engineering-chain evidence below is kept separate.
+
+### Earlier implementation frontier — 2026-10-19
+
 The initial Wire repository was a scaffold at `5218f0a`. Three investigations traced upstream
 protocol differences, existing Node/SDK integration and Rust ingestion/offline paths. The immediate
 implementation is [Wire #1](https://github.com/eosrio/hyperion-wire-plugin/issues/1): package-local
@@ -88,12 +100,12 @@ provenance remain the host's responsibility.
 | Wire Hyperion extraction reference | `87b5e2e9647e0219fcf77d07b653668601e0ade7`; inspect extension points, do not port it wholesale or use it as the correctness oracle. |
 | CDT source-inspection reference | `187d6a24ddc60c5c3f4238271815c124bcc80f11`; not yet an accepted compiler/build dependency. |
 | Contract fixture inventory | `test_kv_map`, `test_kv_sec_query`, `proto_abi_test`, and representative `sysio.token`, `sysio.chains`/`sysio.opreg`, `sysio.roa` behaviors. |
-| Testnet launch node/CDT builds | Pending operator selection and reproducible build inputs. Investigation revisions are not launch pins. |
+| Testnet launch node/CDT builds | Actual running testnet reports node `6508c9e8f4044df8d5acb082a7af3be6a80cd9a0`; binary/version receipts are retained in the dated source record. Reproducible build/CDT inputs remain pending. |
 | Deployed contracts and WASM/ABI artifacts | Pending inventory, build receipts and SHA-256 digests. A committed WASM beside C++ does not prove a matching build. |
-| Genesis, chain identity/configuration and deployment sequence | Pending; record before node-captured qualification fixtures are accepted. |
+| Genesis, chain identity/configuration and deployment sequence | Actual chain/genesis and selected public configuration are captured in the 2026-10-20 source record; deployment sequence and contract artifact pins remain pending. |
 | Extension/SDK/host/Rust artifact versions and platform set | Pending tested coordinated set and selected packaging mechanism. No catalog support claim yet. |
-| Isolated node setup | Running under tools #42 on inspected Hyperion-1; official release binary verified, RPC/SHIP and clean restart observed. Existing binaries/services preserved. Runtime is bounded to six hours per start; final network/contract qualification is pending. |
-| Final testnet provisioning | Pending selected inputs, contract deployment and qualification. The isolated node setup can begin earlier; neither setup nor prior server-test authorization permits production service replacement. |
+| Isolated node setup | Dated tools #42 engineering setup on Hyperion-1; official release binary, RPC/SHIP and clean restart observed. The retained record is not a current uptime claim or the new testnet source. |
+| Final testnet provisioning | Operator reports launched testnet; advancing node and real block1 SHiP input verified on Hyperion-3. Selected contract inventory, build/deployment receipts and full qualification remain pending. No production service replacement is part of this evidence slice. |
 
 The package profile and corpus explicitly label themselves as engineering fixtures. Track each
 fixture's origin as synthetic/source-derived, regenerated with exact build inputs, or captured from
