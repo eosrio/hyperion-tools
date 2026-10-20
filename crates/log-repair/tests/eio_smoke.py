@@ -16,19 +16,23 @@ Rust tests cover that path with injected faults. Creates only files under --out 
 temporary loop device and device-mapper target, removed on exit.
 """
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import uuid
 
-DM_NAME = "antelope-log-repair-eio"
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
 
 
 def sh(*argv, **kw):
     return subprocess.run([str(a) for a in argv], check=True, capture_output=True, text=True,
-                          **kw).stdout.strip()
+                          timeout=60, **kw).stdout.strip()
 
 
 def main():
@@ -46,13 +50,24 @@ def main():
     tool = str(args.tool.resolve())
     intact = args.blocks_log.resolve()
     size = intact.stat().st_size
+    require(8192 <= size <= 8 << 20, "use an extracted 8 KiB..8 MiB disposable fixture")
+    require(intact.with_suffix(".index").stat().st_size <= 8 << 20, "fixture index exceeds bound")
+    require(not root.is_relative_to(intact.parent), "output must be separate from input blocks directory")
+    originals = {p: hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in (intact, intact.with_suffix(".index"))}
+    dm_name = f"antelope-eio-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    mapped_device = f"/dev/mapper/{dm_name}"
     image, mnt = root / "fs.img", root / "mnt"
     mnt.mkdir()
     with open(image, "wb") as f:
         f.truncate(max(64 << 20, 2 * size + (32 << 20)))
+    require(shutil.disk_usage(root).free >= image.stat().st_size + (64 << 20),
+            "insufficient capacity for private filesystem image")
     loop = sh("losetup", "--find", "--show", image)
+    require(re.fullmatch(r"/dev/loop\d+", loop) is not None, "unexpected loop device")
     mapped = False
     mounted = False
+    loop_owned = False
 
     def tool_json(*argv, name, expect_ok=True):
         result = subprocess.run([tool, "--json", *map(str, argv)], capture_output=True,
@@ -66,6 +81,17 @@ def main():
         return report
 
     try:
+        devices = json.loads(sh("losetup", "--list", "--json", "--output", "NAME,BACK-FILE", loop))
+        require(len(devices["loopdevices"]) == 1
+                and pathlib.Path(devices["loopdevices"][0]["back-file"]).resolve() == image,
+                "loop backing file differs from the newly created private image")
+        loop_owned = True
+        (root / "resources.json").write_text(json.dumps({
+            "image": str(image), "loop": loop, "mapper": dm_name,
+            "tool_sha256": hashlib.sha256(pathlib.Path(tool).read_bytes()).hexdigest(),
+            "source_sha256": {str(p): h for p, h in originals.items()},
+            "global_cache_flush": False,
+        }, indent=2) + "\n")
         sh("mkfs.ext4", "-q", "-b", "4096", loop)
         sh("mount", loop, mnt)
         mounted = True
@@ -73,7 +99,10 @@ def main():
         target = mnt / "blocks" / "blocks.log"
         shutil.copyfile(intact, target)
         shutil.copyfile(intact.with_suffix(".index"), target.with_suffix(".index"))
-        sh("sync")
+        # Flush only these private files. Never sync or evict the live host's cache.
+        for path in (target, target.with_suffix(".index")):
+            with path.open("rb") as file:
+                os.fsync(file.fileno())
 
         # Damage the page holding the start of the middle block's entry.
         index = intact.with_suffix(".index").read_bytes()
@@ -81,14 +110,14 @@ def main():
         middle = len(index) // 8 // 2
         block = first + middle
         page = int.from_bytes(index[middle * 8:middle * 8 + 8], "little") // 4096
-        assert 0 < page < size // 4096 - 1, "log too small: need pages around the damage"
+        require(0 < page < size // 4096 - 1, "log too small: need pages around the damage")
         extents = sh("filefrag", "-v", "-b4096", target)
         physical = None
         for m in re.finditer(r"^\s*\d+:\s+(\d+)\.\.\s*(\d+):\s+(\d+)\.\.", extents, re.M):
             start, end, phys = map(int, m.groups())
             if start <= page <= end:
                 physical = phys + page - start
-        assert physical is not None, f"page {page} not found in:\n{extents}"
+        require(physical is not None, f"page {page} not found in:\n{extents}")
         sh("umount", mnt)
         mounted = False
 
@@ -97,11 +126,12 @@ def main():
         table = (f"0 {bad} linear {loop} 0\n"
                  f"{bad} 8 error\n"
                  f"{bad + 8} {sectors - bad - 8} linear {loop} {bad + 8}\n")
-        subprocess.run(["dmsetup", "create", DM_NAME], input=table, text=True, check=True)
+        (root / "device-table.txt").write_text(table)
+        subprocess.run(["dmsetup", "create", dm_name], input=table, text=True, check=True, timeout=60)
         mapped = True
-        sh("mount", f"/dev/mapper/{DM_NAME}", mnt)
+        sh("mount", mapped_device, mnt)
         mounted = True
-        pathlib.Path("/proc/sys/vm/drop_caches").write_text("3\n")
+        # This is a new mount of the private image via its own mapper device.
 
         # Keep the human-readable report as evidence too.
         human = subprocess.run([tool, "scan", "--log", str(target)], capture_output=True,
@@ -109,18 +139,18 @@ def main():
         (root / "scan-whole.txt").write_text(human.stdout + human.stderr)
         want = [{"offset": page * 4096, "len": 4096, "records": [page, page]}]
         whole = tool_json("scan", "--log", target, name="scan-whole.json")
-        assert whole["record_size"] == 4096, whole["record_size"]
-        assert whole["damaged"] is True
-        assert [r["extents"] for r in whole["regions"]] == [want], whole["regions"]
-        assert whole["regions"][0]["repairable"] is True
+        require(whole["record_size"] == 4096, "unexpected filesystem record size")
+        require(whole["damaged"] is True, "whole scan missed kernel EIO")
+        require([r["extents"] for r in whole["regions"]] == [want], "whole scan extents differ")
+        require(whole["regions"][0]["repairable"] is True, "EIO region is not repairable")
         narrow = tool_json("scan", "--log", target, "--damaged-block", block,
                            name="scan-block.json")
-        assert [r["extents"] for r in narrow["regions"]] == [want]
+        require([r["extents"] for r in narrow["regions"]] == [want], "narrow scan extents differ")
 
         prepared = tool_json("prepare", "--log", target, "--damaged-block", block,
                              "--blocks-log", intact, "--out", root / "prepare",
                              name="prepare.json")
-        assert prepared["build"]["extent_states"] == ["unreadable"]
+        require(prepared["build"]["extent_states"] == ["unreadable"], "prepare did not classify EIO")
         human = subprocess.run([tool, "prepare", "--log", str(target), "--damaged-block",
                                 str(block), "--blocks-log", str(intact), "--out",
                                 str(root / "prepare-human")], capture_output=True, text=True,
@@ -130,34 +160,44 @@ def main():
         failed = tool_json("apply", "--bundle", bundle, "--approve",
                            prepared["build"]["plan_sha256"], "--node-stopped",
                            name="apply.json", expect_ok=False)
-        assert "write bytes" in failed["error"], failed["error"]
-        assert (bundle / "apply-intent.json").exists()
-        assert not (bundle / "receipt.json").exists()
+        require("write bytes" in failed["error"], f"unexpected apply error: {failed['error']}")
+        require((bundle / "apply-intent.json").exists(), "failed apply lost its intent")
+        require(not (bundle / "receipt.json").exists(), "failed apply published a receipt")
 
         # The failed write leaves the replacement in the page cache: reads succeed and the
         # file looks repaired although the device still fails. Only after the cache is
-        # dropped does the damage show again. Operators must not trust a scan made right
+        # discarded does the damage show again. Operators must not trust a scan made right
         # after a failed apply.
         cached = tool_json("scan", "--log", target, name="scan-after-failed-apply.json")
-        pathlib.Path("/proc/sys/vm/drop_caches").write_text("3\n")
-        uncached = tool_json("scan", "--log", target, name="scan-after-drop-caches.json")
-        assert uncached["damaged"] is True, "damage must reappear once the cache is dropped"
+        sh("umount", mnt)
+        mounted = False
+        sh("mount", mapped_device, mnt)
+        mounted = True
+        uncached = tool_json("scan", "--log", target, name="scan-after-private-remount.json")
+        require(uncached["damaged"] is True, "EIO must reappear after private remount")
         cache_masked = cached["damaged"] is False
-        assert intact.stat().st_size == size  # source untouched
+        require(all(hashlib.sha256(p.read_bytes()).hexdigest() == h for p, h in originals.items()),
+                "source files changed")
     finally:
+        cleanup = []
         if mounted:
-            subprocess.run(["umount", mnt], check=False)
+            cleanup.append(subprocess.run(["umount", mnt], check=False, timeout=60).returncode)
         if mapped:
-            subprocess.run(["dmsetup", "remove", DM_NAME], check=False)
-        subprocess.run(["losetup", "-d", loop], check=False)
+            cleanup.append(subprocess.run(["dmsetup", "remove", dm_name], check=False, timeout=60).returncode)
+        if loop_owned:
+            cleanup.append(subprocess.run(["losetup", "-d", loop], check=False, timeout=60).returncode)
+        (root / "cleanup.json").write_text(json.dumps({"returncodes": cleanup}) + "\n")
+        require(all(code == 0 for code in cleanup), "private loop/mapper/mount cleanup failed")
 
-    print(json.dumps({"ok": True, "evidence": str(root), "checks": [
+    report = {"ok": True, "evidence": str(root), "global_cache_flush": False, "checks": [
         "kernel EIO through ext4 found by whole-file and --damaged-block scans",
         "record size taken from st_blksize (4096 on ext4)",
         "prepare from another node's blocks.log marks the extent unreadable",
         "apply against a write-failing device keeps the journal and writes no receipt",
         f"after the failed write, the page cache {'masked' if cache_masked else 'did not mask'} "
-        "the damage until caches were dropped"]}, indent=2))
+        "the damage until the private filesystem was remounted"]}
+    (root / "complete.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":

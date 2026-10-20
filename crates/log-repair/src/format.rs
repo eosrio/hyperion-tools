@@ -332,7 +332,7 @@ impl Log {
             ensure!(h.number == n, "block {n} header has wrong number");
             Ok(h.id)
         } else {
-            let (id, _) = ship_payload(body)?;
+            let id = checked_ship_id(body)?;
             ensure!(num(&id) == n, "SHIP entry {n} has wrong block number");
             Ok(id)
         }
@@ -341,7 +341,9 @@ impl Log {
 
 /// Bytes of a SHIP entry (header, payload, position trailer) from its 48-byte header.
 pub fn ship_entry_size(header: &[u8]) -> u64 {
-    56 + u64le(&header[40..48])
+    // An overflowing length must remain out of bounds, rather than wrapping to a
+    // short entry that makes trailer slicing panic. Callers reject this sentinel.
+    56u64.saturating_add(u64le(&header[40..48]))
 }
 
 /// Count the orphaned fork entries in `bytes`, which start at file offset `at`. After a
@@ -374,6 +376,15 @@ pub fn orphans(mut bytes: &[u8], mut at: u64) -> Result<u64> {
 
 /// Verify framing, Adler checksum, exact compressed consumption, and bounded expansion.
 pub fn ship_payload(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
+    decode_ship::<true>(body)
+}
+
+/// Validate the whole payload without retaining its decoded bytes.
+pub fn checked_ship_id(body: &[u8]) -> Result<[u8; 32]> {
+    decode_ship::<false>(body).map(|(id, _)| id)
+}
+
+fn decode_ship<const COLLECT: bool>(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
     ensure!(body.len() >= 52, "truncated SHIP entry");
     if let Some(problem) = unsupported_ship_magic(u64le(body)) {
         bail!("{problem}");
@@ -399,45 +410,81 @@ pub fn ship_payload(body: &[u8]) -> Result<([u8; 32], Vec<u8>)> {
         expected.is_none_or(|s| s <= MAX_BYTES),
         "SHIP expansion exceeds 256 MiB limit"
     );
-    let mut z = Decompress::new(true);
-    let mut raw = Vec::new();
-    let mut chunk = [0u8; 65536];
-    loop {
-        let (input_before, output_before) = (z.total_in(), z.total_out());
-        let status = z
-            .decompress(
-                &body[start + input_before as usize..],
-                &mut chunk,
-                FlushDecompress::None,
-            )
-            .context("invalid SHIP zlib payload")?;
-        let produced = (z.total_out() - output_before) as usize;
-        ensure!(
-            raw.len() as u64 + produced as u64 <= MAX_BYTES,
-            "SHIP decompression limit exceeded"
-        );
-        raw.extend_from_slice(&chunk[..produced]);
-        if status == Status::StreamEnd {
-            break;
+    SHIP_DECODER.with_borrow_mut(|decoder| {
+        decoder
+            .get_or_insert_with(ShipDecoder::new)
+            .decode::<COLLECT>(body, start, expected, marker)
+    })
+}
+
+thread_local! {
+    // One bounded workspace per decoding thread. No source bytes or returned payloads
+    // are cached; each call resets the complete zlib state, including after an error.
+    static SHIP_DECODER: std::cell::RefCell<Option<ShipDecoder>> = const { std::cell::RefCell::new(None) };
+}
+
+struct ShipDecoder {
+    z: Decompress,
+    chunk: Box<[u8; 65536]>,
+}
+
+impl ShipDecoder {
+    fn new() -> Self {
+        Self {
+            z: Decompress::new(true),
+            chunk: Box::new([0; 65536]),
+        }
+    }
+
+    fn decode<const COLLECT: bool>(
+        &mut self,
+        body: &[u8],
+        start: usize,
+        expected: Option<u64>,
+        marker: u32,
+    ) -> Result<([u8; 32], Vec<u8>)> {
+        let Self { z, chunk } = self;
+        z.reset(true);
+        let mut raw = Vec::new();
+        loop {
+            let (input_before, output_before) = (z.total_in(), z.total_out());
+            let status = z
+                .decompress(
+                    &body[start + input_before as usize..],
+                    chunk.as_mut(),
+                    FlushDecompress::None,
+                )
+                .context("invalid SHIP zlib payload")?;
+            let produced = (z.total_out() - output_before) as usize;
+            ensure!(
+                z.total_out() <= MAX_BYTES,
+                "SHIP decompression limit exceeded"
+            );
+            if COLLECT {
+                raw.extend_from_slice(&chunk[..produced]);
+            }
+            if status == Status::StreamEnd {
+                break;
+            }
+            ensure!(
+                z.total_in() > input_before || produced > 0,
+                "incomplete SHIP zlib stream"
+            );
         }
         ensure!(
-            z.total_in() > input_before || produced > 0,
-            "incomplete SHIP zlib stream"
+            z.total_in() == (body.len() - start) as u64,
+            "trailing or incomplete SHIP zlib stream"
         );
+        ensure!(
+            expected.is_none_or(|s| s == z.total_out()),
+            "SHIP uncompressed size mismatch"
+        );
+        ensure!(
+            marker <= 1 || u64::from(marker) == (body.len() - start) as u64,
+            "legacy SHIP compressed size mismatch"
+        );
+        Ok((body[8..40].try_into()?, raw))
     }
-    ensure!(
-        z.total_in() == (body.len() - start) as u64,
-        "trailing or incomplete SHIP zlib stream"
-    );
-    ensure!(
-        expected.is_none_or(|s| s == raw.len() as u64),
-        "SHIP uncompressed size mismatch"
-    );
-    ensure!(
-        marker <= 1 || u64::from(marker) == (body.len() - start) as u64,
-        "legacy SHIP compressed size mismatch"
-    );
-    Ok((body[8..40].try_into()?, raw))
 }
 
 /// A SHIP entry in Spring's encoding (stored zlib, 32 KiB blocks).
@@ -471,7 +518,7 @@ pub fn encode_ship_with(id: &[u8; 32], raw: &[u8], marker: u32, codec: &Codec) -
         body.extend_from_slice(&(raw.len() as u64).to_le_bytes());
     }
     body.extend_from_slice(&compressed);
-    ship_payload(&body)?;
+    checked_ship_id(&body)?;
     Ok(body)
 }
 

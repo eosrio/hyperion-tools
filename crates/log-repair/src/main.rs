@@ -1,3 +1,5 @@
+#[cfg(feature = "allocation-metrics")]
+mod allocation_metrics;
 mod codec;
 mod format;
 mod framing;
@@ -418,7 +420,10 @@ fn parse_block_range(s: &str) -> std::result::Result<(u32, u32), String> {
 async fn main() {
     let cli = Cli::parse();
     let json = cli.json;
-    match run(cli).await {
+    let outcome = run(cli).await;
+    #[cfg(feature = "allocation-metrics")]
+    allocation_metrics::report();
+    match outcome {
         Ok(out) if json => println!("{}", serde_json::to_string_pretty(&out.json).unwrap()),
         Ok(out) => print!("{}", out.text),
         Err(e) => {

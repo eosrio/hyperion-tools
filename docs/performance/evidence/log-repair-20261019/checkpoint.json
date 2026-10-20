@@ -1,0 +1,4943 @@
+{
+  "schema": 1,
+  "status": "in_progress",
+  "base_revision": "2b4ebbcc8e9e265e995d1c46670fc79c5257cae2",
+  "host": {
+    "system": "Linux",
+    "node": "x670e-7950x",
+    "release": "6.1.10-060110-generic",
+    "version": "#202302060840 SMP PREEMPT_DYNAMIC Mon Feb  6 09:32:56 UTC 2023",
+    "machine": "x86_64",
+    "processor": "x86_64"
+  },
+  "cache": "Ordinary shared-host cache. Other qualification and production work overlapped; no global cache eviction.",
+  "binaries": {
+    "baseline": {
+      "sha256": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9"
+    },
+    "decoder_reuse": {
+      "decoder-reuse-release": "97f5c3f8ed46d46035c4404ab1005db82c1b82ca01f025716825f0e01bf587f3",
+      "decoder-reuse-allocation": "dae5f051ddcbc5f0d04eac191c1590f3fc6be801c36bb3f033c440b3d19ed387"
+    },
+    "stream_validation": {
+      "stream-validation-release": "645bb740dca88d9ebae0256d05d1e5b318ba06dcc387917f176f2ac836e2f4ca",
+      "stream-validation-allocation": "084ec90bbc752940146bc1745022b9486923c793df8d3289c49dbb1b21c3bd05"
+    },
+    "candidate1": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+    "candidate2": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+  },
+  "corpus": [
+    {
+      "kind": "blocks",
+      "first_block": 1,
+      "last_block": 269898278,
+      "log_bytes": 56409713202,
+      "index_bytes": 2159186224,
+      "log_sha256": "418c9147be9b74beb57b2f1cb1a59cdc47de4efb6c11942a1a46dea5feb032eb",
+      "index_sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378"
+    },
+    {
+      "kind": "trace_history",
+      "first_block": 2,
+      "last_block": 269898278,
+      "log_bytes": 104294471504,
+      "index_bytes": 2159186216,
+      "log_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+      "index_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98"
+    },
+    {
+      "kind": "chain_state_history",
+      "first_block": 2,
+      "last_block": 269898278,
+      "log_bytes": 162079017385,
+      "index_bytes": 2159186216,
+      "log_sha256": "6c8bbe084b58214113833b20ed4234bf1e5c81d8b664385744ef258ae5c9215b",
+      "index_sha256": "780a39f7f2a6640ff7e31369294783900098c60d3f474b12e1f945d573f3b34b"
+    }
+  ],
+  "paired_experiments": {
+    "paired-reuse-v1": {
+      "tool_sha256": {
+        "before": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9",
+        "after": "97f5c3f8ed46d46035c4404ab1005db82c1b82ca01f025716825f0e01bf587f3",
+        "allocation-before": "b8d1e5d14805a025fc2ebd35c35c14ddd39749d332ac065e18099b3a9b96edab",
+        "allocation-after": "dae5f051ddcbc5f0d04eac191c1590f3fc6be801c36bb3f033c440b3d19ed387"
+      },
+      "reports_equal_excluding_seconds": true,
+      "results": [
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 1,
+          "tool_seconds": 11.111601854,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 11.139712184667587,
+            "user_seconds": 4.374231,
+            "system_seconds": 6.733278,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20868,
+            "minor_faults": 11071877,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 662,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13041664,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 1,
+          "tool_seconds": 2.352550452,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.384725719690323,
+            "user_seconds": 2.257857,
+            "system_seconds": 0.09207499999999999,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20952,
+            "minor_faults": 71900,
+            "major_faults": 1,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13172736,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 2,
+          "tool_seconds": 2.37407888,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.384495347738266,
+            "user_seconds": 2.286428,
+            "system_seconds": 0.084384,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20952,
+            "minor_faults": 71901,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 660,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13041664,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 2,
+          "tool_seconds": 10.797034803,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 10.840552479028702,
+            "user_seconds": 3.791531,
+            "system_seconds": 6.999135,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20868,
+            "minor_faults": 11071877,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 662,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13041664,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 3,
+          "tool_seconds": 10.792083953,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 10.835962802171707,
+            "user_seconds": 3.967818,
+            "system_seconds": 6.819687,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20872,
+            "minor_faults": 11071878,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 662,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13041664,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 3,
+          "tool_seconds": 2.322772909,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.33373686671257,
+            "user_seconds": 2.232024,
+            "system_seconds": 0.088,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 20952,
+            "minor_faults": 71901,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 13041664,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 1,
+          "tool_seconds": 9.117871475,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 9.126891985535622,
+            "user_seconds": 2.190716,
+            "system_seconds": 6.911949,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32220,
+            "minor_faults": 11116436,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 1,
+          "tool_seconds": 0.544535472,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5724262297153473,
+            "user_seconds": 0.39402299999999996,
+            "system_seconds": 0.151241,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32248,
+            "minor_faults": 116267,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 1,
+          "tool_seconds": 9.179917808,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 2000674,
+            "reallocations": 56,
+            "deallocations": 2000566,
+            "requested_bytes": 44164136249,
+            "live_requested_bytes": 47395,
+            "peak_live_requested_bytes": 31176093
+          },
+          "metrics": {
+            "elapsed_seconds": 9.223811149597168,
+            "user_seconds": 2.373021,
+            "system_seconds": 6.806929,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32348,
+            "minor_faults": 11116438,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 855,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 1,
+          "tool_seconds": 0.56554856,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5742035806179047,
+            "user_seconds": 0.41078299999999995,
+            "system_seconds": 0.15553899999999998,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32380,
+            "minor_faults": 116269,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 853,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 2,
+          "tool_seconds": 0.543173623,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5728080123662949,
+            "user_seconds": 0.37974199999999997,
+            "system_seconds": 0.16388899999999998,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32252,
+            "minor_faults": 116271,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 2,
+          "tool_seconds": 9.068817778,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 9.074288636446,
+            "user_seconds": 2.344292,
+            "system_seconds": 6.724839,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32220,
+            "minor_faults": 11116436,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 2,
+          "tool_seconds": 0.559563586,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5725725144147873,
+            "user_seconds": 0.409225,
+            "system_seconds": 0.150976,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32376,
+            "minor_faults": 116268,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 854,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 2,
+          "tool_seconds": 9.116742606,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 2000674,
+            "reallocations": 56,
+            "deallocations": 2000566,
+            "requested_bytes": 44164136249,
+            "live_requested_bytes": 47395,
+            "peak_live_requested_bytes": 31176093
+          },
+          "metrics": {
+            "elapsed_seconds": 9.125791028141975,
+            "user_seconds": 2.499967,
+            "system_seconds": 6.615914,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32348,
+            "minor_faults": 11116438,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 855,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 3,
+          "tool_seconds": 9.130181745,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 9.174829304218292,
+            "user_seconds": 2.179726,
+            "system_seconds": 6.951127,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32224,
+            "minor_faults": 11116437,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 3,
+          "tool_seconds": 0.537214487,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.572429433465004,
+            "user_seconds": 0.386528,
+            "system_seconds": 0.151423,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32248,
+            "minor_faults": 116266,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 3,
+          "tool_seconds": 9.078852022,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 2000674,
+            "reallocations": 56,
+            "deallocations": 2000566,
+            "requested_bytes": 44164136249,
+            "live_requested_bytes": 47395,
+            "peak_live_requested_bytes": 31176093
+          },
+          "metrics": {
+            "elapsed_seconds": 9.12454904615879,
+            "user_seconds": 2.379443,
+            "system_seconds": 6.698434,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32348,
+            "minor_faults": 11116438,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 855,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 3,
+          "tool_seconds": 0.558943723,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5739933997392654,
+            "user_seconds": 0.391897,
+            "system_seconds": 0.167955,
+            "max_rss_kib": 49384,
+            "sampled_program_peak_rss_kib": 32384,
+            "minor_faults": 116270,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 854,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        }
+      ]
+    },
+    "paired-stream-v1": {
+      "tool_sha256": {
+        "before": "97f5c3f8ed46d46035c4404ab1005db82c1b82ca01f025716825f0e01bf587f3",
+        "after": "645bb740dca88d9ebae0256d05d1e5b318ba06dcc387917f176f2ac836e2f4ca",
+        "allocation-before": "dae5f051ddcbc5f0d04eac191c1590f3fc6be801c36bb3f033c440b3d19ed387",
+        "allocation-after": "084ec90bbc752940146bc1745022b9486923c793df8d3289c49dbb1b21c3bd05"
+      },
+      "reports_equal_excluding_seconds": true,
+      "results": [
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 1,
+          "tool_seconds": 2.356735968,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.3855713456869125,
+            "user_seconds": 2.272329,
+            "system_seconds": 0.07987,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20952,
+            "minor_faults": 71901,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37920768,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 1,
+          "tool_seconds": 2.312468605,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.334709495306015,
+            "user_seconds": 2.215449,
+            "system_seconds": 0.09230999999999999,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20920,
+            "minor_faults": 71517,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37818368,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 2,
+          "tool_seconds": 2.268266105,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.2832898050546646,
+            "user_seconds": 2.150157,
+            "system_seconds": 0.11148899999999999,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20920,
+            "minor_faults": 71517,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37818368,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 2,
+          "tool_seconds": 2.373879303,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.383498966693878,
+            "user_seconds": 2.261046,
+            "system_seconds": 0.10805,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20948,
+            "minor_faults": 71900,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37818368,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "before",
+          "repeat": 3,
+          "tool_seconds": 2.317610932,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.3340079933404922,
+            "user_seconds": 2.216271,
+            "system_seconds": 0.09618499999999999,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20948,
+            "minor_faults": 71900,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37818368,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "early",
+          "artifact": "after",
+          "repeat": 3,
+          "tool_seconds": 2.308529326,
+          "verified_bytes": 275777362,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 2.3347402215003967,
+            "user_seconds": 2.204597,
+            "system_seconds": 0.09966499999999999,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 20920,
+            "minor_faults": 71521,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 283778386,
+              "wchar": 661,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 37818368,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 1,
+          "tool_seconds": 0.54180439,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.572604775428772,
+            "user_seconds": 0.397935,
+            "system_seconds": 0.144703,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32252,
+            "minor_faults": 116267,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 671,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 1,
+          "tool_seconds": 0.511013419,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5236122459173203,
+            "user_seconds": 0.35972299999999996,
+            "system_seconds": 0.151883,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32240,
+            "minor_faults": 115845,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 1,
+          "tool_seconds": 0.53928133,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5723631381988525,
+            "user_seconds": 0.40412899999999996,
+            "system_seconds": 0.136043,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32380,
+            "minor_faults": 116269,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 853,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 1,
+          "tool_seconds": 0.482074227,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 676,
+            "reallocations": 56,
+            "deallocations": 566,
+            "requested_bytes": 489909131,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31222628
+          },
+          "metrics": {
+            "elapsed_seconds": 0.522171750664711,
+            "user_seconds": 0.339371,
+            "system_seconds": 0.143733,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32492,
+            "minor_faults": 115847,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 846,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 2,
+          "tool_seconds": 0.493993732,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5228933691978455,
+            "user_seconds": 0.337989,
+            "system_seconds": 0.15692299999999998,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32236,
+            "minor_faults": 115844,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 2,
+          "tool_seconds": 0.542377515,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5726243257522583,
+            "user_seconds": 0.403416,
+            "system_seconds": 0.139797,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32248,
+            "minor_faults": 116266,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 2,
+          "tool_seconds": 0.488404585,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 676,
+            "reallocations": 56,
+            "deallocations": 566,
+            "requested_bytes": 489909131,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31222628
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5227566957473755,
+            "user_seconds": 0.34884499999999996,
+            "system_seconds": 0.14034,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32496,
+            "minor_faults": 115848,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 846,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 2,
+          "tool_seconds": 0.539363853,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5731703490018845,
+            "user_seconds": 0.39209299999999997,
+            "system_seconds": 0.148035,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32384,
+            "minor_faults": 116270,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 854,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "before",
+          "repeat": 3,
+          "tool_seconds": 0.538213007,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5732441842556,
+            "user_seconds": 0.39502,
+            "system_seconds": 0.143643,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32252,
+            "minor_faults": 116267,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "after",
+          "repeat": 3,
+          "tool_seconds": 0.480250253,
+          "verified_bytes": 457341378,
+          "allocation_requests": null,
+          "metrics": {
+            "elapsed_seconds": 0.5224609524011612,
+            "user_seconds": 0.330028,
+            "system_seconds": 0.15109699999999998,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32236,
+            "minor_faults": 115844,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 672,
+              "syscr": 55,
+              "syscw": 2,
+              "read_bytes": 0,
+              "write_bytes": 4096,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-before",
+          "repeat": 3,
+          "tool_seconds": 0.540441071,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 1000676,
+            "reallocations": 56,
+            "deallocations": 1000566,
+            "requested_bytes": 868245065,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31241629
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5727142244577408,
+            "user_seconds": 0.377961,
+            "system_seconds": 0.16312,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32380,
+            "minor_faults": 116269,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 854,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        },
+        {
+          "range": "modern",
+          "artifact": "allocation-after",
+          "repeat": 3,
+          "tool_seconds": 0.47776266,
+          "verified_bytes": 457341378,
+          "allocation_requests": {
+            "allocations": 676,
+            "reallocations": 56,
+            "deallocations": 566,
+            "requested_bytes": 489909131,
+            "live_requested_bytes": 156227,
+            "peak_live_requested_bytes": 31222628
+          },
+          "metrics": {
+            "elapsed_seconds": 0.5226123780012131,
+            "user_seconds": 0.33777799999999997,
+            "system_seconds": 0.14074,
+            "max_rss_kib": 49512,
+            "sampled_program_peak_rss_kib": 32500,
+            "minor_faults": 115849,
+            "major_faults": 0,
+            "sampled_io_max": {
+              "rchar": 465342402,
+              "wchar": 845,
+              "syscr": 55,
+              "syscw": 5,
+              "read_bytes": 0,
+              "write_bytes": 8192,
+              "cancelled_write_bytes": 0
+            }
+          }
+        }
+      ]
+    }
+  },
+  "large_state": {
+    "uncompressed_initial_bytes": 139207634,
+    "results": [
+      {
+        "artifact": "before",
+        "repeat": 1,
+        "tool_seconds": 0.109983034,
+        "metrics": {
+          "elapsed_seconds": 0.11962296068668365,
+          "user_seconds": 0.011878,
+          "system_seconds": 0.09898699999999999,
+          "max_rss_kib": 274304,
+          "sampled_program_peak_rss_kib": 197648,
+          "minor_faults": 68933,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 998,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "artifact": "after",
+        "repeat": 1,
+        "tool_seconds": 0.068003703,
+        "metrics": {
+          "elapsed_seconds": 0.06949566304683685,
+          "user_seconds": 0.012161,
+          "system_seconds": 0.056755,
+          "max_rss_kib": 157208,
+          "sampled_program_peak_rss_kib": 50892,
+          "minor_faults": 34830,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 998,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "artifact": "after",
+        "repeat": 2,
+        "tool_seconds": 0.070233597,
+        "metrics": {
+          "elapsed_seconds": 0.11986477673053741,
+          "user_seconds": 0.015804,
+          "system_seconds": 0.055313999999999995,
+          "max_rss_kib": 157208,
+          "sampled_program_peak_rss_kib": 138272,
+          "minor_faults": 34829,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 998,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "artifact": "before",
+        "repeat": 2,
+        "tool_seconds": 0.1107576,
+        "metrics": {
+          "elapsed_seconds": 0.12058663368225098,
+          "user_seconds": 0.01992,
+          "system_seconds": 0.091635,
+          "max_rss_kib": 274312,
+          "sampled_program_peak_rss_kib": 204028,
+          "minor_faults": 68935,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 996,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "artifact": "before",
+        "repeat": 3,
+        "tool_seconds": 0.108763781,
+        "metrics": {
+          "elapsed_seconds": 0.11995631456375122,
+          "user_seconds": 0.016229999999999998,
+          "system_seconds": 0.093327,
+          "max_rss_kib": 274308,
+          "sampled_program_peak_rss_kib": 204284,
+          "minor_faults": 68934,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 998,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "artifact": "after",
+        "repeat": 3,
+        "tool_seconds": 0.074307909,
+        "metrics": {
+          "elapsed_seconds": 0.12026803195476532,
+          "user_seconds": 0.019742,
+          "system_seconds": 0.055278,
+          "max_rss_kib": 157208,
+          "sampled_program_peak_rss_kib": 138272,
+          "minor_faults": 34830,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 141168940,
+            "wchar": 998,
+            "syscr": 20,
+            "syscw": 7,
+            "read_bytes": 0,
+            "write_bytes": 8192,
+            "cancelled_write_bytes": 0
+          }
+        }
+      }
+    ],
+    "reports_equal_excluding_seconds": true,
+    "caveat": "wait4 peak RSS can include fork-before-exec launcher memory; sampled exe-matched VmHWM is a lower bound."
+  },
+  "full_trace_reuse": {
+    "before_tool_seconds": 2753.46731334,
+    "before_metrics": {
+      "elapsed_seconds": 2753.828457802534,
+      "user_seconds": 907.519387,
+      "system_seconds": 1833.823424,
+      "max_rss_kib": 68516,
+      "sampled_program_peak_rss_kib": 68516,
+      "minor_faults": 2995695653,
+      "major_faults": 0,
+      "sampled_io_max": {
+        "rchar": 106454140640,
+        "wchar": 3123,
+        "syscr": 12365,
+        "syscw": 319,
+        "read_bytes": 45067554816,
+        "write_bytes": 106496,
+        "cancelled_write_bytes": 0
+      }
+    },
+    "after_runs": [
+      {
+        "tool_seconds": 421.3197398,
+        "metrics": {
+          "elapsed_seconds": 421.36783431470394,
+          "user_seconds": 381.521348,
+          "system_seconds": 38.054947,
+          "max_rss_kib": 68628,
+          "sampled_program_peak_rss_kib": 68628,
+          "minor_faults": 26627496,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 106454140640,
+            "wchar": 3133,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21127700480,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "tool_seconds": 418.940240332,
+        "metrics": {
+          "elapsed_seconds": 418.97553737461567,
+          "user_seconds": 379.966451,
+          "system_seconds": 37.288409,
+          "max_rss_kib": 68628,
+          "sampled_program_peak_rss_kib": 68628,
+          "minor_faults": 26627503,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 18814787584,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          }
+        }
+      },
+      {
+        "tool_seconds": 431.896817245,
+        "metrics": {
+          "elapsed_seconds": 431.9042729139328,
+          "user_seconds": 391.817334,
+          "system_seconds": 38.169665,
+          "max_rss_kib": 68624,
+          "sampled_program_peak_rss_kib": 68624,
+          "minor_faults": 26627495,
+          "major_faults": 0,
+          "sampled_io_max": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21305008128,
+            "write_bytes": 106496,
+            "cancelled_write_bytes": 0
+          }
+        }
+      }
+    ],
+    "reports_equal_excluding_seconds": true,
+    "entries": 269898277,
+    "bytes": 104294471504,
+    "orphaned_fork_entries": 1223326,
+    "comparison": "Single baseline pilot vs three decoder-reuse repeats; final candidate full SHIP repeats still pending."
+  },
+  "damage": {
+    "ok": true,
+    "cases": 158,
+    "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5"
+  },
+  "interruptions": {
+    "cases": [
+      {
+        "case": "kill-truncate-1-resume",
+        "ok": true,
+        "actual_process_kill": true
+      },
+      {
+        "case": "kill-truncate-1-rollback",
+        "ok": true,
+        "actual_process_kill": true
+      },
+      {
+        "case": "kill-truncate-2-resume",
+        "ok": true,
+        "actual_process_kill": true
+      },
+      {
+        "case": "kill-truncate-2-rollback",
+        "ok": true,
+        "actual_process_kill": true
+      },
+      {
+        "case": "enospc-before-intent",
+        "ok": true,
+        "actual_process_kill": false
+      },
+      {
+        "case": "enospc-truncate-1",
+        "ok": true,
+        "actual_process_kill": false
+      },
+      {
+        "case": "enospc-truncate-2",
+        "ok": true,
+        "actual_process_kill": false
+      },
+      {
+        "case": "enospc-rollback-write-1",
+        "ok": true,
+        "actual_process_kill": false
+      },
+      {
+        "case": "enospc-rollback-write-2",
+        "ok": true,
+        "actual_process_kill": false
+      }
+    ],
+    "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+    "strace_sha256": "38a5c75cb29dd85ddd7780d54f5bf595554d7a1b5c42524b23065f5dc4c4b01d",
+    "strace_version": "5.16",
+    "scope": "Four actual tracee SIGKILL cases and five injected ENOSPC syscall cases; no physical storage power-cut claim."
+  },
+  "kernel_eio": {
+    "ok": true,
+    "global_cache_flush": false,
+    "checks": [
+      "kernel EIO through ext4 found by whole-file and --damaged-block scans",
+      "record size taken from st_blksize (4096 on ext4)",
+      "prepare from another node's blocks.log marks the extent unreadable",
+      "apply against a write-failing device keeps the journal and writes no receipt",
+      "after the failed write, the page cache masked the damage until the private filesystem was remounted"
+    ],
+    "cleanup": {
+      "returncodes": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "node_acceptance": {
+    "nodeos_version": "v1.2.3-alpha1-9f6e4496db1ebffec088f9206b645ef9571f2889",
+    "tool_sha256": "97f5c3f8ed46d46035c4404ab1005db82c1b82ca01f025716825f0e01bf587f3",
+    "expected_head": 209396280,
+    "head_id": "0c7b22381a2af3da81a43cb14e9a73f07e6b57160ce7477b1d58575b8972f1de",
+    "seeded_history": [
+      {
+        "kind": "trace_history",
+        "seeded_entries": 1,
+        "newly_replayed_entries": 1998,
+        "first": 209394282,
+        "last": 209396280,
+        "all_canonical_ids_and_payload_hashes_match": true,
+        "log_sha256": "978e1c4b98f78465dea62357b010c6c8d34cd5ffb3e869738996847a191b626e",
+        "index_sha256": "0372690a65e5acadb9fbca67e283a5b01e48b9da676cebb14e51b59f2f5a69c5"
+      },
+      {
+        "kind": "chain_state_history",
+        "seeded_entries": 1,
+        "newly_replayed_entries": 1998,
+        "first": 209394282,
+        "last": 209396280,
+        "all_canonical_ids_and_payload_hashes_match": true,
+        "log_sha256": "543f8af75f3d3b8fc23ff02f34076d4f91462a1a3334404d6c1a2558813074be",
+        "index_sha256": "8a061968b0c0a07df1a4f725ea8a6d114d30a0ad9268a1551bb6307506d8a20e"
+      }
+    ],
+    "fresh_history_delta_first_full_state_bytes": 139207634,
+    "note": "Fresh history matched all 1998 traces and 1997 subsequent deltas; initial full-state payload is not equivalent to original delta."
+  },
+  "pending": [
+    "Repeated final-artifact scan/verify/inspection and chain-state baselines; one complete final trace inspect/verify pilot passed",
+    "Healthy ZFS and controlled-cache qualification; EOS 128 GiB copy stopped after a permanent source-file pool error",
+    "Repeated full-size recovery operations; existing five-operation measurement is a single pilot",
+    "Broader media errors, remaining journal/write/fsync/short-write boundaries and physical storage/VM power cuts; see QUALIFICATION.md"
+  ],
+  "candidate2_build": {
+    "base_revision": "2b4ebbcc8e9e265e995d1c46670fc79c5257cae2",
+    "parent_revision": "fb057b4f477119871f6d4fe74ac7105046ce2c8f",
+    "binary_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+    "target": "x86_64-unknown-linux-musl",
+    "features": [],
+    "build_host": "Windows",
+    "build_command": "cargo zigbuild --offline --locked --release --target x86_64-unknown-linux-musl -p antelope-log-repair",
+    "toolchains": {
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-pc-windows-msvc\nrelease: 1.99.0\nLLVM version: 23.1.1",
+      "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+      "zig": "0.17.0"
+    },
+    "cargo_zigbuild_sha256": "4b310a7e121abaf229a206d68566834088a38a767ac512a112dd9a6fc9cf55fa",
+    "source_files": {
+      "crates/log-repair/src/allocation_metrics.rs": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+      "crates/log-repair/src/codec.rs": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+      "crates/log-repair/src/format.rs": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+      "crates/log-repair/src/framing.rs": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+      "crates/log-repair/src/io.rs": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+      "crates/log-repair/src/main.rs": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+      "crates/log-repair/src/repair.rs": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+      "crates/log-repair/src/replay.rs": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+      "crates/log-repair/src/report.rs": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+      "crates/log-repair/src/ship.rs": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+      "crates/log-repair/src/tail/trim.rs": "c3db705db6c34018b3eab1424bf3497ae5075f66217614f7cf212618b5a9fd1e",
+      "crates/log-repair/src/tail.rs": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+      "crates/log-repair/src/target.rs": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+      "crates/log-repair/src/tests.rs": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+      "crates/log-repair/src/verify.rs": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+      "Cargo.toml": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+      "Cargo.lock": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+      "crates/log-repair/Cargo.toml": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f"
+    }
+  },
+  "candidate2_committed_sources": {
+    "revision": "63f933f25cf57631ba50f2d86bed1ee498addb4e",
+    "binary_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+    "files": {
+      "crates/log-repair/src/allocation_metrics.rs": {
+        "compiled_source_sha256": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+        "committed_bytes_sha256": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/codec.rs": {
+        "compiled_source_sha256": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+        "committed_bytes_sha256": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/format.rs": {
+        "compiled_source_sha256": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+        "committed_bytes_sha256": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/framing.rs": {
+        "compiled_source_sha256": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+        "committed_bytes_sha256": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/io.rs": {
+        "compiled_source_sha256": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+        "committed_bytes_sha256": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/main.rs": {
+        "compiled_source_sha256": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+        "committed_bytes_sha256": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/repair.rs": {
+        "compiled_source_sha256": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+        "committed_bytes_sha256": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/replay.rs": {
+        "compiled_source_sha256": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+        "committed_bytes_sha256": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/report.rs": {
+        "compiled_source_sha256": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+        "committed_bytes_sha256": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/ship.rs": {
+        "compiled_source_sha256": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+        "committed_bytes_sha256": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tail/trim.rs": {
+        "compiled_source_sha256": "c3db705db6c34018b3eab1424bf3497ae5075f66217614f7cf212618b5a9fd1e",
+        "committed_bytes_sha256": "303e27fb4b4928bbb5790cf2f8882de8481001b0e5203829253ae9e78847bc6c",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tail.rs": {
+        "compiled_source_sha256": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+        "committed_bytes_sha256": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/target.rs": {
+        "compiled_source_sha256": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+        "committed_bytes_sha256": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tests.rs": {
+        "compiled_source_sha256": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+        "committed_bytes_sha256": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/verify.rs": {
+        "compiled_source_sha256": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+        "committed_bytes_sha256": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+        "equal_after_crlf_normalization": true
+      },
+      "Cargo.toml": {
+        "compiled_source_sha256": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+        "committed_bytes_sha256": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+        "equal_after_crlf_normalization": true
+      },
+      "Cargo.lock": {
+        "compiled_source_sha256": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+        "committed_bytes_sha256": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/Cargo.toml": {
+        "compiled_source_sha256": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f",
+        "committed_bytes_sha256": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f",
+        "equal_after_crlf_normalization": true
+      }
+    }
+  },
+  "candidate2_validation": {
+    "linux_rust_tests": 92,
+    "windows_rust_tests": 67,
+    "python_tests": 20,
+    "windows_python_skipped": 17,
+    "libre_damage": {
+      "ok": true,
+      "cases": 174,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    },
+    "eos_damage": {
+      "ok": true,
+      "cases": 26,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    },
+    "eos_fixture_sha256": "4b740d07312cdbae971e4305f0267c68caf0eb86832e6137c1c87b177e87e46c",
+    "interruptions": {
+      "ok": true,
+      "results": [
+        {
+          "case": "kill-truncate-1-resume",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-1-rollback",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-2-resume",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-2-rollback",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "enospc-before-intent",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-truncate-1",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-truncate-2",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-rollback-write-1",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-rollback-write-2",
+          "ok": true,
+          "actual_process_kill": false
+        }
+      ],
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "strace_sha256": "38a5c75cb29dd85ddd7780d54f5bf595554d7a1b5c42524b23065f5dc4c4b01d",
+      "strace_version": "strace -- version 5.16\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers\n",
+      "host": {
+        "system": "Linux",
+        "node": "x670e-7950x",
+        "release": "6.1.10-060110-generic",
+        "version": "#202302060840 SMP PREEMPT_DYNAMIC Mon Feb  6 09:32:56 UTC 2023",
+        "machine": "x86_64",
+        "processor": "x86_64"
+      },
+      "fixture_sha256": "7e7e9581e53288815512605c6ea4164337d521e0d6a28719258dea341f2c92b9",
+      "original_log_sha256": "4612ecbb6c3e56d83d712aa7ea8374442119b1bbdaca561a9063bad58d55ea5e",
+      "original_index_sha256": "062cb2a12bc9e6a89eeb113f62615fa27b3aa5e4a360ed2b825b1d1b49ba8452",
+      "mutation": "Remove four bytes from the real final entry's position trailer.",
+      "scope": "Process SIGKILL and injected syscall errors; no storage power-cut claim.",
+      "cases": [
+        "kill-truncate-1-resume",
+        "kill-truncate-1-rollback",
+        "kill-truncate-2-resume",
+        "kill-truncate-2-rollback",
+        "enospc-before-intent",
+        "enospc-truncate-1",
+        "enospc-truncate-2",
+        "enospc-rollback-write-1",
+        "enospc-rollback-write-2"
+      ]
+    },
+    "retirement_guard": "Rehash private output before deletion, even when observed metadata matches. Preparation and cleanup are outside timed repair operations."
+  },
+  "full_block_mutations": {
+    "ok": true,
+    "groups": [
+      {
+        "operation": "trim",
+        "runs": 1,
+        "median_seconds": 165.147693246603,
+        "min_seconds": 165.147693246603,
+        "max_seconds": 165.147693246603
+      },
+      {
+        "operation": "resume",
+        "runs": 1,
+        "median_seconds": 35.387085005640984,
+        "min_seconds": 35.387085005640984,
+        "max_seconds": 35.387085005640984
+      },
+      {
+        "operation": "rollback",
+        "runs": 1,
+        "median_seconds": 71.3008416891098,
+        "min_seconds": 71.3008416891098,
+        "max_seconds": 71.3008416891098
+      },
+      {
+        "operation": "salvage",
+        "runs": 1,
+        "median_seconds": 287.66955211758614,
+        "min_seconds": 287.66955211758614,
+        "max_seconds": 287.66955211758614
+      },
+      {
+        "operation": "restore",
+        "runs": 1,
+        "median_seconds": 1090.7165640592575,
+        "min_seconds": 1090.7165640592575,
+        "max_seconds": 1090.7165640592575
+      }
+    ],
+    "results": [
+      {
+        "operation": "trim",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 165.147693246603,
+        "user_seconds": 118.565445,
+        "system_seconds": 45.61779,
+        "max_rss_kib": 50928,
+        "minor_faults": 31504737,
+        "sampled_program_peak_rss_kib": 20860,
+        "major_faults": 29,
+        "input_block_ops": 137191576,
+        "output_block_ops": 344,
+        "last_sample": {
+          "seconds": 165.14724057912827,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 121663743534,
+            "wchar": 10327,
+            "syscr": 1790570,
+            "syscw": 766,
+            "read_bytes": 70242086912,
+            "write_bytes": 176128,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 31504737,
+            "major_faults": 29,
+            "user_ticks": 11856,
+            "system_ticks": 4561,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 121663743534,
+          "wchar": 10327,
+          "syscr": 1790570,
+          "syscw": 766,
+          "read_bytes": 70242086912,
+          "write_bytes": 176128,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "resume",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 35.387085005640984,
+        "user_seconds": 21.718089,
+        "system_seconds": 13.6388,
+        "max_rss_kib": 50928,
+        "minor_faults": 14302687,
+        "sampled_program_peak_rss_kib": 18664,
+        "major_faults": 1,
+        "input_block_ops": 256,
+        "output_block_ops": 64,
+        "last_sample": {
+          "seconds": 35.38683234155178,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 58568906601,
+            "wchar": 4160,
+            "syscr": 3511,
+            "syscw": 278,
+            "read_bytes": 131072,
+            "write_bytes": 32768,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 14302687,
+            "major_faults": 1,
+            "user_ticks": 2171,
+            "system_ticks": 1363,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 58568906601,
+          "wchar": 4160,
+          "syscr": 3511,
+          "syscw": 278,
+          "read_bytes": 131072,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "rollback",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 71.3008416891098,
+        "user_seconds": 43.686231,
+        "system_seconds": 27.530885,
+        "max_rss_kib": 50928,
+        "minor_faults": 28605230,
+        "sampled_program_peak_rss_kib": 18664,
+        "major_faults": 0,
+        "input_block_ops": 0,
+        "output_block_ops": 168,
+        "last_sample": {
+          "seconds": 71.30058550834656,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 117137810356,
+            "wchar": 8501,
+            "syscr": 7016,
+            "syscw": 558,
+            "read_bytes": 0,
+            "write_bytes": 86016,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 28605230,
+            "major_faults": 0,
+            "user_ticks": 4368,
+            "system_ticks": 2753,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 117137810356,
+          "wchar": 8501,
+          "syscr": 7016,
+          "syscw": 558,
+          "read_bytes": 0,
+          "write_bytes": 86016,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "salvage",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 287.66955211758614,
+        "user_seconds": 199.443407,
+        "system_seconds": 86.388159,
+        "max_rss_kib": 50928,
+        "minor_faults": 47262348,
+        "sampled_program_peak_rss_kib": 21980,
+        "major_faults": 3,
+        "input_block_ops": 115673496,
+        "output_block_ops": 114392920,
+        "last_sample": {
+          "seconds": 287.66914086043835,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 182494547547,
+            "wchar": 58568921357,
+            "syscr": 2685803,
+            "syscw": 7241047,
+            "read_bytes": 59224829952,
+            "write_bytes": 58569175040,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 47262348,
+            "major_faults": 3,
+            "user_ticks": 19944,
+            "system_ticks": 8638,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 182494547547,
+          "wchar": 58568921357,
+          "syscr": 2685803,
+          "syscw": 7241047,
+          "read_bytes": 59224829952,
+          "write_bytes": 58569175040,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "restore",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 1090.7165640592575,
+        "user_seconds": 587.743333,
+        "system_seconds": 489.071999,
+        "max_rss_kib": 50928,
+        "minor_faults": 47295642,
+        "sampled_program_peak_rss_kib": 20756,
+        "major_faults": 41,
+        "input_block_ops": 543259768,
+        "output_block_ops": 114393680,
+        "last_sample": {
+          "seconds": 1090.7154977023602,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 364679852711,
+            "wchar": 58568923432,
+            "syscr": 2431770305,
+            "syscw": 7241047,
+            "read_bytes": 278149001216,
+            "write_bytes": 58569564160,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 47295642,
+            "major_faults": 41,
+            "user_ticks": 58774,
+            "system_ticks": 48907,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 364679852711,
+          "wchar": 58568923432,
+          "syscr": 2431770305,
+          "syscw": 7241047,
+          "read_bytes": 278149001216,
+          "write_bytes": 58569564160,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      }
+    ],
+    "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+    "retired_data": true,
+    "scope": "One full-size pilot on new copies; not a repeated median. Runtime source is candidate1, preceding canonical-repeat support."
+  },
+  "full_block_mutation_oracles": {
+    "final-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "restore-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "salvage-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772367,
+            "size": 56409713010,
+            "modified_ns": 1792452625685361557,
+            "changed_ns": 1792452625685361557
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/salvage-output/recovered/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772368,
+            "size": 2159186216,
+            "modified_ns": 1792452625685361557,
+            "changed_ns": 1792452625685361557
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/salvage-output/recovered/blocks.index"
+        }
+      ]
+    },
+    "trim-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713010,
+            "modified_ns": 1792452153812928605,
+            "changed_ns": 1792452153812928605
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186216,
+            "modified_ns": 1792452153832928624,
+            "changed_ns": 1792452153832928624
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "restore-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "418c9147be9b74beb57b2f1cb1a59cdc47de4efb6c11942a1a46dea5feb032eb",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772381,
+            "size": 56409713202,
+            "modified_ns": 1792453530734549897,
+            "changed_ns": 1792453530734549897
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/restore-output/recovered/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772382,
+            "size": 2159186224,
+            "modified_ns": 1792453530734549897,
+            "changed_ns": 1792453530734549897
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/restore-output/recovered/blocks.index"
+        }
+      ]
+    },
+    "salvage-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "rollback-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "resume-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713010,
+            "modified_ns": 1792452153812928605,
+            "changed_ns": 1792452153812928605
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186216,
+            "modified_ns": 1792452153832928624,
+            "changed_ns": 1792452153832928624
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    }
+  },
+  "baseline_full_trace_inspection": {
+    "prefix": {
+      "entries": 172018839,
+      "first_block": 2,
+      "last_block": 172018840,
+      "physical_end": 55616016557
+    },
+    "inspection": {
+      "entries": 172018839,
+      "excluded_suffix_bytes": 48678454947,
+      "excluded_suffix_sha256": "937b6acabc535e348045b7bbd482d940729a77b2c9c770e2d30b11b674436791",
+      "failure": {
+        "next_block": 172018841,
+        "offset": 55616016557,
+        "reason": "expected block 172018841, found 172018829; fork/gap selection is ambiguous without sufficient canonical evidence"
+      },
+      "first_block": 2,
+      "index_bytes": 2159186216,
+      "index_discrepancies": 97879450,
+      "index_partial_bytes": 0,
+      "index_prefix_sha256": "17ab843bccd5a33cbc2998a3c6aacbe540ec775f42e20491167e490aeec8fee3",
+      "index_present": true,
+      "index_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+      "index_suffix_sha256": "9a479e9447ba3d5f91e37d469d92cfe1eb33d975c088ff404b30947903c63769",
+      "indexed_head_hint": 269898278,
+      "input_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+      "last_block": 172018840,
+      "omitted_fork_entries": 139,
+      "physical_prefix_end": 55616016557,
+      "physical_prefix_sha256": "d442b1d36dc77f24e77e69841020f039626c36d85a51b75912c2ba1bdba4d713",
+      "reference_checked_entries": 172018839,
+      "reference_evidence_sha256": "9f90f45f1091f486d9f834ad5038fb1cf256c52d3f006df2bbd4cec66e7eb1e0"
+    },
+    "metrics": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 2133.178011789918,
+      "user_seconds": 820.598528,
+      "system_seconds": 1304.281027,
+      "max_rss_kib": 49700,
+      "minor_faults": 1919651734,
+      "sampled_program_peak_rss_kib": 17256,
+      "major_faults": 27,
+      "input_block_ops": 217662280,
+      "output_block_ops": 432,
+      "last_sample": {
+        "seconds": 2133.1770510971546,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 145699988720,
+          "wchar": 7562,
+          "syscr": 516931961,
+          "syscw": 369,
+          "read_bytes": 111443087360,
+          "write_bytes": 221184,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 1919651734,
+          "major_faults": 27,
+          "user_ticks": 82059,
+          "system_ticks": 130428,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 145699988720,
+        "wchar": 7562,
+        "syscr": 516931961,
+        "syscw": 369,
+        "read_bytes": 111443087360,
+        "write_bytes": 221184,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.5,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "coverage": "Incomplete; benchmark oracle rejected the early stop. Neither a timeout nor successful full coverage."
+  },
+  "real_canonical_repeat": {
+    "wanted": 172018829,
+    "indexed_offset": 55616016557,
+    "failure_offset": 55616016557,
+    "records": [
+      {
+        "block": 172018829,
+        "offset": 55616006693,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616007104,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+        "decoded_sha256": "7749e843576ecd861aafc893b8a0925b2ec835068fac6798f58dc5afaca6c3df",
+        "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616007515,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+        "decoded_sha256": "968f5cd19934c46e874ee555cbeb993e6e005f0b34b001ce89e5fcebf84febda",
+        "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616007926,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+        "decoded_sha256": "5c638d3660c64cb26da52c2874ab9721556ac8e925ebd1b225d40b3f861916b1",
+        "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616008337,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+        "decoded_sha256": "e180da5fa9945c904b6c634ab7b9aa1a26b15fcb7928f4489ec27a617ba74133",
+        "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616008748,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+        "decoded_sha256": "d5364f16efe0f65b77d5aa8a98ed0c0cd01ed801c0421668747030ebd6c12e49",
+        "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616009159,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+        "decoded_sha256": "4a5f5c0470cdb3e820742c4ecca1b0211c2b625fd2adbd72b1d9e299da80da75",
+        "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616009570,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+        "decoded_sha256": "73a5a24abbebe24798c6e9b47279e50f9647b692cc81c865932d6423ece80a11",
+        "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616009981,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+        "decoded_sha256": "8bcb44871c0160c4e14d3e5d2fd68e8c15a7661abbee0e2d43014dc0573160eb",
+        "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616010392,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+        "decoded_sha256": "dac37a9bcb9c1df93bf537cc4dfac3f7e71f4aec84992ed2b6d92c2a1e6e5f14",
+        "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616010803,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+        "decoded_sha256": "ec720d445f74a9c4240fb802e79ada3d01e12f87ee7234ab9765df8e8a9f9d79",
+        "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616011214,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+        "decoded_sha256": "fba88a0a63424ee403d0d4ab72eebf6e74894b0f1f154ac2475cee8eef34573f",
+        "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+      },
+      {
+        "block": 172018829,
+        "offset": 55616011625,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4a951665cc5d1aa9e783c855c130bef07b361f8a1fd3901f4b439ab0f19f9cc2",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc59f740ff69fa128454ec39230e037099683f10ca7f7f56320d62570"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616012036,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "5953200af039bcc182edcad3c1042cc8c9a47890bbeed263daf4701b1a054c63",
+        "decoded_sha256": "dee168931e75559f0a67f124480a9f2001b053c759fdb13793b3513d0a23122c",
+        "id": "0a40cc8eb134a2a028ce3075c7ee1224d42ec4e1b250a3f4de79466bd9004cca"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616012447,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "7bbe9fa44e60e8e30017fd9cdd11b6332a79a4685b58042df5994536107419fb",
+        "decoded_sha256": "cea94c30962764c155d6424546f03676ff05417c8c7f7524f0ede2b3f2eb4c2f",
+        "id": "0a40cc8fea4cf29d9d821d3791ff74cf95a527e50c314ea56d7e9ea459377024"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616012858,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "75a7f20dd19138dd6d8e3220bbccc72f077e741b66a9649213e931696fd36b9b",
+        "decoded_sha256": "4dbd27bc0c1f2c846e672521793815a79fe55187e0e8476e2ab244058e1bbc79",
+        "id": "0a40cc90e5c739da357fbf3984c1a33035c8a62f0078af12d3bedecf424d87fb"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616013269,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "66cf5a14d74f01fdaff7ced9055c24a75e00c3a9b69bdf9dc28372446c4f3d11",
+        "decoded_sha256": "d518442585c2fa4388c2d8c55592481df64c1afaebaf0653a0e4736adef10762",
+        "id": "0a40cc91f9ed60f0478e24b3f0ab45e56fbcf9a8df66f6ce7df0197807fad3ce"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616013680,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "6853478a472aed280ddcd156880211bf24c2af7e7b0a91f80df5f77a33a4c196",
+        "decoded_sha256": "489c91c866b55b12a62c5b3b89efafde15052d43cd0596efac2e9791d1f78c40",
+        "id": "0a40cc924be041645949e0246858ff4eff63649f7c57cec5c392a8e1e460afc7"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616014091,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "8cb26c9a380b1bd3fcc50ed8b1cbc77bce3bc106394ab943733eba05ddde92a9",
+        "decoded_sha256": "ff69fb1f0dbfff11c0c4fcbba4ad5f35900a247d2ee587caa5174df84cd38249",
+        "id": "0a40cc9356c6668274c0e519ed8d9c0554d1e52789ab4231ccd1706e6b0347bb"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616014502,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "0c57b582c0afa4934ed29aa5bb565509ba63ef0bfdff0c977a1ac6e8af596b90",
+        "decoded_sha256": "c2b263980a12657b491ba9f37884d1820b349ef75d5562e61f9522c9b60bf75e",
+        "id": "0a40cc941cb77047c3f800a782c0ccca6a602fcb900411ca5ef7430b2791d01c"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616014913,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "05da090b0ae1e3be058ead3aebd6548305f9999ac78a953ea72704f564bd3878",
+        "decoded_sha256": "d437fc825de23aaf507f87c085ce31db0dd37dc04cac254ee645fa5a8413e408",
+        "id": "0a40cc95dc1cfeb9afff21396836472c49e73b6b46e53bfa4f5bb06b25360229"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616015324,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "81e48b813a1c3e67f6c59faac193fbae081ab0dfa63f145202d69ec592167107",
+        "decoded_sha256": "cdf7e7323b5090cf9266a9bae38d783c9d09416330d54361abeb65ba62d98535",
+        "id": "0a40cc96cb68d6a49b2c854ff52edb7b51dfa80039a16a0d2abc0cb3eedc0d23"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616015735,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "10986722b467929803685115c8b7c5926f8cd06036c03a6e6f579f5c8d4405f0",
+        "decoded_sha256": "bc7d1a745ce15529c2d4c003b044fabc103ab0f51b94cd64c979d6633c143c9d",
+        "id": "0a40cc97b7ee14bb9b5c164376d8e07af1ec856f6d0a7602117a771e25814bc3"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616016146,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "89d7cede5132a0f0efd057641433fe144d26c93b57bc93c5b1c0d062b2fb439f",
+        "decoded_sha256": "b472bbfceacbe1df26440c6a3d4c0a6adf7d715c8f0880b7ed49ef702fd9e83f",
+        "id": "0a40cc9883b250be89eaee9c527366f2f84788a105e45a915787e434211bf143"
+      },
+      {
+        "block": 172018829,
+        "offset": 55616016557,
+        "indexed_for_wanted": true,
+        "body_bytes": 403,
+        "encoded_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616016968,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+        "decoded_sha256": "7749e843576ecd861aafc893b8a0925b2ec835068fac6798f58dc5afaca6c3df",
+        "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616017379,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+        "decoded_sha256": "968f5cd19934c46e874ee555cbeb993e6e005f0b34b001ce89e5fcebf84febda",
+        "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616017790,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+        "decoded_sha256": "5c638d3660c64cb26da52c2874ab9721556ac8e925ebd1b225d40b3f861916b1",
+        "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616018201,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+        "decoded_sha256": "e180da5fa9945c904b6c634ab7b9aa1a26b15fcb7928f4489ec27a617ba74133",
+        "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616018612,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+        "decoded_sha256": "d5364f16efe0f65b77d5aa8a98ed0c0cd01ed801c0421668747030ebd6c12e49",
+        "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616019023,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+        "decoded_sha256": "4a5f5c0470cdb3e820742c4ecca1b0211c2b625fd2adbd72b1d9e299da80da75",
+        "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616019434,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+        "decoded_sha256": "73a5a24abbebe24798c6e9b47279e50f9647b692cc81c865932d6423ece80a11",
+        "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616019845,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+        "decoded_sha256": "8bcb44871c0160c4e14d3e5d2fd68e8c15a7661abbee0e2d43014dc0573160eb",
+        "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616020256,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+        "decoded_sha256": "dac37a9bcb9c1df93bf537cc4dfac3f7e71f4aec84992ed2b6d92c2a1e6e5f14",
+        "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616020667,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+        "decoded_sha256": "ec720d445f74a9c4240fb802e79ada3d01e12f87ee7234ab9765df8e8a9f9d79",
+        "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616021078,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+        "decoded_sha256": "fba88a0a63424ee403d0d4ab72eebf6e74894b0f1f154ac2475cee8eef34573f",
+        "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+      },
+      {
+        "block": 172018841,
+        "offset": 55616021489,
+        "indexed_for_wanted": false,
+        "body_bytes": 965,
+        "encoded_sha256": "3893fbffaeba1a8fecdaa0033888cf405ffcd4f0b6e1ebc7fd31da10f58edb74",
+        "decoded_sha256": "14f5910b007604c9d07ccf99d60c17472bb5d39213177d13475df027c253a353",
+        "id": "0a40cc997fa9212a6d82ccd65380c13683d5798f2678ec0c19121961292378c4"
+      }
+    ],
+    "policy": "Canonical block evidence and byte-identical encoded bodies, bounded by 4 MiB and 4096 blocks. Other repeats keep the ambiguity stop."
+  },
+  "actual_canonical_repeat_reproduction": {
+    "fixture_archive_sha256": "96b7c6c5c67e0d3015ff8b683de51619e41a9464fb812f8f8b36468fc2eb4253",
+    "proof": {
+      "ok": true,
+      "chain_id": "38b1d7815474d0c60683ecbea321d723e83f5da6ae5f1c1f9fecc69d9ba96465",
+      "range": [
+        172018800,
+        172018870
+      ],
+      "original_physical_range": [
+        55615994774,
+        55616034381
+      ],
+      "original_physical_sha256": "6d4368372a267c394caf72a871812cc2a54ef54ed3b78b3e99152f7474ce16bf",
+      "physical_records": 95,
+      "canonical_records": 71,
+      "baseline_prefix": {
+        "entries": 41,
+        "first_block": 172018800,
+        "last_block": 172018840,
+        "physical_end": 21783
+      },
+      "candidate_prefix": {
+        "entries": 71,
+        "first_block": 172018800,
+        "last_block": 172018870,
+        "physical_end": 39607
+      },
+      "omitted_fork_entries": 24,
+      "expected_log_sha256": "da4b29501d0c6b1d93a2c9c67f71029cc719235af26f201c7f07e4035d67436f",
+      "actual_log_sha256": "da4b29501d0c6b1d93a2c9c67f71029cc719235af26f201c7f07e4035d67436f",
+      "expected_index_sha256": "b0191efcfd8db62f8b74bab4938c0f38c9315943107db7f78f88bc1890dad0c6",
+      "actual_index_sha256": "b0191efcfd8db62f8b74bab4938c0f38c9315943107db7f78f88bc1890dad0c6",
+      "inputs_preserved": true,
+      "records": [
+        {
+          "block": 172018800,
+          "original_offset": 55615994774,
+          "offset": 0,
+          "body_sha256": "6de9da01130128968cfa3d11a2b2187a32216fd2d4a5ac1b540b65d4d949f629",
+          "id": "0a40cc70912be23b5d20f56da1c0c60abbe77da7678f65a7361828641738ab8e"
+        },
+        {
+          "block": 172018801,
+          "original_offset": 55615995185,
+          "offset": 411,
+          "body_sha256": "cc8024010fceef7f2ffe0764a5cfefe31944df46ddc08eefb978222a15e6b961",
+          "id": "0a40cc7152d717b22961ed4ee6f6cce1dee6a2607b6fb9e2885c3cc9f19411d3"
+        },
+        {
+          "block": 172018802,
+          "original_offset": 55615995596,
+          "offset": 822,
+          "body_sha256": "a440c8c710c2c926cc00c46a377cf5bc8d858a81b1d685a80b118081befd8a49",
+          "id": "0a40cc729f9c647594bea7abcfa1d2f1fe66bd143b905194ed972354b617d83d"
+        },
+        {
+          "block": 172018803,
+          "original_offset": 55615996007,
+          "offset": 1233,
+          "body_sha256": "41d804786e4d2196cfc21ea9fec302c75cd3f0e1869e3c508c3f003bc97bbee5",
+          "id": "0a40cc73a4f5c2ade72375c870e962926b5f1240a4ca294b9e3f70a260f9947d"
+        },
+        {
+          "block": 172018804,
+          "original_offset": 55615996418,
+          "offset": 1644,
+          "body_sha256": "9793525309fdcc1c35a77765be38f2afd4c6cdbfc7ca6f7b15633d5176cae1b4",
+          "id": "0a40cc748550d3e28e787f012ebab4d5bd5c12e3106cd66d9a444b0b3d40e2d4"
+        },
+        {
+          "block": 172018805,
+          "original_offset": 55615996829,
+          "offset": 2055,
+          "body_sha256": "f6369e9afae10bf715b384ca62e871474a716eaf5f3f6dbd3dce6e2118930c00",
+          "id": "0a40cc75996fe85e24402d466d5266ac682a29904d968f9592170875943fb92c"
+        },
+        {
+          "block": 172018806,
+          "original_offset": 55615997240,
+          "offset": 2466,
+          "body_sha256": "71b3afef3964690cdee8d5eff358bbff600f5e4305ec476b0313e8f6bbcf8d01",
+          "id": "0a40cc76cd92d1cb693d2b2e593b2f3edf3fe2f963e9da6936dd2c781d633223"
+        },
+        {
+          "block": 172018807,
+          "original_offset": 55615997651,
+          "offset": 2877,
+          "body_sha256": "91d0eaa38cfac71fb0a9f6a1caa935e1f2f19858827397b8c7fd1e7c59ec41f1",
+          "id": "0a40cc77f7d9de939627722d5e24ee66e83d18b22d0adcb2793339fbfcf42c9c"
+        },
+        {
+          "block": 172018808,
+          "original_offset": 55615998062,
+          "offset": 3288,
+          "body_sha256": "a00f2fc9be53c667bc167293e828605cfd25c680d61807167f4e77ea0aaa45e7",
+          "id": "0a40cc78ea80fa957bf70d834af9e500230635d6e15d73e11e480b92c8cac7ba"
+        },
+        {
+          "block": 172018809,
+          "original_offset": 55615998473,
+          "offset": 3699,
+          "body_sha256": "a6c0bc9f89f0cc9001a9a864f361dcb5afa80517526f79cd16c43607bd0a4abf",
+          "id": "0a40cc799da299977004220cd27314135f027e16a7291ffa7c92b5efd659bdfe"
+        },
+        {
+          "block": 172018810,
+          "original_offset": 55615998884,
+          "offset": 4110,
+          "body_sha256": "2a63448226de1c35617acf434497e3d8b86085fb5b4ae5b04b4bace896c56605",
+          "id": "0a40cc7a6d42bd8c0f93f942aa7606353f1871ecca64724258439b89d1596089"
+        },
+        {
+          "block": 172018811,
+          "original_offset": 55615999295,
+          "offset": 4521,
+          "body_sha256": "89cc282cb1e8b097e7ce29a70650ea83d48d57663af0daa9b5b2e251f782050e",
+          "id": "0a40cc7baaa36a9c194a0bab14131fa2b22bea0c5fa727fd3e78eb37ecfdbcff"
+        },
+        {
+          "block": 172018812,
+          "original_offset": 55615999706,
+          "offset": 4932,
+          "body_sha256": "8f8e65e855d1df716e689615649d9bd7c24b3ac6a4daafcdf612eab2f959f257",
+          "id": "0a40cc7c74aa9311e7fd863875a4d3668684a45ce979b27d2de55c37df00ed9f"
+        },
+        {
+          "block": 172018813,
+          "original_offset": 55616000117,
+          "offset": 5343,
+          "body_sha256": "82b39183c31db71ebf0fb14a170db79d97b5c7ae874e8345e2455c31efbffd1e",
+          "id": "0a40cc7d184d65e9f62b3348dd7d7548da73536ee90cd48ff30239d8565fc8e4"
+        },
+        {
+          "block": 172018814,
+          "original_offset": 55616000528,
+          "offset": 5754,
+          "body_sha256": "f4b134e3457ab6cf21ac9d145d4d42b8e599e85aa8c69eb3cd9c50ef058cba9b",
+          "id": "0a40cc7ef4c4077b7584ff24189fdf96955b771b4fb5a314118fbc376e5a9378"
+        },
+        {
+          "block": 172018815,
+          "original_offset": 55616000939,
+          "offset": 6165,
+          "body_sha256": "501cc8c38ddef1c9b469abb3e009b4781c8657be5bbe1fda5addc701f337a0a1",
+          "id": "0a40cc7feb0131179216cc833473d1270e9c94347de55121b2a3f5e91d76f779"
+        },
+        {
+          "block": 172018816,
+          "original_offset": 55616001350,
+          "offset": 6576,
+          "body_sha256": "d9d8faca263b3a96a5982aac123d53f2d769e1388e5400f351e04c00fb3e4be1",
+          "id": "0a40cc8081f606ff52c4ab7ad473840cb16fa1c7ab9a3d443fd46952b022cf6c"
+        },
+        {
+          "block": 172018817,
+          "original_offset": 55616001761,
+          "offset": 6987,
+          "body_sha256": "a434ef1f04a1e7883d3d1bd2d91956c328446fd3870491725193b3a2907bda47",
+          "id": "0a40cc811077fd5c91fab275dc7f8dd70222907412a41ba3a35ea7376671d4bf"
+        },
+        {
+          "block": 172018818,
+          "original_offset": 55616002172,
+          "offset": 7398,
+          "body_sha256": "f409ae3f0ce2bd84ff178dafbf0a048bbb549ee40437f651dee3dacce2603519",
+          "id": "0a40cc82288102b3605dceb3c7a1633f963fddea9b6f7afdb3eae655df0d7e4a"
+        },
+        {
+          "block": 172018819,
+          "original_offset": 55616002583,
+          "offset": 7809,
+          "body_sha256": "ffdb0ac7260c097359498e868f52a2ff5f6e7a5b7a05a5cf380c207075875357",
+          "id": "0a40cc83224671a77650754453970e04611893fd9d0fae0eb8a9eefa4ee2678e"
+        },
+        {
+          "block": 172018820,
+          "original_offset": 55616002994,
+          "offset": 8220,
+          "body_sha256": "c67f8971e098379e494867fe58e9cb92427bc758313e09064ca1e870a106340e",
+          "id": "0a40cc8495a67b30027f5491838d36a5b3fe87d016abb7cd00fce65dc0d72c5e"
+        },
+        {
+          "block": 172018821,
+          "original_offset": 55616003405,
+          "offset": 8631,
+          "body_sha256": "72230acb819683a77bfa050e6d8e04b67605c4b7c4f3c3ed91a697be9493a0b9",
+          "id": "0a40cc85f2d4041af0e2759465d8bf83baa8aedd01077d9d0b39339ee823bf9f"
+        },
+        {
+          "block": 172018822,
+          "original_offset": 55616003816,
+          "offset": 9042,
+          "body_sha256": "4e61c6f29faa5abca6e03fbfe83bb3ba0b4ff6db64e5a0adaf1ddc5be851c520",
+          "id": "0a40cc866aa4ac6526c6bcd5e46e920203dd9dc06acb3285d604343dc7d3d27e"
+        },
+        {
+          "block": 172018823,
+          "original_offset": 55616004227,
+          "offset": 9453,
+          "body_sha256": "b497a93694cf19c9fe6e936938fe330b050f952a9bc179522472ddd14d1f1e66",
+          "id": "0a40cc877eb9f5af8ab8f42a93abf4a5d56e3c34afa30d9774f5d259b47df10f"
+        },
+        {
+          "block": 172018824,
+          "original_offset": 55616004638,
+          "offset": 9864,
+          "body_sha256": "037c02b1fa7b815297e056ab4025d8b25dbb481e953dc47a16557ccb76676f1e",
+          "id": "0a40cc8841b616f5bb02c7150f13684d7297fc44a7dd9d1b68e50addc32fa3d8"
+        },
+        {
+          "block": 172018825,
+          "original_offset": 55616005049,
+          "offset": 10275,
+          "body_sha256": "72acee606db1af6011d5e25e8dc9ee75413716999e0e9fae11414837ab3f2314",
+          "id": "0a40cc893cc86eca3ffdc65b6f2f36e13faa91ae20e831be88c6840ff54d55f3"
+        },
+        {
+          "block": 172018826,
+          "original_offset": 55616005460,
+          "offset": 10686,
+          "body_sha256": "864bb4a35d687dc8eaeb2378161cf9806b89cc74471c825e94081d9052cf1bdc",
+          "id": "0a40cc8adf60a5148f8be1c070e83dc935ff79adf2c8dc24dbfbb3fd3acfe80e"
+        },
+        {
+          "block": 172018827,
+          "original_offset": 55616005871,
+          "offset": 11097,
+          "body_sha256": "1a347b252430f80daeba5a9d1e8a9b16913d372fe79d6d5bb787d22b988066dc",
+          "id": "0a40cc8b454b177a555ba1d6e8240c9633734a6f213968c7a48e3487c38c29ec"
+        },
+        {
+          "block": 172018828,
+          "original_offset": 55616006282,
+          "offset": 11508,
+          "body_sha256": "b7bad4f9ba99ddce37e78d569b17fd8142001274f6416da3bc7005614ada8387",
+          "id": "0a40cc8c6118363f67424bf084af107c66749c346d83e92a6e06da03a9779b46"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616006693,
+          "offset": 11919,
+          "body_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+          "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616007104,
+          "offset": 12330,
+          "body_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+          "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616007515,
+          "offset": 12741,
+          "body_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+          "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616007926,
+          "offset": 13152,
+          "body_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+          "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616008337,
+          "offset": 13563,
+          "body_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+          "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616008748,
+          "offset": 13974,
+          "body_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+          "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616009159,
+          "offset": 14385,
+          "body_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+          "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616009570,
+          "offset": 14796,
+          "body_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+          "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616009981,
+          "offset": 15207,
+          "body_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+          "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616010392,
+          "offset": 15618,
+          "body_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+          "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616010803,
+          "offset": 16029,
+          "body_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+          "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616011214,
+          "offset": 16440,
+          "body_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+          "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616011625,
+          "offset": 16851,
+          "body_sha256": "4a951665cc5d1aa9e783c855c130bef07b361f8a1fd3901f4b439ab0f19f9cc2",
+          "id": "0a40cc8dc59f740ff69fa128454ec39230e037099683f10ca7f7f56320d62570"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616012036,
+          "offset": 17262,
+          "body_sha256": "5953200af039bcc182edcad3c1042cc8c9a47890bbeed263daf4701b1a054c63",
+          "id": "0a40cc8eb134a2a028ce3075c7ee1224d42ec4e1b250a3f4de79466bd9004cca"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616012447,
+          "offset": 17673,
+          "body_sha256": "7bbe9fa44e60e8e30017fd9cdd11b6332a79a4685b58042df5994536107419fb",
+          "id": "0a40cc8fea4cf29d9d821d3791ff74cf95a527e50c314ea56d7e9ea459377024"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616012858,
+          "offset": 18084,
+          "body_sha256": "75a7f20dd19138dd6d8e3220bbccc72f077e741b66a9649213e931696fd36b9b",
+          "id": "0a40cc90e5c739da357fbf3984c1a33035c8a62f0078af12d3bedecf424d87fb"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616013269,
+          "offset": 18495,
+          "body_sha256": "66cf5a14d74f01fdaff7ced9055c24a75e00c3a9b69bdf9dc28372446c4f3d11",
+          "id": "0a40cc91f9ed60f0478e24b3f0ab45e56fbcf9a8df66f6ce7df0197807fad3ce"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616013680,
+          "offset": 18906,
+          "body_sha256": "6853478a472aed280ddcd156880211bf24c2af7e7b0a91f80df5f77a33a4c196",
+          "id": "0a40cc924be041645949e0246858ff4eff63649f7c57cec5c392a8e1e460afc7"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616014091,
+          "offset": 19317,
+          "body_sha256": "8cb26c9a380b1bd3fcc50ed8b1cbc77bce3bc106394ab943733eba05ddde92a9",
+          "id": "0a40cc9356c6668274c0e519ed8d9c0554d1e52789ab4231ccd1706e6b0347bb"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616014502,
+          "offset": 19728,
+          "body_sha256": "0c57b582c0afa4934ed29aa5bb565509ba63ef0bfdff0c977a1ac6e8af596b90",
+          "id": "0a40cc941cb77047c3f800a782c0ccca6a602fcb900411ca5ef7430b2791d01c"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616014913,
+          "offset": 20139,
+          "body_sha256": "05da090b0ae1e3be058ead3aebd6548305f9999ac78a953ea72704f564bd3878",
+          "id": "0a40cc95dc1cfeb9afff21396836472c49e73b6b46e53bfa4f5bb06b25360229"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616015324,
+          "offset": 20550,
+          "body_sha256": "81e48b813a1c3e67f6c59faac193fbae081ab0dfa63f145202d69ec592167107",
+          "id": "0a40cc96cb68d6a49b2c854ff52edb7b51dfa80039a16a0d2abc0cb3eedc0d23"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616015735,
+          "offset": 20961,
+          "body_sha256": "10986722b467929803685115c8b7c5926f8cd06036c03a6e6f579f5c8d4405f0",
+          "id": "0a40cc97b7ee14bb9b5c164376d8e07af1ec856f6d0a7602117a771e25814bc3"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616016146,
+          "offset": 21372,
+          "body_sha256": "89d7cede5132a0f0efd057641433fe144d26c93b57bc93c5b1c0d062b2fb439f",
+          "id": "0a40cc9883b250be89eaee9c527366f2f84788a105e45a915787e434211bf143"
+        },
+        {
+          "block": 172018829,
+          "original_offset": 55616016557,
+          "offset": 21783,
+          "body_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+          "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+        },
+        {
+          "block": 172018830,
+          "original_offset": 55616016968,
+          "offset": 22194,
+          "body_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+          "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+        },
+        {
+          "block": 172018831,
+          "original_offset": 55616017379,
+          "offset": 22605,
+          "body_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+          "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+        },
+        {
+          "block": 172018832,
+          "original_offset": 55616017790,
+          "offset": 23016,
+          "body_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+          "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+        },
+        {
+          "block": 172018833,
+          "original_offset": 55616018201,
+          "offset": 23427,
+          "body_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+          "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+        },
+        {
+          "block": 172018834,
+          "original_offset": 55616018612,
+          "offset": 23838,
+          "body_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+          "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+        },
+        {
+          "block": 172018835,
+          "original_offset": 55616019023,
+          "offset": 24249,
+          "body_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+          "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+        },
+        {
+          "block": 172018836,
+          "original_offset": 55616019434,
+          "offset": 24660,
+          "body_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+          "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+        },
+        {
+          "block": 172018837,
+          "original_offset": 55616019845,
+          "offset": 25071,
+          "body_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+          "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+        },
+        {
+          "block": 172018838,
+          "original_offset": 55616020256,
+          "offset": 25482,
+          "body_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+          "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+        },
+        {
+          "block": 172018839,
+          "original_offset": 55616020667,
+          "offset": 25893,
+          "body_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+          "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+        },
+        {
+          "block": 172018840,
+          "original_offset": 55616021078,
+          "offset": 26304,
+          "body_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+          "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+        },
+        {
+          "block": 172018841,
+          "original_offset": 55616021489,
+          "offset": 26715,
+          "body_sha256": "3893fbffaeba1a8fecdaa0033888cf405ffcd4f0b6e1ebc7fd31da10f58edb74",
+          "id": "0a40cc997fa9212a6d82ccd65380c13683d5798f2678ec0c19121961292378c4"
+        },
+        {
+          "block": 172018842,
+          "original_offset": 55616022462,
+          "offset": 27688,
+          "body_sha256": "fe2ab51dabe53973260ae6fdf39455197324b6c5cbab0e56213454f65d8dcd4a",
+          "id": "0a40cc9a23eedb44c5a5c53eddfdd7cd58ccf212aab0fba25d042601ec80aec0"
+        },
+        {
+          "block": 172018843,
+          "original_offset": 55616022873,
+          "offset": 28099,
+          "body_sha256": "b50ac70e760dac50dc51d654ee72f1e022710db4ee2adfe652032992ad139484",
+          "id": "0a40cc9b361870422570ad4f520062705edea60781457875a9a907e5c14af6d4"
+        },
+        {
+          "block": 172018844,
+          "original_offset": 55616023284,
+          "offset": 28510,
+          "body_sha256": "28cb2405b2bb1b41a621372f44bc452831ce3a56d357b83171ccc773a8283e88",
+          "id": "0a40cc9c9c63c28cb0202df8ec65ba8453ed7c84b753f6cb86fd132fe44737de"
+        },
+        {
+          "block": 172018845,
+          "original_offset": 55616023695,
+          "offset": 28921,
+          "body_sha256": "e12dc344b1b3dbffc47f956a46fbe7d3d918884a3dcd26ec22aadbe7508fdaea",
+          "id": "0a40cc9d22ac6b25b72a2f4fff6b63f061362bb88ab66d10d1858180367e29ea"
+        },
+        {
+          "block": 172018846,
+          "original_offset": 55616024106,
+          "offset": 29332,
+          "body_sha256": "f81b937ab84860be94200e369e803a6c60210f506c6afaadfc9636e77faffc54",
+          "id": "0a40cc9e8fb8a76d9df4357f497cb6c0e1d9b671953e76f850df6fa47f19efc6"
+        },
+        {
+          "block": 172018847,
+          "original_offset": 55616024517,
+          "offset": 29743,
+          "body_sha256": "cc970a1adfa21fa3d95d5af011e4112dbc855795fcb367bdebc1aafb711aaccf",
+          "id": "0a40cc9fc9558d0c5940c18c8ee1a837928dcfc7de178e8b9878e297a881baef"
+        },
+        {
+          "block": 172018848,
+          "original_offset": 55616024928,
+          "offset": 30154,
+          "body_sha256": "b30831d6987e094c1fbf62dfc6d709aaa330c655ab526c718330d4d548145b80",
+          "id": "0a40cca0919cc801dbc5a0ccc80eca6cff6d2ec93ec79b9c95c267398a26ea0d"
+        },
+        {
+          "block": 172018849,
+          "original_offset": 55616025339,
+          "offset": 30565,
+          "body_sha256": "f49bcb463d5a25a8777b81c3501d80c70b0de29c811f8bc433fe0c3e3c8d62c9",
+          "id": "0a40cca168c231e68c3087826e9ea70463f8d5348e14ae1315a23d43f5177507"
+        },
+        {
+          "block": 172018850,
+          "original_offset": 55616025750,
+          "offset": 30976,
+          "body_sha256": "18c5b5387f0dab0efc2e6a499323e71139c946f7b75c62e3ceef4c68bfedaecc",
+          "id": "0a40cca261a6640874c9b79859ca8b6ca76fab5fbd1111fa1d9666f6ed7b00e1"
+        },
+        {
+          "block": 172018851,
+          "original_offset": 55616026161,
+          "offset": 31387,
+          "body_sha256": "9f92c8f61dd58840284130826b3f5a4507b31f1c403ea118fad8ddabac708b5c",
+          "id": "0a40cca3f19b39138d308f57e6cf4015b5f4403ddcd4e82969c8e75abf1b85cb"
+        },
+        {
+          "block": 172018852,
+          "original_offset": 55616026572,
+          "offset": 31798,
+          "body_sha256": "cd3f6d452772a5a7cd6571d1a578fdce7aa89dc1d23db75f519ec42216ba4762",
+          "id": "0a40cca45ae504dc34516038b65d88062002b7ffd5dc6b3c6711287bd83c7b69"
+        },
+        {
+          "block": 172018853,
+          "original_offset": 55616026983,
+          "offset": 32209,
+          "body_sha256": "8c66102d1a9eb6cc680a44f413e8a4eb6970e4fcf203fc03e36347f6bce049be",
+          "id": "0a40cca5d165d7696d1c682d49ed30b398b23cb82b88de5c68c7ad2f0b786d03"
+        },
+        {
+          "block": 172018854,
+          "original_offset": 55616027394,
+          "offset": 32620,
+          "body_sha256": "aa992febf79478a2ba595358a0f72ec8de379486e954e364843eb8ef5cd7c51c",
+          "id": "0a40cca6ae0fa437aa25dbc1c9b00b00752c9a6ba821c2a9ff3df5130fb916e6"
+        },
+        {
+          "block": 172018855,
+          "original_offset": 55616027805,
+          "offset": 33031,
+          "body_sha256": "d89664adc279b852c03549d89e8a24c967a2cf7d81549b4ad3242de5e81b2c7a",
+          "id": "0a40cca78c6393421ad19756fd77f1b0fdb50cf25081eeb2b5705305cc3cc497"
+        },
+        {
+          "block": 172018856,
+          "original_offset": 55616028216,
+          "offset": 33442,
+          "body_sha256": "0e4accfd9d9e2419d7ec05a47a6c7c5ab7c10695bec74a5246a44f6c11531d42",
+          "id": "0a40cca8ef96c7143f8cbcf01f8ac807586411579ef865ccc89492c76980d4ea"
+        },
+        {
+          "block": 172018857,
+          "original_offset": 55616028627,
+          "offset": 33853,
+          "body_sha256": "a79fd542d9d67a2f8236f12e92acce368eab74897147e9b9f1b42d0316420d0e",
+          "id": "0a40cca9da10a8b393082f326e81bb3eb25415dc812c0bb36cf3320783821ca9"
+        },
+        {
+          "block": 172018858,
+          "original_offset": 55616029038,
+          "offset": 34264,
+          "body_sha256": "6f23f16320ce2fde861b7a7d37331263c15679ace3d291c0c3fae2c73951bb44",
+          "id": "0a40ccaaa6f6531cde7271666554eba9094105241f05edaf180fbec7fbbee16a"
+        },
+        {
+          "block": 172018859,
+          "original_offset": 55616029449,
+          "offset": 34675,
+          "body_sha256": "5c7729d50e60a6bcdf3f7dab69c1da031ec16356b29271f02cbf87676819d9a0",
+          "id": "0a40ccabaffeb67df9ed71ce49f0ce27a64f69c0a25b43dd371d3978a9ef170c"
+        },
+        {
+          "block": 172018860,
+          "original_offset": 55616029860,
+          "offset": 35086,
+          "body_sha256": "c239ea6374b67a53f1622bd7b23cdf936845fdd205ed133fac85e58535877fe2",
+          "id": "0a40ccace214b8df25c0310dbd5fd98b35fc8bb95398e5f561f8d8d79c7b6584"
+        },
+        {
+          "block": 172018861,
+          "original_offset": 55616030271,
+          "offset": 35497,
+          "body_sha256": "f6f4bf6b31f9886af351e0b99d9c1b42ef480c2e44691c4f03b1214807ed2827",
+          "id": "0a40ccadd7e0f164d8ba1da00da7e41173134732dfd75dcbfadb82f9eb5e84ec"
+        },
+        {
+          "block": 172018862,
+          "original_offset": 55616030682,
+          "offset": 35908,
+          "body_sha256": "f151bf6dc0375ec6c52683adad1006f22e8890e1cfbc8919ee917495ca0bb01f",
+          "id": "0a40ccae874c91ec696e20e53ca6fb7a08875c71713272387244b2d7a6107260"
+        },
+        {
+          "block": 172018863,
+          "original_offset": 55616031093,
+          "offset": 36319,
+          "body_sha256": "44bb622e56300c1e81bcdcf58d3d10045e2a39a2bff3fe4dd2134098bbfefb80",
+          "id": "0a40ccaff2e601098be856fef5f12783c3d9e5ff37d63232c63e5db27a080bd7"
+        },
+        {
+          "block": 172018864,
+          "original_offset": 55616031504,
+          "offset": 36730,
+          "body_sha256": "9a020c9185d77b3277f6b6a0c58b2dfce1e7f8cbbfc48e2afa382ce7e820ee0f",
+          "id": "0a40ccb0dd8a2cd3cbe8cc94a7d1a75e2bcf0699d0955e61e29350809ac61212"
+        },
+        {
+          "block": 172018865,
+          "original_offset": 55616031915,
+          "offset": 37141,
+          "body_sha256": "791e6a83b0e1a317bd0d16795480f2ec5d5e6e13a178dc915de76bff8ab7a92d",
+          "id": "0a40ccb12c38b9d616e9a0bdf0480c9f552220a42b659562dc33ec257db9f5b8"
+        },
+        {
+          "block": 172018866,
+          "original_offset": 55616032326,
+          "offset": 37552,
+          "body_sha256": "a1bf00ca93b3040ff04da03abaaaa6df07d21433a1ad3b5795e72343b814eae4",
+          "id": "0a40ccb2dd07516c7a3bfb1416250df3c20282bba19a68d7ad186572a59e9076"
+        },
+        {
+          "block": 172018867,
+          "original_offset": 55616032737,
+          "offset": 37963,
+          "body_sha256": "9a805130cbd6ca6d1195db1cfa1172ba80d680e059f53b4bdf8f4215c15dd37a",
+          "id": "0a40ccb343d6dbe63d6d474644d888331181bddfba5eb0199c47ce49851a2f01"
+        },
+        {
+          "block": 172018868,
+          "original_offset": 55616033148,
+          "offset": 38374,
+          "body_sha256": "868750286843f252918be9ab67434cb8c4dc4604b7621348dde86b9a965c4331",
+          "id": "0a40ccb4282feac90a96969b02a6745cc2e80ab30fb6d5e3e7c9b1ba83814071"
+        },
+        {
+          "block": 172018869,
+          "original_offset": 55616033559,
+          "offset": 38785,
+          "body_sha256": "1486b45f6a4d32514cb8608ad8a830b3ee574c5cd5e379ecad4f5e8a638ac1fb",
+          "id": "0a40ccb5e69e79fc4a00f916bfa098ad6e01edd2f1db48458b40047816e98edf"
+        },
+        {
+          "block": 172018870,
+          "original_offset": 55616033970,
+          "offset": 39196,
+          "body_sha256": "18b506960cec7b927b6e6923fbc1356e816ba780b0db3263451633002998197f",
+          "id": "0a40ccb62b0c5a29389b9b936a276aaeb2a89b5ee43400f7736d8eb6b154fc1d"
+        }
+      ],
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    }
+  },
+  "ultra_64gib_scan_verify": {
+    "evidence": {
+      "large-supported-corpus/ready.json": {
+        "schema": 1,
+        "ok": true,
+        "pairs": [
+          {
+            "kind": "blocks",
+            "first_block": 1,
+            "last_block": 192881743,
+            "log_bytes": 68719476814,
+            "index_bytes": 1543053944,
+            "last_position": 68719476622,
+            "log": {
+              "path": "blocks/blocks.log",
+              "source": "/mnt/data1n1/ultra-mainnet/blocks/blocks.log",
+              "source_initial": {
+                "device": 66309,
+                "inode": 142999593,
+                "size": 103604470706,
+                "modified_ns": 1792454367375699860,
+                "changed_ns": 1792454367375699860
+              },
+              "source_after": {
+                "device": 66309,
+                "inode": 142999593,
+                "size": 103604929402,
+                "modified_ns": 1792454937840224311,
+                "changed_ns": 1792454937840224311
+              },
+              "bytes": 68719476814,
+              "sha256": "84a86b6dabb760c6b8d1638d1ca1bcdf72a8298b2285803ffe6b6b882d733c47",
+              "source_prefix_sha256": "84a86b6dabb760c6b8d1638d1ca1bcdf72a8298b2285803ffe6b6b882d733c47",
+              "copy_seconds": 169.90841923840344,
+              "kernel_copy": true,
+              "identity": [
+                66309,
+                34734166
+              ]
+            },
+            "index": {
+              "path": "blocks/blocks.index",
+              "source": "/mnt/data1n1/ultra-mainnet/blocks/blocks.index",
+              "source_initial": {
+                "device": 66309,
+                "inode": 142999599,
+                "size": 2692462264,
+                "modified_ns": 1792454367375699860,
+                "changed_ns": 1792454367375699860
+              },
+              "source_after": {
+                "device": 66309,
+                "inode": 142999599,
+                "size": 2692471552,
+                "modified_ns": 1792454947916586766,
+                "changed_ns": 1792454947916586766
+              },
+              "bytes": 1543053944,
+              "sha256": "c418d4e35a84fa7b21f6ea573d172d0e178b84ad62ec38e425674afa837ffa23",
+              "source_prefix_sha256": "c418d4e35a84fa7b21f6ea573d172d0e178b84ad62ec38e425674afa837ffa23",
+              "copy_seconds": 3.133933740667999,
+              "kernel_copy": true,
+              "identity": [
+                66309,
+                34734167
+              ]
+            }
+          }
+        ],
+        "elapsed_seconds": 580.5776516068727
+      },
+      "large-supported-baseline/plan.json": {
+        "schema": 1,
+        "source_revision": "2b4ebbcc8e9e265e995d1c46670fc79c5257cae2",
+        "tool_sha256": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9",
+        "tool": "/mnt/data1n1/antelope-qualification-20261019/binaries/baseline",
+        "corpus": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus",
+        "kinds": [
+          "blocks"
+        ],
+        "commands": [
+          "scan",
+          "verify"
+        ],
+        "repeats": 3,
+        "block_range": null,
+        "cache": "ordinary",
+        "host": {
+          "system": "Linux",
+          "node": "eosrio7920",
+          "release": "5.15.0-186-generic",
+          "version": "#196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026",
+          "machine": "x86_64",
+          "processor": "x86_64"
+        },
+        "profile": "none"
+      },
+      "large-supported-baseline/complete.json": {
+        "schema": 1,
+        "ok": true,
+        "tool_sha256": "58efe37f33f9a0cd3687422db043012d6c91db87e769400508559f05d80346b9",
+        "results": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.90667769126594,
+            "user_seconds": 0.064021,
+            "system_seconds": 49.171764,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793783,
+            "sampled_program_peak_rss_kib": 18536,
+            "major_faults": 28,
+            "input_block_ops": 54200328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.9055957570672,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27750567936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793783,
+                "major_faults": 28,
+                "user_ticks": 6,
+                "system_ticks": 4917,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27750567936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.30855623912066,
+            "user_seconds": 0.08420799999999999,
+            "system_seconds": 48.052923,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793790,
+            "sampled_program_peak_rss_kib": 18524,
+            "major_faults": 0,
+            "input_block_ops": 53884328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.30795237980783,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2373,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27588775936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793790,
+                "major_faults": 0,
+                "user_ticks": 8,
+                "system_ticks": 4805,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2373,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27588775936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 56.91608199942857,
+            "user_seconds": 0.060152,
+            "system_seconds": 47.416869,
+            "max_rss_kib": 50012,
+            "minor_faults": 16793803,
+            "sampled_program_peak_rss_kib": 18584,
+            "major_faults": 0,
+            "input_block_ops": 53893096,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 56.91562375705689,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2364,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 27593265152,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793803,
+                "major_faults": 0,
+                "user_ticks": 6,
+                "system_ticks": 4741,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2364,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 27593265152,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 192.461025983,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 192.47335752565414,
+            "user_seconds": 125.12603,
+            "system_seconds": 56.086002,
+            "max_rss_kib": 50012,
+            "minor_faults": 17566716,
+            "sampled_program_peak_rss_kib": 40384,
+            "major_faults": 1,
+            "input_block_ops": 54270832,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 192.4724369291216,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27786665984,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17566716,
+                "major_faults": 1,
+                "user_ticks": 12512,
+                "system_ticks": 5608,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27786665984,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 191.22788116,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 191.23969677090645,
+            "user_seconds": 123.233325,
+            "system_seconds": 56.311449,
+            "max_rss_kib": 50012,
+            "minor_faults": 17559603,
+            "sampled_program_peak_rss_kib": 40348,
+            "major_faults": 0,
+            "input_block_ops": 54065520,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 191.23881715070456,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2287,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27681546240,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17559603,
+                "major_faults": 0,
+                "user_ticks": 12323,
+                "system_ticks": 5631,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2287,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27681546240,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 191.536993167,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 191.5816785953939,
+            "user_seconds": 124.170174,
+            "system_seconds": 55.822451,
+            "max_rss_kib": 50012,
+            "minor_faults": 17554449,
+            "sampled_program_peak_rss_kib": 40300,
+            "major_faults": 0,
+            "input_block_ops": 54064456,
+            "output_block_ops": 112,
+            "last_sample": {
+              "seconds": 191.58077875897288,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 27681001472,
+                "write_bytes": 57344,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17554449,
+                "major_faults": 0,
+                "user_ticks": 12417,
+                "system_ticks": 5582,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 27681001472,
+              "write_bytes": 57344,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          }
+        ],
+        "groups": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "runs": 3,
+            "median_seconds": 57.30855623912066,
+            "min_seconds": 56.91608199942857,
+            "max_seconds": 57.90667769126594,
+            "median_mib_per_second": 1143.563969766344
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "runs": 3,
+            "median_seconds": 191.5816785953939,
+            "min_seconds": 191.23969677090645,
+            "max_seconds": 192.47335752565414,
+            "median_mib_per_second": 342.0786394281317
+          }
+        ],
+        "profile": "none",
+        "cache": "ordinary"
+      },
+      "large-supported-candidate1-release/plan.json": {
+        "schema": 1,
+        "source_revision": "fb057b4f477119871f6d4fe74ac7105046ce2c8f",
+        "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+        "tool": "/mnt/data1n1/antelope-qualification-20261019/binaries/candidate1-release",
+        "corpus": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus",
+        "kinds": [
+          "blocks"
+        ],
+        "commands": [
+          "scan",
+          "verify"
+        ],
+        "repeats": 3,
+        "block_range": null,
+        "cache": "ordinary",
+        "host": {
+          "system": "Linux",
+          "node": "eosrio7920",
+          "release": "5.15.0-186-generic",
+          "version": "#196-Ubuntu SMP Sat Jun 20 16:09:34 UTC 2026",
+          "machine": "x86_64",
+          "processor": "x86_64"
+        },
+        "profile": "none"
+      },
+      "large-supported-candidate1-release/complete.json": {
+        "schema": 1,
+        "ok": true,
+        "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+        "results": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 58.63323575258255,
+            "user_seconds": 0.048129,
+            "system_seconds": 48.628132,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793779,
+            "sampled_program_peak_rss_kib": 18536,
+            "major_faults": 30,
+            "input_block_ops": 49614672,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 58.63274230528623,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2366,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25402712064,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793779,
+                "major_faults": 30,
+                "user_ticks": 4,
+                "system_ticks": 4862,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2366,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25402712064,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.631466871127486,
+            "user_seconds": 0.072127,
+            "system_seconds": 47.275049,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793795,
+            "sampled_program_peak_rss_kib": 18544,
+            "major_faults": 0,
+            "input_block_ops": 49550328,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.63045794237405,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25369767936,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793795,
+                "major_faults": 0,
+                "user_ticks": 7,
+                "system_ticks": 4727,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25369767936,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476814,
+            "tool_reported_seconds": null,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 57.898559919558465,
+            "user_seconds": 0.032154999999999996,
+            "system_seconds": 47.606647,
+            "max_rss_kib": 49896,
+            "minor_faults": 16793803,
+            "sampled_program_peak_rss_kib": 18508,
+            "major_faults": 0,
+            "input_block_ops": 49550304,
+            "output_block_ops": 104,
+            "last_sample": {
+              "seconds": 57.897534624673426,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 68719477662,
+                "wchar": 2367,
+                "syscr": 4103,
+                "syscw": 215,
+                "read_bytes": 25369755648,
+                "write_bytes": 53248,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 16793803,
+                "major_faults": 0,
+                "user_ticks": 3,
+                "system_ticks": 4760,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 68719477662,
+              "wchar": 2367,
+              "syscr": 4103,
+              "syscw": 215,
+              "read_bytes": 25369755648,
+              "write_bytes": 53248,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 1,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 188.403937569,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 188.42177704069763,
+            "user_seconds": 123.189934,
+            "system_seconds": 55.122763,
+            "max_rss_kib": 49896,
+            "minor_faults": 17562386,
+            "sampled_program_peak_rss_kib": 40316,
+            "major_faults": 1,
+            "input_block_ops": 49649056,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 188.42110162880272,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25420316672,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17562386,
+                "major_faults": 1,
+                "user_ticks": 12318,
+                "system_ticks": 5512,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25420316672,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 2,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 187.766761873,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 187.81076522916555,
+            "user_seconds": 122.789541,
+            "system_seconds": 54.766096,
+            "max_rss_kib": 49896,
+            "minor_faults": 17560159,
+            "sampled_program_peak_rss_kib": 40364,
+            "major_faults": 0,
+            "input_block_ops": 49711912,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 187.80968139413744,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2288,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25452498944,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17560159,
+                "major_faults": 0,
+                "user_ticks": 12278,
+                "system_ticks": 5476,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2288,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25452498944,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "repeat": 3,
+            "corpus_log_bytes": 68719476814,
+            "measured_bytes": 68719476687,
+            "tool_reported_seconds": 188.14724151,
+            "returncode": 0,
+            "timed_out": false,
+            "elapsed_seconds": 188.16614586580545,
+            "user_seconds": 123.078671,
+            "system_seconds": 54.571559,
+            "max_rss_kib": 49896,
+            "minor_faults": 17552271,
+            "sampled_program_peak_rss_kib": 40408,
+            "major_faults": 0,
+            "input_block_ops": 49711576,
+            "output_block_ops": 136,
+            "last_sample": {
+              "seconds": 188.16531336400658,
+              "unavailable": {
+                "exe": "FileNotFoundError"
+              },
+              "io": {
+                "rchar": 70262555031,
+                "wchar": 2287,
+                "syscr": 8838,
+                "syscw": 202,
+                "read_bytes": 25452326912,
+                "write_bytes": 69632,
+                "cancelled_write_bytes": 0
+              },
+              "memory_kib": {},
+              "stat": {
+                "state": "Z",
+                "minor_faults": 17552271,
+                "major_faults": 0,
+                "user_ticks": 12307,
+                "system_ticks": 5457,
+                "block_io_delay_ticks": 0
+              }
+            },
+            "sampled_io_max": {
+              "rchar": 70262555031,
+              "wchar": 2287,
+              "syscr": 8838,
+              "syscw": 202,
+              "read_bytes": 25452326912,
+              "write_bytes": 69632,
+              "cancelled_write_bytes": 0
+            },
+            "sampling_interval_seconds": 0.05,
+            "phase_timing": "Polling observations, not exact internal stage boundaries.",
+            "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+            "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+          }
+        ],
+        "groups": [
+          {
+            "kind": "blocks",
+            "command": "scan",
+            "runs": 3,
+            "median_seconds": 57.898559919558465,
+            "min_seconds": 57.631466871127486,
+            "max_seconds": 58.63323575258255,
+            "median_mib_per_second": 1131.910710135783
+          },
+          {
+            "kind": "blocks",
+            "command": "verify",
+            "runs": 3,
+            "median_seconds": 188.16614586580545,
+            "min_seconds": 187.81076522916555,
+            "max_seconds": 188.42177704069763,
+            "median_mib_per_second": 348.2879433583568
+          }
+        ],
+        "profile": "none",
+        "cache": "ordinary"
+      },
+      "format-limitation.json": {
+        "observed_first_entry": 127,
+        "supported_preamble_first_entry": 126,
+        "scan_preflight": "passed",
+        "verify_preflight": "passed",
+        "tail_inspection_preflight": "refused: blocks.log header separator missing",
+        "decision": "Benchmark scan/verify only on the larger copied log. Keep tail refusal; no separator searching or guessing from the index."
+      },
+      "comparisons": {
+        "scan": {
+          "reports_equal_except_seconds_fields": true,
+          "reference_report": {
+            "damaged": false,
+            "index": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.index",
+            "kind": "blocks",
+            "log": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.log",
+            "log_blocks": [
+              1,
+              192881743
+            ],
+            "ok": true,
+            "record_size": 4096,
+            "regions": [],
+            "scan": {
+              "bytes_read": 68719476814,
+              "failed_reads": 0,
+              "from": 0,
+              "seconds": 57.860173746,
+              "to": 68719480832
+            }
+          }
+        },
+        "verify": {
+          "reports_equal_except_seconds_fields": true,
+          "reference_report": {
+            "blocks": [
+              1,
+              192881743
+            ],
+            "bytes": 68719476687,
+            "checked": [
+              "index positions and every entry's position trailer",
+              "header block numbers and the ID chain"
+            ],
+            "corrupt": false,
+            "entries": 192881743,
+            "findings": [],
+            "kind": "blocks",
+            "log": "/mnt/data1n1/antelope-qualification-20261019/large-supported-corpus/blocks/blocks.log",
+            "not_covered": [
+              "transaction bodies and signatures: nothing in blocks.log checks them; pass --against with another node's blocks.log"
+            ],
+            "ok": true,
+            "orphaned_fork_entries": 0,
+            "seconds": 192.461025983,
+            "skipped_entries": 0,
+            "truncated": false
+          }
+        }
+      }
+    },
+    "scope": "Independent larger block-log prefix on ext4/NVMe, three ordinary-cache repeats per command/artifact. Candidate1 runtime. Scan/verify pass; tail recovery refuses unsupported genesis. No recovery or healthy-ZFS qualification."
+  },
+  "final_trace_candidate2": {
+    "plan.json": {
+      "schema": 1,
+      "source_revision": "63f933f25cf57631ba50f2d86bed1ee498addb4e",
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "tool": "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+      "corpus": "/tmp/antelope-qualification-20261019/corpus",
+      "kinds": [
+        "trace_history"
+      ],
+      "commands": [
+        "inspect",
+        "verify"
+      ],
+      "repeats": 1,
+      "block_range": null,
+      "cache": "ordinary",
+      "host": {
+        "system": "Linux",
+        "node": "x670e-7950x",
+        "release": "6.1.10-060110-generic",
+        "version": "#202302060840 SMP PREEMPT_DYNAMIC Mon Feb  6 09:32:56 UTC 2023",
+        "machine": "x86_64",
+        "processor": "x86_64"
+      },
+      "profile": "none"
+    },
+    "complete.json": {
+      "schema": 1,
+      "ok": true,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "results": [
+        {
+          "kind": "trace_history",
+          "command": "inspect",
+          "repeat": 1,
+          "corpus_log_bytes": 104294471504,
+          "measured_bytes": 104294471504,
+          "tool_reported_seconds": null,
+          "returncode": 0,
+          "timed_out": false,
+          "elapsed_seconds": 752.6027360856533,
+          "user_seconds": 559.72737,
+          "system_seconds": 192.225157,
+          "max_rss_kib": 57984,
+          "minor_faults": 28258770,
+          "sampled_program_peak_rss_kib": 57984,
+          "major_faults": 32,
+          "input_block_ops": 309601568,
+          "output_block_ops": 720,
+          "last_sample": {
+            "seconds": 752.6024482697248,
+            "unavailable": {
+              "exe": "FileNotFoundError"
+            },
+            "io": {
+              "rchar": 170040141217,
+              "wchar": 10247,
+              "syscr": 814994889,
+              "syscw": 691,
+              "read_bytes": 158516002816,
+              "write_bytes": 368640,
+              "cancelled_write_bytes": 0
+            },
+            "memory_kib": {},
+            "stat": {
+              "state": "Z",
+              "minor_faults": 28258770,
+              "major_faults": 32,
+              "user_ticks": 55972,
+              "system_ticks": 19222,
+              "block_io_delay_ticks": 0
+            }
+          },
+          "sampled_io_max": {
+            "rchar": 170040141217,
+            "wchar": 10247,
+            "syscr": 814994889,
+            "syscw": 691,
+            "read_bytes": 158516002816,
+            "write_bytes": 368640,
+            "cancelled_write_bytes": 0
+          },
+          "sampling_interval_seconds": 0.05,
+          "phase_timing": "Polling observations, not exact internal stage boundaries.",
+          "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+          "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+        },
+        {
+          "kind": "trace_history",
+          "command": "verify",
+          "repeat": 1,
+          "corpus_log_bytes": 104294471504,
+          "measured_bytes": 104294471504,
+          "tool_reported_seconds": 447.850302218,
+          "returncode": 0,
+          "timed_out": false,
+          "elapsed_seconds": 447.8806343078613,
+          "user_seconds": 395.496571,
+          "system_seconds": 34.707929,
+          "max_rss_kib": 69580,
+          "minor_faults": 26527737,
+          "sampled_program_peak_rss_kib": 69580,
+          "major_faults": 3,
+          "input_block_ops": 86281400,
+          "output_block_ops": 208,
+          "last_sample": {
+            "seconds": 447.8801913559437,
+            "unavailable": {
+              "exe": "FileNotFoundError"
+            },
+            "io": {
+              "rchar": 106454140584,
+              "wchar": 3136,
+              "syscr": 12365,
+              "syscw": 319,
+              "read_bytes": 44176076800,
+              "write_bytes": 106496,
+              "cancelled_write_bytes": 0
+            },
+            "memory_kib": {},
+            "stat": {
+              "state": "Z",
+              "minor_faults": 26527737,
+              "major_faults": 3,
+              "user_ticks": 39549,
+              "system_ticks": 3470,
+              "block_io_delay_ticks": 0
+            }
+          },
+          "sampled_io_max": {
+            "rchar": 106454140584,
+            "wchar": 3136,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 44176076800,
+            "write_bytes": 106496,
+            "cancelled_write_bytes": 0
+          },
+          "sampling_interval_seconds": 0.05,
+          "phase_timing": "Polling observations, not exact internal stage boundaries.",
+          "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+          "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+        }
+      ],
+      "groups": [
+        {
+          "kind": "trace_history",
+          "command": "inspect",
+          "runs": 1,
+          "median_seconds": 752.6027360856533,
+          "min_seconds": 752.6027360856533,
+          "max_seconds": 752.6027360856533,
+          "median_mib_per_second": 132.15864631829945
+        },
+        {
+          "kind": "trace_history",
+          "command": "verify",
+          "runs": 1,
+          "median_seconds": 447.8806343078613,
+          "min_seconds": 447.8806343078613,
+          "max_seconds": 447.8806343078613,
+          "median_mib_per_second": 222.07470294006976
+        }
+      ],
+      "profile": "none",
+      "cache": "ordinary"
+    },
+    "trace_history-inspect-1/stdout.json": {
+      "activation": "Originals are never modified. Output is staged only; review complete.json and coordinate log/index activation with nodeos stopped.",
+      "chain_id": null,
+      "failure": null,
+      "format_version": 1,
+      "index": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index",
+      "index_stamp": {
+        "device": 66306,
+        "inode": 75650661,
+        "modified_ns": 1792446142896008390,
+        "size": 2159186216
+      },
+      "inspection": {
+        "entries": 269898277,
+        "excluded_suffix_bytes": 0,
+        "excluded_suffix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "failure": null,
+        "first_block": 2,
+        "index_bytes": 2159186216,
+        "index_discrepancies": 0,
+        "index_partial_bytes": 0,
+        "index_prefix_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+        "index_present": true,
+        "index_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+        "index_suffix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "indexed_head_hint": 269898278,
+        "input_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+        "last_block": 269898278,
+        "omitted_fork_entries": 1223326,
+        "physical_prefix_end": 104294471504,
+        "physical_prefix_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+        "reference_checked_entries": 269898277,
+        "reference_evidence_sha256": "bcc0f1e95a787bf4269dfbc868a47a25bf5d49c2a0209ae5e31c19870e88f314"
+      },
+      "kind": "trace",
+      "ok": true,
+      "operation": "recover_tail",
+      "options": {
+        "restore": {
+          "available": false,
+          "reason": "pass --through-block with the intended final block; a torn file cannot prove how many entries are missing",
+          "through_block": null
+        },
+        "salvage": {
+          "available": true,
+          "excluded_suffix_bytes": 0,
+          "last_block": 269898278,
+          "missing_block_range": null,
+          "missing_indexed_block_range": null,
+          "reason": null,
+          "total_missing_history_known": false
+        }
+      },
+      "preferred_mode": "restore",
+      "prefix": {
+        "entries": 269898277,
+        "first_block": 2,
+        "last_block": 269898278,
+        "physical_end": 104294471504
+      },
+      "restored_tail_sha256": null,
+      "selected_mode": "restore",
+      "source_inputs": [
+        {
+          "path": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log",
+          "stamp": {
+            "device": 66306,
+            "inode": 75650656,
+            "modified_ns": 1792445708910755400,
+            "size": 56409713202
+          }
+        },
+        {
+          "path": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.index",
+          "stamp": {
+            "device": 66306,
+            "inode": 75650657,
+            "modified_ns": 1792445800686110295,
+            "size": 2159186224
+          }
+        }
+      ],
+      "sources": {
+        "block_logs": [
+          {
+            "index": null,
+            "log": "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log"
+          }
+        ],
+        "blocks": [],
+        "donors": []
+      },
+      "target": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+      "target_stamp": {
+        "device": 66306,
+        "inode": 75650660,
+        "modified_ns": 1792445978196970201,
+        "size": 104294471504
+      },
+      "through_block": null,
+      "tool_version": "0.1.0",
+      "validation": "Whole signed_block framing, position trailers, header ID links; SHIP payload sizes, zlib checksums and canonical IDs when references are supplied. No signature or Merkle-root validation. SHIP payloads rely on the operator's trusted donor."
+    },
+    "trace_history-inspect-1/result.json": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 752.6027360856533,
+      "user_seconds": 559.72737,
+      "system_seconds": 192.225157,
+      "max_rss_kib": 57984,
+      "minor_faults": 28258770,
+      "sampled_program_peak_rss_kib": 57984,
+      "major_faults": 32,
+      "input_block_ops": 309601568,
+      "output_block_ops": 720,
+      "last_sample": {
+        "seconds": 752.6024482697248,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 170040141217,
+          "wchar": 10247,
+          "syscr": 814994889,
+          "syscw": 691,
+          "read_bytes": 158516002816,
+          "write_bytes": 368640,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 28258770,
+          "major_faults": 32,
+          "user_ticks": 55972,
+          "system_ticks": 19222,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 170040141217,
+        "wchar": 10247,
+        "syscr": 814994889,
+        "syscw": 691,
+        "read_bytes": 158516002816,
+        "write_bytes": 368640,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.05,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "trace_history-inspect-1/started.json": {
+      "argv": [
+        "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+        "--json",
+        "recover-tail",
+        "--log",
+        "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+        "--blocks-log",
+        "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log"
+      ],
+      "pid": 642000,
+      "created_unix": 1792456046.9986365,
+      "kind": "trace_history",
+      "command": "inspect",
+      "repeat": 1,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "cache_state": {
+        "mode": "ordinary",
+        "files": {
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log": {
+            "before": {
+              "pages": 25462518,
+              "resident_pages": 21385547,
+              "resident_fraction": 0.8398834317957085
+            },
+            "after": {
+              "pages": 25462518,
+              "resident_pages": 21385547,
+              "resident_fraction": 0.8398834317957085
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.log": {
+            "before": {
+              "pages": 13771903,
+              "resident_pages": 1023443,
+              "resident_fraction": 0.07431384028772203
+            },
+            "after": {
+              "pages": 13771903,
+              "resident_pages": 1023443,
+              "resident_fraction": 0.07431384028772203
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/blocks/blocks.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 281244,
+              "resident_fraction": 0.5335220223619263
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 281244,
+              "resident_fraction": 0.5335220223619263
+            }
+          }
+        },
+        "global_cache_eviction": false,
+        "note": "DONTNEED is advisory; resident fractions determine actual cache state."
+      }
+    },
+    "trace_history-verify-1/stdout.json": {
+      "blocks": [
+        2,
+        269898278
+      ],
+      "bytes": 104294471504,
+      "checked": [
+        "index positions and every entry's position trailer",
+        "entry block numbers, and every payload's zlib framing, sizes, and Adler-32"
+      ],
+      "corrupt": false,
+      "entries": 269898277,
+      "findings": [],
+      "kind": "trace",
+      "log": "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log",
+      "not_covered": [
+        "entry block IDs beyond their block number, and the meaning of the payloads; pass --against with a blocks.log to check the IDs"
+      ],
+      "ok": true,
+      "orphaned_fork_entries": 1223326,
+      "seconds": 447.850302218,
+      "skipped_entries": 0,
+      "truncated": false
+    },
+    "trace_history-verify-1/result.json": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 447.8806343078613,
+      "user_seconds": 395.496571,
+      "system_seconds": 34.707929,
+      "max_rss_kib": 69580,
+      "minor_faults": 26527737,
+      "sampled_program_peak_rss_kib": 69580,
+      "major_faults": 3,
+      "input_block_ops": 86281400,
+      "output_block_ops": 208,
+      "last_sample": {
+        "seconds": 447.8801913559437,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 106454140584,
+          "wchar": 3136,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 44176076800,
+          "write_bytes": 106496,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 26527737,
+          "major_faults": 3,
+          "user_ticks": 39549,
+          "system_ticks": 3470,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 106454140584,
+        "wchar": 3136,
+        "syscr": 12365,
+        "syscw": 319,
+        "read_bytes": 44176076800,
+        "write_bytes": 106496,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.05,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "trace_history-verify-1/started.json": {
+      "argv": [
+        "/tmp/antelope-qualification-20261019/binaries/candidate2-release",
+        "--json",
+        "verify",
+        "--log",
+        "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log"
+      ],
+      "pid": 645953,
+      "created_unix": 1792456805.1868298,
+      "kind": "trace_history",
+      "command": "verify",
+      "repeat": 1,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "cache_state": {
+        "mode": "ordinary",
+        "files": {
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.log": {
+            "before": {
+              "pages": 25462518,
+              "resident_pages": 14856714,
+              "resident_fraction": 0.583473873243801
+            },
+            "after": {
+              "pages": 25462518,
+              "resident_pages": 14856714,
+              "resident_fraction": 0.583473873243801
+            }
+          },
+          "/tmp/antelope-qualification-20261019/corpus/state-history/trace_history.index": {
+            "before": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            },
+            "after": {
+              "pages": 527146,
+              "resident_pages": 527146,
+              "resident_fraction": 1.0
+            }
+          }
+        },
+        "global_cache_eviction": false,
+        "note": "DONTNEED is advisory; resident fractions determine actual cache state."
+      }
+    },
+    "baseline_report_equal_except_seconds": true,
+    "prior_decoder_reuse_run_metrics": [
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 421.36783431470394,
+        "user_seconds": 381.521348,
+        "system_seconds": 38.054947,
+        "max_rss_kib": 68628,
+        "minor_faults": 26627496,
+        "sampled_program_peak_rss_kib": 68628,
+        "major_faults": 0,
+        "input_block_ops": 41265040,
+        "output_block_ops": 200,
+        "last_sample": {
+          "seconds": 421.36759524047375,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3133,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21127700480,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627496,
+            "major_faults": 0,
+            "user_ticks": 38152,
+            "system_ticks": 3805,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3133,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 21127700480,
+          "write_bytes": 102400,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 418.97553737461567,
+        "user_seconds": 379.966451,
+        "system_seconds": 37.288409,
+        "max_rss_kib": 68628,
+        "minor_faults": 26627503,
+        "sampled_program_peak_rss_kib": 68628,
+        "major_faults": 0,
+        "input_block_ops": 36747632,
+        "output_block_ops": 200,
+        "last_sample": {
+          "seconds": 418.9752441495657,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 18814787584,
+            "write_bytes": 102400,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627503,
+            "major_faults": 0,
+            "user_ticks": 37996,
+            "system_ticks": 3728,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3135,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 18814787584,
+          "write_bytes": 102400,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 431.9042729139328,
+        "user_seconds": 391.817334,
+        "system_seconds": 38.169665,
+        "max_rss_kib": 68624,
+        "minor_faults": 26627495,
+        "sampled_program_peak_rss_kib": 68624,
+        "major_faults": 0,
+        "input_block_ops": 41611344,
+        "output_block_ops": 208,
+        "last_sample": {
+          "seconds": 431.9040108323097,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 106454140640,
+            "wchar": 3135,
+            "syscr": 12365,
+            "syscw": 319,
+            "read_bytes": 21305008128,
+            "write_bytes": 106496,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 26627495,
+            "major_faults": 0,
+            "user_ticks": 39181,
+            "system_ticks": 3816,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 106454140640,
+          "wchar": 3135,
+          "syscr": 12365,
+          "syscw": 319,
+          "read_bytes": 21305008128,
+          "write_bytes": 106496,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      }
+    ]
+  },
+  "final_trace_comparison_scope": {
+    "baseline_verify_pilot_seconds": 2753.828457802534,
+    "final_verify_seconds": 447.8806343078613,
+    "baseline_to_final_observed_ratio": 6.148576756523983,
+    "decoder_reuse_median_wall_seconds": 421.36783431470394,
+    "final_vs_reuse_wall_percent": 6.2920797066241985,
+    "decoder_reuse_median_cpu_seconds": 419.57629499999996,
+    "final_cpu_seconds": 430.2045,
+    "final_vs_reuse_cpu_percent": 2.5330804258138606,
+    "note": "One final-artifact pilot; different build host and cache/I/O context. CPU stayed inside provisional investigation allowance. No attribution of wall-time difference to code, no repeatability or full-release claim. Baseline inspection stopped early, so it is not a complete-inspection speed comparison."
+  },
+  "metadata_archives": {
+    "x670e": {
+      "archive": "/tmp/antelope-qualification-20261019/evidence-final-1792457427.tar.gz",
+      "sha256": "fe57985885652f6a934f77c6946694383d13d2cbe41802524a4ecd5dbaa0d091",
+      "bytes": 8015573,
+      "files": 26400
+    },
+    "ultra": {
+      "archive": "/mnt/data1n1/antelope-qualification-20261019/evidence-final-1792457426.tar.gz",
+      "sha256": "0aa335cf3151186280f99e575a4917fb8fc3555b9af7812c53ce25749f110970",
+      "bytes": 58465,
+      "files": 133
+    },
+    "eos": {
+      "archive": "/mnt/fastdata/antelope-qualification-20261019/evidence-final-1792457426.tar.gz",
+      "sha256": "1a0078f2bd9df9e9813da3fa2042430c8ae5c9591cd2050a07fe00da29195bea",
+      "bytes": 61077,
+      "files": 150
+    }
+  }
+}
