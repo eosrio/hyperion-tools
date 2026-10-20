@@ -19,6 +19,7 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 |---|---|---|
 | eosrio/hyperion-tools | Release plan, Rust ingestion/codec and snapshot tooling, reusable processing/recovery components where appropriate, replay and cross-component qualification. | Existing; retain as the main coordination home. |
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
+| eosrio/hyperion-stream-client | Client protocol, lifecycle and packaging; qualify actual client/server compatibility with the History API. | Existing; track server integration in History API #231. |
 | eosrio/hyperion-explorer | Companion explorer frontend, dependency/toolchain upgrades, browser UX, and client compatibility with the 4.5 API and stream contracts. | Existing; modernization started locally; publish implementation and qualify against pinned 4.5 components. |
 | eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
@@ -99,6 +100,11 @@ instead of waiting for a speculative complete SDK.
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
   query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
   document the intentional 4.5 response-type change without requiring a full history reindex.
+- **Stream client/server compatibility:** complete [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+  across real history/live filters, reconnect cleanup, cancellation and request-scoped terminal
+  failures. Qualify exact sequence strings and retryable errors through the actual client/server
+  route, with source-count/identity, transport-drop, fork and LIB checks. Client-only fixtures
+  do not satisfy server or Elasticsearch completeness acceptance.
 - **Explorer modernization and compatibility:** upgrade the existing frontend and qualify its
   routes, SSR/proxy deployment, live streaming and browser behavior against the 4.5 contracts.
   Preserve exact sequence identities and distinguish unavailable projections from empty results.
@@ -112,6 +118,17 @@ instead of waiting for a speculative complete SDK.
 Do not schedule transport replacement, an untrusted-code sandbox, a wholesale worker-pool rewrite
 or zero-downtime backend cutover as prerequisites for 4.5. Revisit only with a concrete requirement
 or measurement and a separate scope decision.
+
+## Stream client compatibility gate
+
+- [ ] Complete [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+  before M4 acceptance, coordinated with [qualification matrix #20](https://github.com/eosrio/hyperion-tools/issues/20)
+  and [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24).
+
+Use #231 as the implementation and acceptance source; do not duplicate its backlog. Server
+fixes can proceed alongside other backend work. Package, browser and loopback client tests
+are supporting evidence; closing this gate requires the actual server/client integration
+against a known Antelope dataset and its history/live recovery checks.
 
 ## Explorer delivery slices
 
