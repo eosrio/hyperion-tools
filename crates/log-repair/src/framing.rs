@@ -101,12 +101,22 @@ pub struct Preamble {
     pub chain_id: [u8; 32],
 }
 
-// Ultra mainnet's packed genesis has a 69-byte chain configuration, including
-// ultra_veto_enabled. Recognize this exact genesis by its chain ID, rather than
+// Ultra's packed genesis has a 69-byte chain configuration, including
+// ultra_veto_enabled. Recognize the mainnet/testnet genesis by chain ID, rather than
 // accepting an arbitrary extra byte or searching for a nearby separator.
-const ULTRA_MAINNET: [u8; 32] = [
-    0xa9, 0xc4, 0x81, 0xdf, 0xbc, 0x7d, 0x95, 0x06, 0xdc, 0x7e, 0x87, 0xe9, 0xa1, 0x37, 0xc9, 0x31,
-    0xb0, 0xa9, 0x30, 0x3f, 0x64, 0xfd, 0x7a, 0x1d, 0x08, 0xb8, 0x23, 0x01, 0x33, 0x92, 0x00, 0x97,
+const ULTRA_GENESIS_CHAIN_IDS: [[u8; 32]; 2] = [
+    // Mainnet.
+    [
+        0xa9, 0xc4, 0x81, 0xdf, 0xbc, 0x7d, 0x95, 0x06, 0xdc, 0x7e, 0x87, 0xe9, 0xa1, 0x37, 0xc9,
+        0x31, 0xb0, 0xa9, 0x30, 0x3f, 0x64, 0xfd, 0x7a, 0x1d, 0x08, 0xb8, 0x23, 0x01, 0x33, 0x92,
+        0x00, 0x97,
+    ],
+    // Testnet.
+    [
+        0x7f, 0xc5, 0x6b, 0xe6, 0x45, 0xbb, 0x76, 0xab, 0x9d, 0x74, 0x7b, 0x53, 0x08, 0x9f, 0x13,
+        0x2d, 0xcb, 0x76, 0x81, 0xdb, 0x06, 0xf0, 0x85, 0x2c, 0xfa, 0x03, 0xea, 0xf6, 0xf7, 0xac,
+        0x80, 0xe9,
+    ],
 ];
 
 pub fn preamble(bytes: &[u8]) -> Result<Preamble> {
@@ -121,7 +131,7 @@ pub fn preamble(bytes: &[u8]) -> Result<Preamble> {
         c.key()?;
         let ultra = bytes
             .get(start..c.pos + 69)
-            .is_some_and(|g| <[u8; 32]>::from(Sha256::digest(g)) == ULTRA_MAINNET);
+            .is_some_and(|g| ULTRA_GENESIS_CHAIN_IDS.contains(&Sha256::digest(g).into()));
         c.take(if ultra { 69 } else { 68 })?; // chain_config_v0 or pinned Ultra genesis
         Sha256::digest(&bytes[start..c.pos]).into()
     } else {
@@ -300,22 +310,26 @@ mod tests {
     }
 
     #[test]
-    fn ultra_mainnet_genesis_is_recognized_without_trusting_the_index() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../testdata/ultra-mainnet-v3.json")).unwrap();
-        let bytes = hex::decode(fixture["header_hex"].as_str().unwrap()).unwrap();
-        let p = preamble(&bytes).unwrap();
-        assert_eq!(p.first, 1);
-        assert_eq!(p.end, 127);
-        assert_eq!(hex::encode(p.chain_id), fixture["chain_id"]);
-        for cut in 0..bytes.len() {
-            assert!(preamble(&bytes[..cut]).is_err(), "cut {cut}");
-        }
-        // A nearby separator or an extra byte cannot authorize a different genesis.
-        for offset in 8..bytes.len() {
-            let mut changed = bytes.clone();
-            changed[offset] ^= 1;
-            assert!(preamble(&changed).is_err(), "changed byte {offset}");
+    fn ultra_genesis_is_recognized_without_trusting_the_index() {
+        for fixture in [
+            include_str!("../testdata/ultra-mainnet-v3.json"),
+            include_str!("../testdata/ultra-testnet-v3.json"),
+        ] {
+            let fixture: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            let bytes = hex::decode(fixture["header_hex"].as_str().unwrap()).unwrap();
+            let p = preamble(&bytes).unwrap();
+            assert_eq!(p.first, 1);
+            assert_eq!(p.end, 127);
+            assert_eq!(hex::encode(p.chain_id), fixture["chain_id"]);
+            for cut in 0..bytes.len() {
+                assert!(preamble(&bytes[..cut]).is_err(), "cut {cut}");
+            }
+            // A nearby separator or an extra byte cannot authorize a different genesis.
+            for offset in 8..bytes.len() {
+                let mut changed = bytes.clone();
+                changed[offset] ^= 1;
+                assert!(preamble(&changed).is_err(), "changed byte {offset}");
+            }
         }
     }
 

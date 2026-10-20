@@ -140,7 +140,7 @@ damaged part was written from the log itself, so it does not need to know your h
 
 - **`blocks.log`:** non-pruned versions 1, 2 and 3 are supported. Their headers
   differ; recovery preserves the original header and version. Classic genesis
-  layouts and Ultra mainnet's exact genesis are recognized (see [FORMAT.md](FORMAT.md#target-logs)).
+  layouts and Ultra mainnet/testnet's exact genesis are recognized (see [FORMAT.md](FORMAT.md#target-logs)).
   Any intact copy, any retained `blocks-FIRST-LAST.log` file, or any state-history
   endpoint can supply the blocks.
 - **Finding damage** (`scan`, `verify`) works on every part of a log.

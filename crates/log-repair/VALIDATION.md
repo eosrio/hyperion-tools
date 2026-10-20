@@ -18,8 +18,10 @@ A write covering a whole damaged range heals it, as a full-record write does on 
   70,000 B.
 - **Ultra and FIO headers (2026-10-20):** captured Ultra mainnet v3 genesis and
   blocks 1..4, plus FIO mainnet v2 partial-log genesis and blocks
-  407169178..407169181. Block IDs match Ultra's native `spring-util` output and
-  FIO's native `get_block` responses. Synthetic v1 headers cover the implicit
+  407169178..407169181. Also covered: Ultra testnet genesis (blocks 1..4), current
+  Ultra testnet partial v3 (326151844..326151847), and FIO testnet partial v2
+  (398291606..398291609). Block IDs match Ultra's native `spring-util` output and
+  the chains' native `get_block` responses. Synthetic v1 headers cover the implicit
   first block and absence of a separator. Tests preserve original headers and
   chain identity through salvage, donor restoration, replay slicing and Linux
   trim/rollback. They reject truncated headers, every single-byte change to the

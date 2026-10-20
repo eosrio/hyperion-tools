@@ -38,13 +38,22 @@ Reviewed against these primary sources on 2026-10-15:
 | 3 | `[version=3:u32][first_block:u32][packed genesis if first=1, otherwise chain_id:32][0xff × 8]` |
 
 Genesis normally contains a timestamp, public key and 68-byte `chain_config_v0`.
-Ultra mainnet has a 69-byte configuration including `ultra_veto_enabled`. Its
-layout is accepted only when the entire packed genesis hashes to chain ID
-`a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097`.
-The captured header and four real blocks are in `testdata/ultra-mainnet-v3.json`;
-Ultra's own `spring-util` v6.2.2-3.0.0 independently accepted and decoded them.
+Ultra mainnet and testnet have a 69-byte configuration including
+`ultra_veto_enabled`. This layout is accepted only when the entire packed genesis
+hashes to a known Ultra chain ID:
+
+- Mainnet: `a9c481dfbc7d9506dc7e87e9a137c931b0a9303f64fd7a1d08b8230133920097`.
+- Testnet: `7fc56be645bb76ab9d747b53089f132dcb7681db06f0852cfa03eaf6f7ac80e9`.
+
+Captured headers and four real blocks are in `testdata/ultra-*-v3.json`;
+Ultra's own `spring-util` v6.2.2-3.0.0 independently decoded the genesis samples.
 The extra byte is preserved. Recovery does not search for separators, infer a
 header length from a damaged index, or accept arbitrary fork layouts.
+Classic v1/v2 headers and partial v3 headers are format-based and work across
+networks without a chain-ID allowlist. The Ultra pins apply only when parsing its
+different packed genesis. Test coverage includes FIO mainnet/testnet v2 and Ultra
+mainnet/testnet genesis plus a current Ultra testnet partial v3 log. Custom Ultra
+genesis configurations remain unsupported.
 
 Each entry is a packed `signed_block` followed by its own
 absolute position as a u64 trailer. `blocks.index` holds one u64 position per block.

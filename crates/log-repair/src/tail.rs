@@ -1116,8 +1116,22 @@ mod tests {
             serde_json::from_str(include_str!("../testdata/ultra-mainnet-v3.json")).unwrap();
         let fio: serde_json::Value =
             serde_json::from_str(include_str!("../testdata/fio-mainnet-v2.json")).unwrap();
+        let ultra_testnet: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-testnet-v3.json")).unwrap();
+        let ultra_partial: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/ultra-testnet-partial-v3.json"))
+                .unwrap();
+        let fio_testnet: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/fio-testnet-v2.json")).unwrap();
         // The v1 case is a format-conformance fixture, not a captured historical v1 log.
-        for (fixture, version) in [(&ultra, 3u32), (&fio, 2), (&ultra, 1)] {
+        for (fixture, version) in [
+            (&ultra, 3u32),
+            (&fio, 2),
+            (&ultra, 1),
+            (&ultra_testnet, 3),
+            (&ultra_partial, 3),
+            (&fio_testnet, 2),
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let donor_dir = dir.path().join("donor");
             fs::create_dir(&donor_dir).unwrap();
