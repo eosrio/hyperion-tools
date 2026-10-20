@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import struct
+import zlib
 
 from .common import Pinned, event, publish, require, stamp
 from .formats import block_header, ship_payload
@@ -24,7 +25,16 @@ def mutation(original, actual):
     if actual.startswith(original):
         return {"operation": "append", "offset": len(original), "bytes": len(actual) - len(original),
                 "appended_sha256": digest(actual[len(original):])}
-    require(len(original) == len(actual), "unclassified size-changing mutation")
+    if len(original) != len(actual):
+        start = next(n for n, (a, b) in enumerate(zip(original, actual)) if a != b)
+        suffix = 0
+        while suffix < min(len(original), len(actual)) - start and original[-suffix - 1] == actual[-suffix - 1]:
+            suffix += 1
+        removed = original[start:len(original) - suffix]
+        inserted = actual[start:len(actual) - suffix]
+        return {"operation": "splice", "offset": start,
+                "removed_bytes": len(removed), "inserted_bytes": len(inserted),
+                "removed_sha256": digest(removed), "inserted_sha256": digest(inserted)}
     offsets, changed = [], 0
     for n, (a, b) in enumerate(zip(original, actual)):
         if a != b:
@@ -44,11 +54,13 @@ def groups(records):
     return result
 
 
-def reference(directory, records, chain_id):
+def reference(directory, records, chain_id, kinds=("blocks", "trace_history", "chain_state_history")):
+    require(len(kinds) == len(set(kinds)) and set(kinds) <=
+            {"blocks", "trace_history", "chain_state_history"}, "unknown or duplicate reference kind")
     directory.mkdir(mode=0o700)
     result = {}
     first = records[0]["number"]
-    for kind in ("blocks", "trace_history", "chain_state_history"):
+    for kind in kinds:
         raw = bytearray(struct.pack("<II", 3, first) + bytes.fromhex(chain_id) + bytes([255]) * 8
                         if kind == "blocks" else b"")
         positions = []
@@ -92,6 +104,12 @@ def cases(kind, gold, records):
                        "limitation": limitation})
 
     cuts = {head + 1, head + 7, head + 47, head + (end - head) // 2, end - 8, end - 1}
+    if kind == "blocks" and records[-1][kind].get("transactions", 0) >= 128:
+        # A classic producer signature occupies one variant byte plus 65 bytes.
+        # Leave only the first byte of the real multibyte transaction-count varuint.
+        require(raw[head + records[-1][kind]["header_bytes"]] in (0, 1),
+                "transaction-count cut requires a classic signature")
+        cuts.add(head + records[-1][kind]["header_bytes"] + 67)
     for cut in sorted(c for c in cuts if head < c < end):
         add(f"torn-at-{cut - head}", raw[:cut], prefix=last - 1,
             trim=kind == "blocks", trim_prefix=last - 1)
@@ -138,6 +156,38 @@ def cases(kind, gold, records):
             altered = bytearray(raw)
             altered[head + 40:head + 48] = struct.pack("<Q", length)
             add(name, bytes(altered), prefix=last - 1)
+        old = raw[positions[-2]:head - 8]
+        for latest in (False, True):
+            repeated = bytearray(raw[:head])
+            orphan = bytearray(old)
+            orphan[39] ^= 1
+            repeated.extend(orphan)
+            repeated.extend(struct.pack("<Q", head))
+            duplicate_at = len(repeated)
+            repeated.extend(old)
+            repeated.extend(struct.pack("<Q", duplicate_at))
+            last_at = len(repeated)
+            repeated.extend(raw[head:-8])
+            repeated.extend(struct.pack("<Q", last_at))
+            new_index = index[:-16] + struct.pack(
+                "<QQ", duplicate_at if latest else positions[-2], last_at)
+            add("canonical-repeat-index-" + ("latest" if latest else "first"),
+                bytes(repeated), idx=new_index)
+        layout = ship_payload(old)
+        payload = zlib.decompress(old[layout["zlib_offset"]:])
+        for changed in (False, True):
+            data = payload[:-1] + bytes([payload[-1] ^ 1]) if changed else payload
+            compressed = zlib.compress(data)
+            marker = 0 if layout["marker"] == 1 else 1
+            encoded = struct.pack("<I", marker)
+            if marker == 1:
+                encoded += struct.pack("<Q", len(data))
+            encoded += compressed
+            different = old[:40] + struct.pack("<Q", len(encoded)) + encoded
+            require(different != old, "repeat conflict must differ from original bytes")
+            repeated = raw[:head] + different + struct.pack("<Q", head)
+            add("canonical-repeat-" + ("payload-conflict" if changed else "encoding-conflict"),
+                repeated, prefix=last - 1)
     middle = len(positions) // 2
     altered = bytearray(raw)
     altered[positions[middle]:positions[middle + 1] - 8] = bytes(
@@ -262,6 +312,7 @@ def damage(args):
     fixture, tool = Pinned(args.fixture), None
     root, results = args.out.resolve(), []
     try:
+        require(len(args.kinds) == len(set(args.kinds)), "duplicate damage kinds")
         tool = Pinned(args.tool)
         root.mkdir(mode=0o700)
         require(fixture.before.st_size <= 16 << 20, "fixture JSON exceeds input bound")
@@ -279,7 +330,10 @@ def damage(args):
         for group in groups(records):
             require(len(group) >= 3, "each real range needs complete anchors")
             label = str(group[0]["number"])
-            refs = reference(root / ("reference-" + label), group, value["chain_id"])
+            needed = set(args.kinds) | {"blocks"}
+            refs = reference(root / ("reference-" + label), group, value["chain_id"],
+                             tuple(k for k in ("blocks", "trace_history", "chain_state_history")
+                                   if k in needed))
             for kind in args.kinds:
                 for case in cases(kind, refs[kind], group):
                     directory = root / (label + "-" + kind + "-" + case["name"])

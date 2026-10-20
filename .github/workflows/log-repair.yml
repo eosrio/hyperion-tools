@@ -36,6 +36,13 @@ jobs:
           --fixture crates/log-repair/tests/fixtures/libre-real-entries.json
           --tool ./target/release/antelope-log-repair --trim
           --out /tmp/antelope-real-entry-damage
+      - name: Real EOS transaction-count boundary cases
+        if: runner.os == 'Linux'
+        run: >-
+          python crates/log-repair/tests/qualify.py damage
+          --fixture crates/log-repair/tests/fixtures/eos-real-blocks.json
+          --kinds blocks --tool ./target/release/antelope-log-repair --trim
+          --out /tmp/antelope-eos-block-damage
       - name: Process interruption and disk-full regressions
         if: runner.os == 'Linux'
         run: |

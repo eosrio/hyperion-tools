@@ -11,7 +11,7 @@ import json
 import zlib
 from unittest.mock import patch
 
-from qualification.common import Pinned, publish, require
+from qualification.common import Pinned, publish, require, stamp
 from qualification.corpus import SHIP_MAGIC, copy_prefix, snapshot
 from qualification.bench import Corpus, oracle
 from qualification.process import run
@@ -43,6 +43,20 @@ class RealFormatOracles(unittest.TestCase):
                 damaged = body[:-1] + bytes([body[-1] ^ 1])
                 with self.assertRaises(zlib.error):
                     ship_payload(damaged)
+
+    def test_size_changing_damage_has_a_reconstructable_splice_manifest(self):
+        from qualification.damage import mutation
+        for original, actual in [(b"abcdefgh", b"abcdXYZefgh"),
+                                 (b"abcdefgh", b"abXefgh"),
+                                 (b"abcdefgh", b"abXXXXXXXX")]:
+            value = mutation(original, actual)
+            self.assertEqual(value["operation"], "splice")
+            at = value["offset"]
+            removed = original[at:at + value["removed_bytes"]]
+            inserted = actual[at:at + value["inserted_bytes"]]
+            self.assertEqual(value["removed_sha256"], sha(removed))
+            self.assertEqual(value["inserted_sha256"], sha(inserted))
+            self.assertEqual(original[:at] + inserted + original[at + len(removed):], actual)
 
 
 def sha(data):
@@ -245,6 +259,9 @@ class QualificationTests(unittest.TestCase):
         owned.write_bytes(original)
         proof = fingerprint(owned)
         owned.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
+        # Model a coarse clock or restored metadata: the old byte proof must
+        # still reject a same-length edit even if every observed stamp matches.
+        proof["stamp"] = stamp(owned.stat())
         with self.assertRaisesRegex(RuntimeError, "changed"):
             retire(output, [proof], "changed")
         self.assertTrue(owned.exists())
@@ -253,6 +270,16 @@ class QualificationTests(unittest.TestCase):
         retire(output, [fingerprint(owned)], "verified")
         self.assertFalse(owned.exists())
         self.assertEqual(notes.read_text(), "keep this")
+
+    def test_block_only_references_do_not_require_unrelated_ship_payloads(self):
+        import json
+        from qualification.damage import reference
+        fixture = json.loads((pathlib.Path(__file__).parent / "fixtures/libre-real-entries.json").read_text())
+        records = [{"number": p["number"], "blocks": p["blocks"]}
+                   for p in fixture["records"][:3]]
+        result = reference(self.root / "block-only", records, fixture["chain_id"], ("blocks",))
+        self.assertEqual(set(result), {"blocks"})
+        self.assertEqual(len(result["blocks"]["positions"]), 3)
 
 
 if __name__ == "__main__":

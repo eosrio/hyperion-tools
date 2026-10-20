@@ -31,8 +31,14 @@ def retire(root, entries, label):
         value = path.stat()
         require(stamp(value) == entry["stamp"] and value.st_nlink == 1,
                 "verified retirement file changed or has hard links")
+        current = fingerprint(path)
+        require(current["sha256"] == entry["sha256"] and current["stamp"] == entry["stamp"],
+                "verified retirement file changed since its byte oracle")
     for entry in entries:
         path = pathlib.Path(entry["path"])
+        value = path.stat()
+        require(stamp(value) == entry["stamp"] and value.st_nlink == 1,
+                "verified retirement file changed before removal")
         path.unlink()
         sync_dir(path.parent)
     publish(root / ("retired-" + label + ".json"), {"data_files_retired": entries})

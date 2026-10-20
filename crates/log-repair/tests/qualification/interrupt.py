@@ -67,7 +67,7 @@ def interruption(args):
                     zip(data["records"], data["records"][1:])), "fixture is not ordered")
         records = groups(data["records"])[0]
         require(len(records) >= 3, "need three canonical real entries")
-        gold = reference(root / "reference", records, data["chain_id"])["blocks"]
+        gold = reference(root / "reference", records, data["chain_id"], ("blocks",))["blocks"]
         damaged = gold["bytes"][:-4]
         prefix, prefix_index = gold["bytes"][:gold["positions"][-1]], gold["index"][:-8]
         plan = {
