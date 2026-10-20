@@ -14,8 +14,9 @@ The shared core parser accepts only ASCII base-ten canonical uint64 text. Archiv
 reject noncanonical text; batch requests accept that text plus explicitly supported legacy integer
 JSON numbers at most 9007199254740991. Responses always use strings. Unsafe numeric tokens are
 refused even though Rust can represent them, because a JavaScript caller may have rounded their
-identity before transmission. Duplicate request-metadata keys and repeated sequence GET parameters
-are refused. Delta primary-key semantics are separate and remain unchanged.
+identity before transmission. Duplicate request-metadata keys and repeated action GET identity
+parameters (`block_num` and `global_sequence`) are refused. Delta primary-key semantics are separate
+and remain unchanged.
 
 Canonical uint64 parsing includes zero. This slice preserves the Rust tools' existing zero source
 semantics; it does not relax positive committed-action checks in History API callers.

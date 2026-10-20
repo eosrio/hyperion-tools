@@ -669,13 +669,15 @@ fn handle_health(info: &LogInfo, delta_info: Option<&LogInfo>) -> Reply {
 /// `GET /action?block_num=N&global_sequence=G` — find the single action_trace in block N whose
 /// receipt.global_sequence == G, decode its act.data, return one JSON object.
 fn handle_action(w: &mut Worker, info: &LogInfo, query: &str) -> Reply {
-    if query
-        .split('&')
-        .filter(|pair| pair.split('=').next() == Some("global_sequence"))
-        .count()
-        > 1
-    {
-        return Reply::err(400, "global_sequence must occur exactly once");
+    for field in ["block_num", "global_sequence"] {
+        if query
+            .split('&')
+            .filter(|pair| pair.split('=').next() == Some(field))
+            .count()
+            > 1
+        {
+            return Reply::err(400, &format!("{field} must occur exactly once"));
+        }
     }
     let params = parse_query(query);
     let (Some(bn), Some(gs)) = (params.get("block_num"), params.get("global_sequence")) else {
@@ -1786,17 +1788,14 @@ mod tests {
                 );
                 assert_eq!(reply.code, 400, "accepted query {text:?}");
             }
-            assert_eq!(
-                request(
-                    worker,
-                    info,
-                    "GET",
-                    "/action?block_num=42&global_sequence=1&global_sequence=2",
-                    ""
-                )
-                .code,
-                400
-            );
+            for query in [
+                "/action?block_num=42&global_sequence=1&global_sequence=2",
+                "/action?block_num=42&block_num=43&global_sequence=1",
+                "/action?block_num=43&block_num=42&global_sequence=1",
+                "/action?block_num=42&block_num=42&global_sequence=1",
+            ] {
+                assert_eq!(request(worker, info, "GET", query, "").code, 400);
+            }
             for body in [
                 r#"[{"block_num":42,"global_sequence":"1","global_sequence":"2"}]"#,
                 r#"[{"block_num":42,"global_sequence":"1","global_\u0073equence":"2"}]"#,
