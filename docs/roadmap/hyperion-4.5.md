@@ -98,6 +98,10 @@ instead of waiting for a speculative complete SDK.
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
   query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
   document the intentional 4.5 response-type change without requiring a full history reindex.
+  The derived `/v2/stats/get_action_usage.action_count` is always an exact decimal string under
+  [ADR 0054](../adr/0054-return-action-usage-count-as-decimal-string.md); unrelated counts keep their
+  existing types. [Tools #51](https://github.com/eosrio/hyperion-tools/issues/51) owns the Rust
+  JSON/archive portion; it does not complete Elasticsearch or Wire testnet qualification.
 - **Distribution and operator lifecycle:** independent SDK/plugin/adapter releases, tested versions
   pinned for Hyperion, bundled first-party plugins disabled by default, catalog compatibility checks,
   one-package Wire installation and controlled executable updates. Qualify backend cutover after

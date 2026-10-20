@@ -45,6 +45,7 @@ pub mod delta;
 pub mod disk;
 #[cfg(feature = "archive")]
 pub mod protocol;
+pub mod sequence;
 #[cfg(feature = "ship")]
 pub mod ship;
 #[cfg(feature = "archive")]

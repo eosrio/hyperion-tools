@@ -16,3 +16,6 @@ serde_json = { workspace = true }
 minreq = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+hyperion-ship = { workspace = true, features = ["testkit"] }

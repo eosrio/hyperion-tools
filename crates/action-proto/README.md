@@ -12,3 +12,9 @@ to Elasticsearch), and supports a **cold-tier metadata-only** mode that omits th
 action-proto --from-disk /data/nodeos/state-history --abi-index abi.ndjson \
   --start 2 --end 999999999 --threads 12 --out actions.ndjson
 ```
+
+For 4.5, root and receipt uint64 sequence fields are canonical decimal JSON strings, even below
+2^53. `_id` continues to use the exact decimal sequence, and frozen binary input remains unchanged.
+ABI/code uint32 counters, block numbers and ordinals stay numeric. See the
+[sequence JSON checks](../../docs/qualification/lossless-sequence-json.md) for boundary coverage and
+the separate Elasticsearch/Wire qualification obligations.

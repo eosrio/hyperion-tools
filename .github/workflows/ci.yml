@@ -32,3 +32,20 @@ jobs:
         run: cargo build --release --verbose
       - name: Test
         run: cargo test --release --verbose
+
+  sequence-json-interop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify exact Rust sequence JSON with Node (not Wire qualification)
+        run: node scripts/check-sequence-json.mjs --release

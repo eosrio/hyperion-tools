@@ -37,6 +37,7 @@ use serde_json::{Map, Value};
 
 use hyperion_ship::blocks::{BlockLog, slot_to_iso};
 use hyperion_ship::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::sequence::push_sequence_json;
 use hyperion_ship::trace;
 
 #[derive(Parser, Debug)]
@@ -927,7 +928,7 @@ fn worker(
                 body.push_str(",\"trx_id\":");
                 push_json_str(&mut body, &trx_id);
                 body.push_str(",\"global_sequence\":");
-                body.push_str(&receipt.global_sequence.to_string());
+                push_sequence_json(&mut body, receipt.global_sequence);
                 body.push_str(",\"action_ordinal\":");
                 body.push_str(&act.action_ordinal.to_string());
                 body.push_str(",\"creator_action_ordinal\":");
@@ -1329,4 +1330,78 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyperion_ship::testkit::ship::{Encoding, LogBuilder, synthetic_id};
+    use hyperion_ship::testkit::traces::{SEQUENCE_BOUNDARIES, transaction};
+
+    #[test]
+    fn sequence_public_json_from_disk() {
+        let path =
+            std::env::temp_dir().join(format!("hyperion-sequence-emitter-{}", std::process::id()));
+        // Refuse an existing directory; this test removes only the exact directory it created.
+        std::fs::create_dir(&path).unwrap();
+        let sequences: Vec<_> = SEQUENCE_BOUNDARIES
+            .iter()
+            .map(|(n, _)| (*n, *n, *n))
+            .collect();
+        let mut log = LogBuilder::new(Encoding::SizedStored);
+        log.push(synthetic_id(42, 0), &transaction(&sequences));
+        let (log_path, index_path) = log.write(&path, "trace_history").unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let stats = Stats::default();
+        worker(
+            log_path.to_str().unwrap(),
+            index_path.to_str().unwrap(),
+            42,
+            42,
+            42,
+            &AbiIndex::new(),
+            None,
+            false,
+            false,
+            &stats,
+            &Failures::default(),
+            Some(&sender),
+        )
+        .unwrap();
+        drop(sender);
+        let messages: Vec<_> = receiver.into_iter().collect();
+        assert_eq!(messages.len(), SEQUENCE_BOUNDARIES.len());
+        let mut docs = Vec::new();
+        for (index, (message, (expected_binary, expected_text))) in
+            messages.iter().zip(SEQUENCE_BOUNDARIES).enumerate()
+        {
+            assert_eq!(message.global_sequence, *expected_binary);
+            assert_eq!(message.block_num, 42);
+            let doc: Value = serde_json::from_str(&message.doc).unwrap();
+            assert_eq!(doc["global_sequence"].as_str(), Some(*expected_text));
+            assert_eq!(
+                doc["receipts"][0]["global_sequence"].as_str(),
+                Some(*expected_text)
+            );
+            assert_eq!(
+                doc["receipts"][0]["recv_sequence"].as_str(),
+                Some(*expected_text)
+            );
+            assert_eq!(
+                doc["receipts"][0]["auth_sequence"][0]["sequence"].as_str(),
+                Some(*expected_text)
+            );
+            assert_eq!(doc["code_sequence"].as_u64(), Some(4_294_967_295));
+            assert_eq!(doc["abi_sequence"].as_u64(), Some(4_294_967_295));
+            assert_eq!(doc["action_ordinal"].as_u64(), Some(index as u64 + 1));
+            assert_eq!(doc["act"]["data"].as_str(), Some("dead"));
+            docs.push(doc);
+        }
+        // Consumed by the independent Node JSON parser in scripts/check-sequence-json.mjs.
+        println!(
+            "HYPERION_SEQUENCE_JSON:{}",
+            serde_json::json!({"source":"action-proto","body":docs})
+        );
+        std::fs::remove_dir_all(path).unwrap();
+    }
 }
