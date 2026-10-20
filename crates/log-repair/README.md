@@ -606,8 +606,11 @@ Media read errors remain on the existing `scan`/`prepare`/`apply` path.
 
 When restoration is unavailable and the operator chooses to keep the complete
 prefix, `trim-tail` avoids copying the whole log. **It modifies the existing log
-and index.** Stop nodeos and every reader/writer first, keep them stopped through
-completion, and run as root so `/proc` can inspect other users' file descriptors:
+and index.** Stop nodeos and every reader/writer first and keep them stopped through
+completion. Run as the file owner with read/write access and permission to create
+the journal. Root is optional; it gives `/proc` checks visibility into other users'
+processes. If visibility is restricted, the tool warns and the operator must
+confirm that every reader/writer is stopped:
 
 ```sh
 antelope-log-repair trim-tail --log /data/blocks/blocks.log \
@@ -628,6 +631,34 @@ fsyncs the index. It reads the resulting pair back through the full parser and
 writes `receipt.json` last. The retained prefix is never rewritten. Initial trim
 uses two complete passes, with named progress phases. Read-back can use cache;
 this does not establish that the storage hardware honors flushes on power loss.
+
+To avoid repeating an inspection, save a checkpoint during the first scan:
+
+```sh
+antelope-log-repair recover-tail --log /data/blocks/blocks.log \
+  --save-inspection /scratch/inspection-1 --node-stopped
+antelope-log-repair trim-tail --log /data/blocks/blocks.log \
+  --inspection /scratch/inspection-1 --journal /scratch/tail-trim-1 --node-stopped
+```
+
+The checkpoint saves inspection metadata, not another log copy. This requires an
+index eligible for trimming and a NEW private directory. Use inspection only,
+without `--out` or donor/source options. Both commands must use the exact same
+executable, Linux boot, canonical paths, device/inode, file lengths, and mtime/ctime.
+The log and index must remain unchanged and all readers/writers must remain stopped.
+Reuse supports ext4, XFS, Btrfs, ZFS and tmpfs; other filesystems require ordinary
+trimming. Changed files, a reboot, a rebuilt tool, incomplete or changed checkpoint
+artifacts, and different boundary bytes cause refusal before trimming.
+
+With `--inspection`, trimming skips its initial full scan, saves both suffixes in
+a separate recovery journal, and still performs **one full parser and hash
+verification after truncation**. Saved metadata tracks ordinary file changes;
+it cannot prove the absence of silent media corruption. Full read-back detects
+changed retained bytes and refuses a success receipt. Keep the journal if any
+verification fails. Checksums do not authenticate checkpoints against their owner.
+Resume and rollback need only the journal, with their existing full-prefix checks.
+Earlier terminal output or JSON reports cannot be converted into checkpoints;
+they did not capture the required guards before inspection.
 
 The NEW journal directory contains `log.tail`, `index.tail`, `intent.json`,
 `intent.sha256`, and `lock`. The intent binds absolute paths, device/inode identity,

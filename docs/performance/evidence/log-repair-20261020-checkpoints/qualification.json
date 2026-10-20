@@ -1,0 +1,291 @@
+{
+  "format_version": 1,
+  "date": "2026-10-20",
+  "issue": 55,
+  "base_commit": "da16001dec47735e4a5abd1c6731dbb790b71731",
+  "tool_sha256": "5e9f52c11e8868c88ee00815aafc0c2c18b85a6793941af5e9f688c681da4c5c",
+  "scope": "Independent disposable copies only. No production file mutation, live node replay, or storage power cut. Single-run observations, not repeated performance qualification.",
+  "corpora": {
+    "libre": {
+      "log_bytes": 48477356032,
+      "index_bytes": 1853814976,
+      "first_block": 1,
+      "retained_last_block": 231726802,
+      "retained_entries": 231726802,
+      "saved_log_bytes": 327,
+      "saved_index_bytes": 560,
+      "inspection_reused": true,
+      "source_unchanged": true,
+      "restored_sha256": {
+        "blocks.log": "b5e68e7aaac92ab15863a00dab57a2afdc4ad0367262cd6b35ba8155691c094a",
+        "blocks.index": "af4a7a66594d5c49039589dc03590d92b3f6fe94b0551291f5f16c99ebd1e9a7"
+      },
+      "cache_note": "Single sequential run per variant; shared active host, no global cache eviction; copy and preceding passes warm the cache.",
+      "stages": {
+        "ordinary_trim": {
+          "resources": {
+            "seconds": 125.91,
+            "user_seconds": 94.29,
+            "system_seconds": 30.4,
+            "max_rss_kib": 21936,
+            "filesystem_inputs": 88593344,
+            "filesystem_outputs": 280
+          },
+          "phases": [
+            "recover-tail [inspect trim input (1/2)]",
+            "recover-tail [verify trimmed pair (2/2)]"
+          ]
+        },
+        "ordinary_rollback": {
+          "resources": {
+            "seconds": 61.33,
+            "user_seconds": 42.2,
+            "system_seconds": 19.0,
+            "max_rss_kib": 19400,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 144
+          },
+          "phases": []
+        },
+        "save_inspection": {
+          "resources": {
+            "seconds": 58.26,
+            "user_seconds": 47.18,
+            "system_seconds": 11.0,
+            "max_rss_kib": 21448,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 112
+          },
+          "phases": [
+            "recover-tail [inspect original (1/1)]"
+          ]
+        },
+        "checkpoint_trim": {
+          "resources": {
+            "seconds": 58.35,
+            "user_seconds": 46.92,
+            "system_seconds": 11.2,
+            "max_rss_kib": 21616,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 160
+          },
+          "phases": [
+            "recover-tail [verify trimmed pair (1/1; inspection reused)]"
+          ]
+        },
+        "checkpoint_rollback": {
+          "resources": {
+            "seconds": 60.91,
+            "user_seconds": 42.53,
+            "system_seconds": 18.28,
+            "max_rss_kib": 19400,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 152
+          },
+          "phases": []
+        }
+      },
+      "trimmed_prefix_sha256": {
+        "blocks.log": "04f7f212f2cd5bf3b28ed3ee4c9d2a08131687ebd7512d8ed3989f19b1622b1a",
+        "blocks.index": "257f719c34b6f583991971d2e6d3219addf1d42194f40e7e6dca98c3c2c51e87"
+      },
+      "environment": "Ryzen 9 7950X, ext4/NVMe, active shared server. Baseline overlapped an initial unit-test run; later phases were warmer, as physical input counters show. No cache eviction.",
+      "native_smoke_test": true
+    },
+    "ultra": {
+      "log_bytes": 2186927,
+      "index_bytes": 80000,
+      "first_block": 1,
+      "retained_last_block": 9999,
+      "retained_entries": 9999,
+      "saved_log_bytes": 191,
+      "saved_index_bytes": 8,
+      "inspection_reused": true,
+      "source_unchanged": true,
+      "restored_sha256": {
+        "blocks.log": "0bbfe9ecf992af485abc2c29694c630c176a91733638ff63213f8282d8b4a012",
+        "blocks.index": "63ea4c30e326cf7a884f2189262153767bf041ae605dc31e25434e002516ea3f"
+      },
+      "cache_note": "10000 captured records, final trailer cut by one byte; sequential single-run phases, no cache eviction.",
+      "stages": {
+        "ordinary_trim": {
+          "resources": {
+            "seconds": 0.54,
+            "user_seconds": 0.14,
+            "system_seconds": 0.34,
+            "max_rss_kib": 5300,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 56
+          },
+          "phases": [
+            "recover-tail [inspect trim input (1/2)]",
+            "recover-tail [verify trimmed pair (2/2)]"
+          ]
+        },
+        "ordinary_rollback": {
+          "resources": {
+            "seconds": 0.33,
+            "user_seconds": 0.09,
+            "system_seconds": 0.21,
+            "max_rss_kib": 5096,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 48
+          },
+          "phases": []
+        },
+        "save_inspection": {
+          "resources": {
+            "seconds": 0.22,
+            "user_seconds": 0.1,
+            "system_seconds": 0.1,
+            "max_rss_kib": 5212,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 32
+          },
+          "phases": [
+            "recover-tail [inspect original (1/1)]"
+          ]
+        },
+        "checkpoint_trim": {
+          "resources": {
+            "seconds": 0.46,
+            "user_seconds": 0.12,
+            "system_seconds": 0.29,
+            "max_rss_kib": 5324,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 72
+          },
+          "phases": [
+            "recover-tail [verify trimmed pair (1/1; inspection reused)]"
+          ]
+        },
+        "checkpoint_rollback": {
+          "resources": {
+            "seconds": 0.33,
+            "user_seconds": 0.11,
+            "system_seconds": 0.2,
+            "max_rss_kib": 5096,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 48
+          },
+          "phases": []
+        }
+      },
+      "trimmed_prefix_sha256": {
+        "blocks.log": "48e85d0ea53271d2b41506706cbf29b9c250179ab4b20ee6e4fcf309dc3f1666",
+        "blocks.index": "424706c7daf6defedcf1d5f13a1c212edd3af2934fbf5c3fbcf8f161ca199993"
+      },
+      "native_smoke_test": true
+    },
+    "fio": {
+      "log_bytes": 1924749,
+      "index_bytes": 80000,
+      "first_block": 407169178,
+      "retained_last_block": 407179176,
+      "retained_entries": 9999,
+      "saved_log_bytes": 191,
+      "saved_index_bytes": 8,
+      "inspection_reused": true,
+      "source_unchanged": true,
+      "restored_sha256": {
+        "blocks.log": "bafee22e617b997022108bc5393e166d6f80c06ce5f7be3852b943b61b9958ef",
+        "blocks.index": "0da27abaf2ff1bbad950cf7d76f86eab2ecd78ca4d86a179bb0a14a70ff7352e"
+      },
+      "cache_note": "10000 captured records, final trailer cut by one byte; sequential single-run phases, no cache eviction.",
+      "stages": {
+        "ordinary_trim": {
+          "resources": {
+            "seconds": 0.16,
+            "user_seconds": 0.01,
+            "system_seconds": 0.05,
+            "max_rss_kib": 5076,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 56
+          },
+          "phases": [
+            "recover-tail [inspect trim input (1/2)]",
+            "recover-tail [verify trimmed pair (2/2)]"
+          ]
+        },
+        "ordinary_rollback": {
+          "resources": {
+            "seconds": 0.07,
+            "user_seconds": 0.01,
+            "system_seconds": 0.02,
+            "max_rss_kib": 4684,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 48
+          },
+          "phases": []
+        },
+        "save_inspection": {
+          "resources": {
+            "seconds": 0.06,
+            "user_seconds": 0.02,
+            "system_seconds": 0.01,
+            "max_rss_kib": 4996,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 32
+          },
+          "phases": [
+            "recover-tail [inspect original (1/1)]"
+          ]
+        },
+        "checkpoint_trim": {
+          "resources": {
+            "seconds": 0.15,
+            "user_seconds": 0.01,
+            "system_seconds": 0.05,
+            "max_rss_kib": 5080,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 72
+          },
+          "phases": [
+            "recover-tail [verify trimmed pair (1/1; inspection reused)]"
+          ]
+        },
+        "checkpoint_rollback": {
+          "resources": {
+            "seconds": 0.08,
+            "user_seconds": 0.0,
+            "system_seconds": 0.04,
+            "max_rss_kib": 4688,
+            "filesystem_inputs": 0,
+            "filesystem_outputs": 48
+          },
+          "phases": []
+        }
+      },
+      "trimmed_prefix_sha256": {
+        "blocks.log": "d0e21585e1e6b9ebd33d6786be5a25e5f21c600cbb3adf11d1933482f7c267ee",
+        "blocks.index": "941cdeb3314cd8f36a8147afcb010343b9a33a32c88023bc4faf39e9d3b14c85"
+      },
+      "native_smoke_test": false
+    }
+  },
+  "unprivileged_operator": {
+    "uid": 1000,
+    "results": [
+      {
+        "stage": "inspect",
+        "ok": true,
+        "restricted_proc_warning": true
+      },
+      {
+        "stage": "trim",
+        "ok": true,
+        "restricted_proc_warning": true
+      },
+      {
+        "stage": "rollback",
+        "ok": true,
+        "restricted_proc_warning": true
+      }
+    ]
+  },
+  "source_sha256_lf": {
+    "crates/log-repair/src/main.rs": "daad9d2e2dca199dfa64dc04fb149849241e02089d59d79354206710dfd3ccc5",
+    "crates/log-repair/src/tail.rs": "bf02271f23c6c7cc75c8ce965907b521bacdf82682eee0252350b926f50c3bc6",
+    "crates/log-repair/src/tail/trim.rs": "d279a6a1c07dba4ab93f43ae2b42417edc3d7eaae6190b36c50e7c8cfd20cbc9"
+  }
+}
