@@ -43,6 +43,10 @@ use hyperion_ship::trace::{self, Tx};
     about = "On-demand historical archive: decode action act.data and contract_row values from frozen state-history logs over HTTP."
 )]
 struct Args {
+    /// Protocol selection is checked before inputs, outputs or workers are opened.
+    #[arg(long, default_value = "antelope")]
+    protocol: hyperion_ship::provider::ProtocolProvider,
+
     /// nodeos state-history dir (must contain trace_history.{log,index}; chain_state_history.{log,index} enables /deltas).
     #[arg(long)]
     from_disk: String,
@@ -1493,6 +1497,8 @@ fn open_log_info(dir: &str, stem: &str) -> Result<LogInfo> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    args.protocol
+        .require_antelope("legacy action/delta archive path")?;
 
     eprintln!("[archive-server] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);

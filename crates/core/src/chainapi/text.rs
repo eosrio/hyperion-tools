@@ -15,10 +15,6 @@ use ripemd::{Digest, Ripemd160};
 
 use super::block::{PublicKey, Signature};
 
-/// The block timestamp epoch, 2000-01-01T00:00:00 UTC, in Unix milliseconds.
-const BLOCK_TIMESTAMP_EPOCH_MS: u64 = 946_684_800_000;
-const BLOCK_INTERVAL_MS: u64 = 500;
-
 /// An account or action name.
 pub fn name(value: u64) -> String {
     const CHARMAP: &[u8; 32] = b".12345abcdefghijklmnopqrstuvwxyz";
@@ -35,17 +31,16 @@ pub fn name(value: u64) -> String {
 
 /// A `block_timestamp_type` slot as nodeos writes it.
 pub fn block_timestamp(slot: u32) -> String {
-    let ms = BLOCK_TIMESTAMP_EPOCH_MS + u64::from(slot) * BLOCK_INTERVAL_MS;
-    let secs = ms / 1000;
-    let (days, day_secs) = (secs / 86_400, secs % 86_400);
-    let (year, month, day) = civil_from_days(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}",
-        day_secs / 3600,
-        day_secs / 60 % 60,
-        day_secs % 60,
-        ms % 1000
-    )
+    crate::provider::TimestampProfile::ANTELOPE.slot_to_iso(slot)
+}
+
+/// Protocol-aware timestamp rendering; other Wire block-layout changes still need
+/// the selected provider's block decoder, rather than the Antelope fast parser.
+pub fn block_timestamp_with_provider(
+    slot: u32,
+    provider: &crate::provider::ProtocolProvider,
+) -> anyhow::Result<String> {
+    Ok(provider.timestamp_profile()?.slot_to_iso(slot))
 }
 
 /// A public key as nodeos writes it.
@@ -109,21 +104,6 @@ fn bytes_into(out: &mut Vec<u8>, data: &[u8]) {
         out.push(b | 0x80);
     }
     out.extend_from_slice(data);
-}
-
-/// Year, month and day of `days` since 1970-01-01 (Howard Hinnant's `civil_from_days`, for
-/// non-negative days).
-fn civil_from_days(days: u64) -> (u64, u64, u64) {
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + u64::from(month <= 2);
-    (year, month, day)
 }
 
 #[cfg(test)]

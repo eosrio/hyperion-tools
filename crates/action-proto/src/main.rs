@@ -42,6 +42,10 @@ use hyperion_ship::trace;
 #[derive(Parser, Debug)]
 #[command(about = "Experimental: decode action_traces directly from the trace_history log.")]
 struct Args {
+    /// Protocol selection is checked before inputs, outputs or workers are opened.
+    #[arg(long, default_value = "antelope")]
+    protocol: hyperion_ship::provider::ProtocolProvider,
+
     /// nodeos state-history dir (trace_history.{log,index})
     #[arg(long)]
     from_disk: String,
@@ -1152,6 +1156,7 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    args.protocol.require_antelope("legacy action fast path")?;
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
     eprintln!("[action-proto] {} contracts in ABI index", abi_index.len());

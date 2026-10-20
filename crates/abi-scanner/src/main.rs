@@ -9,11 +9,15 @@ use std::io::{BufWriter, Write};
 use anyhow::{Context, Result};
 use clap::Parser;
 
+use hyperion_ship::provider::ProtocolProvider;
 use hyperion_ship::{disk, ship};
 
 #[derive(Parser, Debug, Clone)]
 #[command(about = "Scan a SHiP block range for contract ABI versions (setabi), deltas-only.")]
 struct Args {
+    /// Select semantics before reading input. Wire profiles are explicit engineering pins.
+    #[arg(long, default_value = "antelope")]
+    protocol: ProtocolProvider,
     /// SHiP websocket endpoint (a fleet-router or a nodeos SHiP node). Omit when using --from-disk.
     #[arg(long)]
     ship: Option<String>,
@@ -102,6 +106,15 @@ fn open_resumable_out(path: &str) -> Result<File> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    args.protocol.validate()?;
+    anyhow::ensure!(
+        args.start > 0 && args.start <= args.end && args.end < u32::MAX,
+        "invalid block range"
+    );
+    if args.from_disk.is_some() {
+        args.protocol
+            .require_antelope("abi-scanner direct-from-disk/account-first scan")?;
+    }
     // Resume when the checkpoint already exists: append to the prior output, don't truncate it.
     let resuming = args
         .checkpoint
@@ -140,7 +153,7 @@ async fn main() -> Result<()> {
         .ship
         .clone()
         .context("--ship is required (or use --from-disk)")?;
-    ship::run_ship(
+    ship::run_ship_with_provider(
         ship,
         args.start,
         args.end,
@@ -148,6 +161,7 @@ async fn main() -> Result<()> {
         args.connections,
         args.irreversible_only,
         out,
+        args.protocol,
     )
     .await
 }

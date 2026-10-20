@@ -27,6 +27,9 @@ use crate::store::{BlocksMode, StoreConfig, VerifyIds};
         or proxy."
 )]
 pub struct Cli {
+    /// Protocol semantics for fixed-layout archive readers. Wire is explicitly refused.
+    #[arg(long, global = true, default_value = "antelope")]
+    pub protocol: hyperion_ship::provider::ProtocolProvider,
     #[command(subcommand)]
     pub command: Command,
 }

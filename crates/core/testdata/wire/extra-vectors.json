@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "producer": {
+    "kind": "independent-source-derived-python",
+    "sourceRevision": "6508c9e8f4044df8d5acb082a7af3be6a80cd9a0",
+    "nodeExecution": false,
+    "contractDeployment": false
+  },
+  "vectors": [
+    {
+      "id": "source-primary-kv-0",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "contract_row_kv",
+      "hex": "000000000000eab0c70000000000000000000040000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f08ffffffffffffffff",
+      "expected": [
+        "contract_row_kv_v0",
+        {
+          "code": "sysio",
+          "payer": "",
+          "table_id": 0,
+          "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+          "value": "ffffffffffffffff"
+        }
+      ],
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-secondary-kv-0",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "contract_index_kv",
+      "hex": "000000000000eab0c700000000000000000000403f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a0908070605040302010040000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "expected": [
+        "contract_index_kv_v0",
+        {
+          "code": "sysio",
+          "payer": "",
+          "table_id": 0,
+          "sec_key": "3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100",
+          "pri_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        }
+      ],
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-primary-kv-65535",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "contract_row_kv",
+      "hex": "000000000000eab0c70000000000000000ffff40000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f08ffffffffffffffff",
+      "expected": [
+        "contract_row_kv_v0",
+        {
+          "code": "sysio",
+          "payer": "",
+          "table_id": 65535,
+          "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+          "value": "ffffffffffffffff"
+        }
+      ],
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-secondary-kv-65535",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "contract_index_kv",
+      "hex": "000000000000eab0c70000000000000000ffff403f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a0908070605040302010040000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "expected": [
+        "contract_index_kv_v0",
+        {
+          "code": "sysio",
+          "payer": "",
+          "table_id": 65535,
+          "sec_key": "3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a292827262524232221201f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100",
+          "pri_key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        }
+      ],
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-6508-chain-row-enum-2",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "chain_row",
+      "hex": "0000000042150000020000000100000008457468657265756d22736f757263652d6465726976656420656e67696e656572696e6720666978747572650001007c291f94010000017c291f940100000630783132333406307835363738",
+      "expected": {
+        "code": "ETH",
+        "kind": "CHAIN_KIND_EVM",
+        "external_chain_id": 1,
+        "name": "Ethereum",
+        "description": "source-derived engineering fixture",
+        "is_depot": 0,
+        "active": 1,
+        "registered_at_ms": "1735689600000",
+        "activated_at_ms": "1735689600001",
+        "outpost": {
+          "opp_addr": "0x1234",
+          "opp_inbound_addr": "0x5678"
+        }
+      },
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-6508-chain-row-enum-99",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "artifacts/6508c9e8/sysio.chains.abi",
+      "typeName": "chain_row",
+      "hex": "0000000042150000630000000100000008457468657265756d22736f757263652d6465726976656420656e67696e656572696e6720666978747572650001007c291f94010000017c291f940100000630783132333406307835363738",
+      "expected": {
+        "code": "ETH",
+        "kind": 99,
+        "external_chain_id": 1,
+        "name": "Ethereum",
+        "description": "source-derived engineering fixture",
+        "is_depot": 0,
+        "active": 1,
+        "registered_at_ms": "1735689600000",
+        "activated_at_ms": "1735689600001",
+        "outpost": {
+          "opp_addr": "0x1234",
+          "opp_inbound_addr": "0x5678"
+        }
+      },
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-negative-time-1",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "time_point",
+      "hex": "ffffffffffffffff",
+      "expected": "-000000.000001",
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-negative-time-1000000",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "time_point",
+      "hex": "c0bdf0ffffffffff",
+      "expected": "-000001",
+      "oracle": "source-derived-independent-python"
+    },
+    {
+      "id": "source-negative-time-3600000000",
+      "operation": "decodeValue",
+      "profileId": "wire-sysio-6508c9e8-engineering-v1",
+      "abiPath": "ship.abi.json",
+      "typeName": "time_point",
+      "hex": "005c6c29ffffffff",
+      "expected": "-010000",
+      "oracle": "source-derived-independent-python"
+    }
+  ]
+}

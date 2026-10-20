@@ -1,0 +1,39 @@
+name: Wire provider integration
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  source-pinned-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-wire-plugin
+          ref: 5e94b871691f4919f060dd0a6a603f2d40e2fa36
+          path: out/wire-provider-oracle
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build the exact Node oracle component
+        working-directory: out/wire-provider-oracle
+        run: |
+          npm ci
+          npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Build affected executables with locked dependencies
+        run: cargo build --locked -p protocol-replay -p abi-scanner -p action-proto -p delta-proto -p archive-server -p snapshot-load -p antelope-ship-archive
+      - name: Compare complete Node and Rust provider results
+        run: |
+          node scripts/generate-wire-receipt-fixture.mjs out/wire-provider-oracle --check
+          node scripts/check-wire-provider.mjs out/wire-provider-oracle
+      - name: Refuse incompatible paths before output or checkpoint writes
+        run: node scripts/check-wire-preflight.mjs
+      - name: Test provider, scanner and retained Antelope behavior
+        run: cargo test --locked -p hyperion-ship --features ship,archive,chain-api,testkit -p abi-scanner -p antelope-ship-archive

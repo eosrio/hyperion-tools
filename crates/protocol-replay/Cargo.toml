@@ -1,0 +1,15 @@
+[package]
+name = "protocol-replay"
+description = "Source-pinned protocol provider replay for raw SHiP frames, ABI values and full KV records"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hyperion-ship = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+hex = { workspace = true }

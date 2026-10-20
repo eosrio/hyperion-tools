@@ -40,6 +40,9 @@ use reader::{
     about = "decode contract-table state (voters, token balances) directly from a portable snapshot .bin[.zst]"
 )]
 struct Args {
+    /// Select input protocol before opening snapshots, output files or database writers.
+    #[arg(long, default_value = "antelope")]
+    protocol: hyperion_ship::provider::ProtocolProvider,
     /// portable snapshot `.bin` or `.bin.zst` (local file; seek-from-file path)
     #[arg(long)]
     snapshot: Option<String>,
@@ -1175,6 +1178,8 @@ fn run_url_path(args: &Args) -> Result<()> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    args.protocol
+        .require_antelope("snapshot-load Antelope portable snapshot layout")?;
 
     // Dispatch: streaming HTTP-direct path (additive) vs the seek-from-file path (default reference).
     match (&args.snapshot_url, &args.snapshot) {

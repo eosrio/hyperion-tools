@@ -12,6 +12,13 @@ use tracing_subscriber::EnvFilter;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Err(error) = cli
+        .protocol
+        .require_antelope("ship-archive fixed-layout reader/server")
+    {
+        eprintln!("{error:#}");
+        return ExitCode::FAILURE;
+    }
     let format = match &cli.command {
         Command::Serve(args) => args.log_format,
         _ => LogFormat::Text,

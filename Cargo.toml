@@ -40,6 +40,9 @@ ureq = { version = "2.10", default-features = false, features = ["tls"] }
 tar = "0.4"
 # Internal shared library.
 hyperion-ship = { path = "crates/core" }
+# Internal coordinated Wire source artifact. Development prerequisite: Wire PR #5.
+# This exact revision is an engineering integration pin, not a selected testnet release.
+hyperion-wire-protocol = { git = "https://github.com/eosrio/hyperion-wire-plugin.git", rev = "5e94b871691f4919f060dd0a6a603f2d40e2fa36" }
 
 [profile.release]
 lto = true

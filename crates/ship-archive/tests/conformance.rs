@@ -62,6 +62,22 @@ async fn t01_the_abi_is_the_first_message_one_text_frame() {
     cfg.abi = Some(path);
     let err = Store::open(&cfg).err().expect("a non-JSON ABI is refused");
     assert!(format!("{err:#}").contains("not a JSON ABI"), "{err:#}");
+
+    let path = fx.dir("wire.abi.json");
+    std::fs::write(
+        &path,
+        include_str!("../../core/testdata/wire/ship.abi.json"),
+    )
+    .unwrap();
+    let mut cfg = fx.store();
+    cfg.abi = Some(path);
+    let err = Store::open(&cfg)
+        .err()
+        .expect("a Wire ABI override cannot change archive binary layouts");
+    assert!(
+        format!("{err:#}").contains("unsupported_feature"),
+        "{err:#}"
+    );
 }
 
 // --- T2: status ---------------------------------------------------------------------------
