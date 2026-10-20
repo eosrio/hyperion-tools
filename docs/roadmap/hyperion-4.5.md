@@ -88,8 +88,9 @@ instead of waiting for a speculative complete SDK.
   filters, sorting, counts and pagination. One successful endpoint or snapshot import is not parity.
 - **Wire:** select exact node/contracts/genesis/build inputs, implement the protocol provider before
   affected decoding, and qualify both required language paths, live/bulk input, key preservation
-  and recovery. Investigation revisions are not accepted launch pins. The new testnet must be
-  launched with Wire's contracts before final live qualification.
+  and recovery. Investigation revisions are not accepted launch pins. The new testnet's synced
+  SHiP node is available on Hyperion-3; final live qualification still requires the selected
+  contract/build/deployment receipts and the integrated Node/Rust recovery exercises.
 - **WormDB:** assess required capabilities early and file demonstrated engine gaps in WormDB.
   Qualify the unchanged definitions and plugin queries against the same applicable conformance,
   recovery and parity requirements. If the effort is too high, record an explicit MongoDB-only
@@ -99,6 +100,8 @@ instead of waiting for a speculative complete SDK.
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
   query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
   document the intentional 4.5 response-type change without requiring a full history reindex.
+  [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231) explicitly owns
+  stream-client filter, reconnect/recovery and cancellation compatibility; it remains a release gate.
 - **Explorer modernization and compatibility:** upgrade the existing frontend and qualify its
   routes, SSR/proxy deployment, live streaming and browser behavior against the 4.5 contracts.
   Preserve exact sequence identities and distinguish unavailable projections from empty results.
@@ -228,9 +231,14 @@ subsequent reader-to-ack profiles; API #197 transport work is deferred by the op
 ## Publication and evidence
 
 The [Wire implementation delivery plan](hyperion-4.5-wire-implementation.md) records the
-2026-10-19 implementation frontier, owning issues, source-derived fixture profile and remaining
-launch decisions. Wire #1 begins executable Node/Rust primitives; codec completeness, provider
-activation, Rust consumer integration and new-testnet recovery remain explicit later gates.
+2026-10-20 native-genesis candidates, actual block-1–4 source evidence, owning issues and remaining
+launch decisions. Reviewed [SDK #10](https://github.com/eosrio/hyperion-sdk/pull/10),
+[Wire #14](https://github.com/eosrio/hyperion-wire-plugin/pull/14) and
+[History API #241](https://github.com/eosrio/hyperion-history-api/pull/241) supply the portable
+contract, source-semantic verifier and durable host admission. Their actual-source regression uses
+in-memory broker/storage seams. Production projection integration under
+[History API #191](https://github.com/eosrio/hyperion-history-api/issues/191), required Rust paths,
+full workers/APIs and current-testnet recovery remain explicit gates; M1 and M3 are not complete.
 
 The operator approved the repository names and first batch on 2026-10-17. The architecture baseline,
 release issue and initial component issues are published with real cross-repository references

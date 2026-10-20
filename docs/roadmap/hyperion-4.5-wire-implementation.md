@@ -1,6 +1,6 @@
 # Wire implementation delivery plan
 
-Status: Active implementation frontier, 2026-10-19. This plan applies ADRs 0005 and 0030–0032;
+Status: Active implementation frontier, 2026-10-20. This plan applies ADRs 0005 and 0030–0032;
 it does not change the mandatory working-Wire release gate or select final testnet launch pins.
 Preparation and qualification remain [tools #22](https://github.com/eosrio/hyperion-tools/issues/22),
 coordinated through [release #24](https://github.com/eosrio/hyperion-tools/issues/24).
@@ -16,6 +16,40 @@ real block 1 input. The existing codec consumes all nine physical streams and 23
 source-specific count discrepancy, without altering source bytes. Complete initialization and
 canonical ABI coverage, contract/CDT/artifact pins, integrated Node/Rust paths and recovery
 acceptance remain open. The earlier isolated `7dede884` engineering-chain evidence below is kept separate.
+
+### Reviewed native-genesis candidates — 2026-10-20
+
+[SDK PR #10](https://github.com/eosrio/hyperion-sdk/pull/10) adds the portable optional native-genesis
+verification contract at `38dfdb08d3145ad7fdff1a004e9ae94a43c1fe83`.
+[Wire PR #14](https://github.com/eosrio/hyperion-wire-plugin/pull/14) verifies the original 6508
+initialization at `e8c7162437a0d0f4e2211979b959f2d002bf3552`.
+[History API PR #241](https://github.com/eosrio/hyperion-history-api/pull/241), at
+`2f2124e2bf6f24eab262c2283a33beb5f3341474`, re-verifies retained source with the selected provider,
+then publishes durable ABI coverage and an issued current proof for the actual empty block-1
+application frame. These are reviewed implementation candidates, not merged or release-qualified pins.
+
+The original absent trace section and null SHiP predecessor remain unchanged. The verified decoded
+header's zero predecessor supplies checkpoint 0 → actual block 1 continuity. Native ABI states retain
+physical ordinals and both present-empty barriers. Ordinary later blocks still require complete source
+input. Reader range eligibility, null-parent light-block parsing and interrupted certificate publication
+are covered by host regressions. The public action-coverage gate remains disabled.
+
+A bounded read-only capture of actual blocks 2–4 from the same node/chain/schema extends the frozen
+block-1 source. Original receipt SHA-256 is
+`38d75b7a1ba28e3abd77512854f963e7723631d6837df73bd7aeff656cc8a450` (226,988 bytes); both unchanged
+receipts are retained in the HAPI fixture. Each later header has zero transactions but one real trace
+action. Native Node 22.23.3 and 24.19.0 pass the production parser/coordinator/proof/projection fixture
+through actual block 4, including native ABI action bindings and skipped-block rejection. The full host
+suite passes 881 tests. SDK and Wire local checks, packed consumers and independent Standards/Spec reviews
+also pass. Original source capture involved no remote service/configuration writes.
+
+This regression uses in-memory broker/storage seams. It does not complete
+[production projection integration #191](https://github.com/eosrio/hyperion-history-api/issues/191),
+required Rust genesis/consumer paths under [tools #41](https://github.com/eosrio/hyperion-tools/issues/41),
+MongoDB/full-worker/API acceptance, contract build/deployment pins, or fork/reconnect qualification.
+Complete the actual-source worker/MongoDB path next while retaining existing Elasticsearch history.
+The separate [stream-client gate #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+still requires filter, reconnect/recovery and cancellation compatibility.
 
 ### Earlier implementation frontier — 2026-10-19
 
