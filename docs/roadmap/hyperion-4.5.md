@@ -19,6 +19,7 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 |---|---|---|
 | eosrio/hyperion-tools | Release plan, Rust ingestion/codec and snapshot tooling, reusable processing/recovery components where appropriate, replay and cross-component qualification. | Existing; retain as the main coordination home. |
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
+| eosrio/hyperion-explorer | Companion explorer frontend, dependency/toolchain upgrades, browser UX, and client compatibility with the 4.5 API and stream contracts. | Existing; modernization started locally; publish implementation and qualify against pinned 4.5 components. |
 | eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
 | eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Created; scaffold CI passed. |
@@ -55,7 +56,7 @@ implementation slices as their immediate prerequisites become clear.
 | M1: First portable MongoDB path | One allowed contract is indexed through the shared interfaces using existing workers and queried through Hyperion, with backend-neutral definitions/queries, durable retryable processing and a real MongoDB fixture. | Minimum SDK and adapter contracts; no full SDK freeze required. |
 | M2: Recoverable dynamic projections | The first path survives replay, restart and fork replacement. A declarative mapping changes without restart, with ABI-bound revisions, initialization coverage and validated activation. Contract failures remain isolated. | M1; extend existing reload/sync mechanisms. |
 | M3: Required domain and protocol support | AtomicAssets plus AtomicMarket pass the pinned parity suite. The Wire package works across applicable Node/Rust paths and passes the selected new testnet profile. | SDK capabilities grow through real slices; Wire profile and parity inventory start in parallel with M1. |
-| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises and operator workflows pass together for the supported matrix. Backend qualification decision and known limits are published. | All mandatory outcomes; qualified MongoDB is sufficient if WormDB is deferred. |
+| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises, explorer compatibility and operator workflows pass together for the supported matrix. Backend qualification decision and known limits are published. | All mandatory outcomes; qualified MongoDB is sufficient if WormDB is deferred. |
 
 Existing history compatibility and reliability checks run from the beginning. They are not
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
@@ -98,6 +99,11 @@ instead of waiting for a speculative complete SDK.
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
   query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
   document the intentional 4.5 response-type change without requiring a full history reindex.
+- **Explorer modernization and compatibility:** upgrade the existing frontend and qualify its
+  routes, SSR/proxy deployment, live streaming and browser behavior against the 4.5 contracts.
+  Preserve exact sequence identities and distinguish unavailable projections from empty results.
+  Frontend work starts independently; the [explorer delivery slices](#explorer-delivery-slices)
+  join backend integration as contracts become available and complete release acceptance in M4.
 - **Distribution and operator lifecycle:** independent SDK/plugin/adapter releases, tested versions
   pinned for Hyperion, bundled first-party plugins disabled by default, catalog compatibility checks,
   one-package Wire installation and controlled executable updates. Qualify backend cutover after
@@ -106,6 +112,40 @@ instead of waiting for a speculative complete SDK.
 Do not schedule transport replacement, an untrusted-code sandbox, a wholesale worker-pool rewrite
 or zero-downtime backend cutover as prerequisites for 4.5. Revisit only with a concrete requirement
 or measurement and a separate scope decision.
+
+## Explorer delivery slices
+
+Implementation belongs in [hyperion-explorer](https://github.com/eosrio/hyperion-explorer), with
+scoped issues and PRs linked to [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24).
+This extends the roadmap without renumbering the published initial issue batch.
+
+1. **Frontend foundation (starts alongside M0):** upgrade Angular/SSR, Material, chart/icon/animation
+   libraries and other dependencies to mutually supported versions. Preserve existing explorer
+   workflows and deployment themes while improving responsive layout, keyboard access, contrast,
+   loading/error/empty states and bundle loading. Establish reproducible installs, unit/browser
+   tests and production builds. Document the frontend's framework-specific TypeScript and Node
+   constraints; the backend SDK/toolchain policy does not override Angular compiler compatibility.
+2. **4.5 client integration (alongside M1-M3):** use the selected deployment for all API, oracle and
+   stream requests. Preserve canonical decimal-string sequence identifiers through rendering,
+   filters, ordering, pagination and streaming, including values above JavaScript's safe integer
+   range, under [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md) and
+   [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219). Handle scoped
+   retryable unavailability and explicit recovery without presenting failed requests as empty
+   results or disabling unrelated history. Consume completeness/last-valid-state headers when
+   their shared contract is defined; history indexing progress does not establish state readiness.
+3. **Release acceptance (M4):** test the built explorer behind the real `/explorer` API proxy with
+   pinned API and stream-client artifacts. Cover accounts, blocks, transactions, public keys,
+   contract tables, filters/pagination, and enabled top-holder/oracle features. Exercise live
+   streaming reconnect and finality/fork recovery against representative supported deployments,
+   including each offered state backend where the workflow depends on state. Qualify SSR/hydration,
+   host configuration, deployment themes and the supported desktop/mobile browser matrix; publish
+   the tested versions, upgrade instructions and remaining limits.
+
+The 2026-10-20 local checkpoint has an initial Angular 22/TypeScript 6/Vitest 5 upgrade and frontend
+improvements, with passing production build/typecheck, 49 unit tests and 12 desktop/mobile Chromium
+fixture scenarios. Those changes are local and uncommitted at this checkpoint; published CI,
+lossless sequence migration, live 4.5 integration and broader browser/backend qualification remain
+pending. Fixture success does not complete explorer release acceptance.
 
 ## First issue batch
 
