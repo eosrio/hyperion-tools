@@ -23,7 +23,8 @@
       "stream-validation-release": "645bb740dca88d9ebae0256d05d1e5b318ba06dcc387917f176f2ac836e2f4ca",
       "stream-validation-allocation": "084ec90bbc752940146bc1745022b9486923c793df8d3289c49dbb1b21c3bd05"
     },
-    "candidate1": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5"
+    "candidate1": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+    "candidate2": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
   },
   "corpus": [
     {
@@ -1441,10 +1442,1185 @@
     "note": "Fresh history matched all 1998 traces and 1997 subsequent deltas; initial full-state payload is not equivalent to original delta."
   },
   "pending": [
-    "EOS 128 GiB ZFS independent-corpus snapshot/benchmarks",
-    "Full-size block-log trim/resume/rollback/salvage/restore pilot",
-    "Remaining full SHIP inspection and chain-state baselines",
-    "Final-candidate full SHIP repeats",
-    "Physical storage/VM power cuts and broader release matrix; see QUALIFICATION.md"
-  ]
+    "Final-candidate full trace inspection and verification pilot is running; repeated final-artifact commands and chain-state baselines remain",
+    "Ultra 64 GiB independent-corpus repeated scan/verify; recovery explicitly refuses its different genesis layout",
+    "Healthy ZFS and controlled-cache qualification; EOS 128 GiB copy stopped after a permanent source-file pool error",
+    "Repeated full-size recovery operations; existing five-operation measurement is a single pilot",
+    "Broader media errors, remaining journal/write/fsync/short-write boundaries and physical storage/VM power cuts; see QUALIFICATION.md"
+  ],
+  "candidate2_build": {
+    "base_revision": "2b4ebbcc8e9e265e995d1c46670fc79c5257cae2",
+    "parent_revision": "fb057b4f477119871f6d4fe74ac7105046ce2c8f",
+    "binary_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+    "target": "x86_64-unknown-linux-musl",
+    "features": [],
+    "build_host": "Windows",
+    "build_command": "cargo zigbuild --offline --locked --release --target x86_64-unknown-linux-musl -p antelope-log-repair",
+    "toolchains": {
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: x86_64-pc-windows-msvc\nrelease: 1.99.0\nLLVM version: 23.1.1",
+      "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+      "zig": "0.17.0"
+    },
+    "cargo_zigbuild_sha256": "4b310a7e121abaf229a206d68566834088a38a767ac512a112dd9a6fc9cf55fa",
+    "source_files": {
+      "crates/log-repair/src/allocation_metrics.rs": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+      "crates/log-repair/src/codec.rs": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+      "crates/log-repair/src/format.rs": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+      "crates/log-repair/src/framing.rs": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+      "crates/log-repair/src/io.rs": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+      "crates/log-repair/src/main.rs": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+      "crates/log-repair/src/repair.rs": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+      "crates/log-repair/src/replay.rs": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+      "crates/log-repair/src/report.rs": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+      "crates/log-repair/src/ship.rs": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+      "crates/log-repair/src/tail/trim.rs": "c3db705db6c34018b3eab1424bf3497ae5075f66217614f7cf212618b5a9fd1e",
+      "crates/log-repair/src/tail.rs": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+      "crates/log-repair/src/target.rs": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+      "crates/log-repair/src/tests.rs": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+      "crates/log-repair/src/verify.rs": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+      "Cargo.toml": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+      "Cargo.lock": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+      "crates/log-repair/Cargo.toml": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f"
+    }
+  },
+  "candidate2_committed_sources": {
+    "revision": "63f933f25cf57631ba50f2d86bed1ee498addb4e",
+    "binary_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+    "files": {
+      "crates/log-repair/src/allocation_metrics.rs": {
+        "compiled_source_sha256": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+        "committed_bytes_sha256": "ff3402d73e7cf89c330ebb54d7eee01abc609facdb9ba8458904a33e83dbe901",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/codec.rs": {
+        "compiled_source_sha256": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+        "committed_bytes_sha256": "f70792a09f3f5e3e7c4337de3f0e34662f6c43c8c15c2bd986f5c2110c66747d",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/format.rs": {
+        "compiled_source_sha256": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+        "committed_bytes_sha256": "c91999ad04f17986be223de9442c51ea1677430f57de4eefd25bc560900da27d",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/framing.rs": {
+        "compiled_source_sha256": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+        "committed_bytes_sha256": "148e341c3f9fbda3123d40c2bf03407f6e1e318cc5c51c86af7567200c7d0580",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/io.rs": {
+        "compiled_source_sha256": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+        "committed_bytes_sha256": "e875bd8b21f2741b290e0687089f7859a751e91499f843b1ad5e608f9dd5049e",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/main.rs": {
+        "compiled_source_sha256": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+        "committed_bytes_sha256": "d98b16daf4c02a33823b3c7bc02ac5a545aa935a4c0c0bb8654c98ab56c41591",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/repair.rs": {
+        "compiled_source_sha256": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+        "committed_bytes_sha256": "af0444cb4698e61c0da26ce11b65ca2a88c9a7a5396d12051b63db835bb06e77",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/replay.rs": {
+        "compiled_source_sha256": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+        "committed_bytes_sha256": "6fd28032d06be05a762b563198138cbc51a3e0ef7c1a643cb489bf0e75fdd789",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/report.rs": {
+        "compiled_source_sha256": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+        "committed_bytes_sha256": "ba8f6e998cd5ea187c0f63c6ccbc3ba9e39fcada17fc161c42b17f89675b7d53",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/ship.rs": {
+        "compiled_source_sha256": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+        "committed_bytes_sha256": "c5198b079a517a0e8ed598df9ac16b6aaa99a6e62adbb42b20d4f454c4f2bc19",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tail/trim.rs": {
+        "compiled_source_sha256": "c3db705db6c34018b3eab1424bf3497ae5075f66217614f7cf212618b5a9fd1e",
+        "committed_bytes_sha256": "303e27fb4b4928bbb5790cf2f8882de8481001b0e5203829253ae9e78847bc6c",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tail.rs": {
+        "compiled_source_sha256": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+        "committed_bytes_sha256": "3c253446042a70c94c7fac48cd8a32412d2e5df7c8776d697e4978dcaeacf4fa",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/target.rs": {
+        "compiled_source_sha256": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+        "committed_bytes_sha256": "ff5297218453ab36bc165904936cd2fda62e16ca688716fee92f5aedc81151a7",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/tests.rs": {
+        "compiled_source_sha256": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+        "committed_bytes_sha256": "f24cd8da8cafd1c1c495953ff9ffa5dd2b3cf1fc4ef382b89310155c4bf7d7d4",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/src/verify.rs": {
+        "compiled_source_sha256": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+        "committed_bytes_sha256": "061bcca0c9782022e1db6887fc5f7c2e7a17617e6459f95ffdfdd5314b00648e",
+        "equal_after_crlf_normalization": true
+      },
+      "Cargo.toml": {
+        "compiled_source_sha256": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+        "committed_bytes_sha256": "cd2c09133f5128994bab72c38d5c63e2e322ccacf078c41a372c248991bb8cb4",
+        "equal_after_crlf_normalization": true
+      },
+      "Cargo.lock": {
+        "compiled_source_sha256": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+        "committed_bytes_sha256": "1f8fef781fea50c2ac2d05d711377c7373db1435d576e6899486b4d82f602236",
+        "equal_after_crlf_normalization": true
+      },
+      "crates/log-repair/Cargo.toml": {
+        "compiled_source_sha256": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f",
+        "committed_bytes_sha256": "72c1bba91d7da302208e9945490b97a2643508119a55896d8f05f742df74635f",
+        "equal_after_crlf_normalization": true
+      }
+    }
+  },
+  "candidate2_validation": {
+    "linux_rust_tests": 92,
+    "windows_rust_tests": 67,
+    "python_tests": 20,
+    "windows_python_skipped": 17,
+    "libre_damage": {
+      "ok": true,
+      "cases": 174,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    },
+    "eos_damage": {
+      "ok": true,
+      "cases": 26,
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381"
+    },
+    "eos_fixture_sha256": "4b740d07312cdbae971e4305f0267c68caf0eb86832e6137c1c87b177e87e46c",
+    "interruptions": {
+      "ok": true,
+      "results": [
+        {
+          "case": "kill-truncate-1-resume",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-1-rollback",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-2-resume",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "kill-truncate-2-rollback",
+          "ok": true,
+          "actual_process_kill": true
+        },
+        {
+          "case": "enospc-before-intent",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-truncate-1",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-truncate-2",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-rollback-write-1",
+          "ok": true,
+          "actual_process_kill": false
+        },
+        {
+          "case": "enospc-rollback-write-2",
+          "ok": true,
+          "actual_process_kill": false
+        }
+      ],
+      "tool_sha256": "ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381",
+      "strace_sha256": "38a5c75cb29dd85ddd7780d54f5bf595554d7a1b5c42524b23065f5dc4c4b01d",
+      "strace_version": "strace -- version 5.16\nCopyright (c) 1991-2022 The strace developers <https://strace.io>.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nOptional features enabled: stack-trace=libunwind stack-demangle m32-mpers mx32-mpers\n",
+      "host": {
+        "system": "Linux",
+        "node": "x670e-7950x",
+        "release": "6.1.10-060110-generic",
+        "version": "#202302060840 SMP PREEMPT_DYNAMIC Mon Feb  6 09:32:56 UTC 2023",
+        "machine": "x86_64",
+        "processor": "x86_64"
+      },
+      "fixture_sha256": "7e7e9581e53288815512605c6ea4164337d521e0d6a28719258dea341f2c92b9",
+      "original_log_sha256": "4612ecbb6c3e56d83d712aa7ea8374442119b1bbdaca561a9063bad58d55ea5e",
+      "original_index_sha256": "062cb2a12bc9e6a89eeb113f62615fa27b3aa5e4a360ed2b825b1d1b49ba8452",
+      "mutation": "Remove four bytes from the real final entry's position trailer.",
+      "scope": "Process SIGKILL and injected syscall errors; no storage power-cut claim.",
+      "cases": [
+        "kill-truncate-1-resume",
+        "kill-truncate-1-rollback",
+        "kill-truncate-2-resume",
+        "kill-truncate-2-rollback",
+        "enospc-before-intent",
+        "enospc-truncate-1",
+        "enospc-truncate-2",
+        "enospc-rollback-write-1",
+        "enospc-rollback-write-2"
+      ]
+    },
+    "retirement_guard": "Rehash private output before deletion, even when observed metadata matches. Preparation and cleanup are outside timed repair operations."
+  },
+  "full_block_mutations": {
+    "ok": true,
+    "groups": [
+      {
+        "operation": "trim",
+        "runs": 1,
+        "median_seconds": 165.147693246603,
+        "min_seconds": 165.147693246603,
+        "max_seconds": 165.147693246603
+      },
+      {
+        "operation": "resume",
+        "runs": 1,
+        "median_seconds": 35.387085005640984,
+        "min_seconds": 35.387085005640984,
+        "max_seconds": 35.387085005640984
+      },
+      {
+        "operation": "rollback",
+        "runs": 1,
+        "median_seconds": 71.3008416891098,
+        "min_seconds": 71.3008416891098,
+        "max_seconds": 71.3008416891098
+      },
+      {
+        "operation": "salvage",
+        "runs": 1,
+        "median_seconds": 287.66955211758614,
+        "min_seconds": 287.66955211758614,
+        "max_seconds": 287.66955211758614
+      },
+      {
+        "operation": "restore",
+        "runs": 1,
+        "median_seconds": 1090.7165640592575,
+        "min_seconds": 1090.7165640592575,
+        "max_seconds": 1090.7165640592575
+      }
+    ],
+    "results": [
+      {
+        "operation": "trim",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 165.147693246603,
+        "user_seconds": 118.565445,
+        "system_seconds": 45.61779,
+        "max_rss_kib": 50928,
+        "minor_faults": 31504737,
+        "sampled_program_peak_rss_kib": 20860,
+        "major_faults": 29,
+        "input_block_ops": 137191576,
+        "output_block_ops": 344,
+        "last_sample": {
+          "seconds": 165.14724057912827,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 121663743534,
+            "wchar": 10327,
+            "syscr": 1790570,
+            "syscw": 766,
+            "read_bytes": 70242086912,
+            "write_bytes": 176128,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 31504737,
+            "major_faults": 29,
+            "user_ticks": 11856,
+            "system_ticks": 4561,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 121663743534,
+          "wchar": 10327,
+          "syscr": 1790570,
+          "syscw": 766,
+          "read_bytes": 70242086912,
+          "write_bytes": 176128,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "resume",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 35.387085005640984,
+        "user_seconds": 21.718089,
+        "system_seconds": 13.6388,
+        "max_rss_kib": 50928,
+        "minor_faults": 14302687,
+        "sampled_program_peak_rss_kib": 18664,
+        "major_faults": 1,
+        "input_block_ops": 256,
+        "output_block_ops": 64,
+        "last_sample": {
+          "seconds": 35.38683234155178,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 58568906601,
+            "wchar": 4160,
+            "syscr": 3511,
+            "syscw": 278,
+            "read_bytes": 131072,
+            "write_bytes": 32768,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 14302687,
+            "major_faults": 1,
+            "user_ticks": 2171,
+            "system_ticks": 1363,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 58568906601,
+          "wchar": 4160,
+          "syscr": 3511,
+          "syscw": 278,
+          "read_bytes": 131072,
+          "write_bytes": 32768,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "rollback",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 71.3008416891098,
+        "user_seconds": 43.686231,
+        "system_seconds": 27.530885,
+        "max_rss_kib": 50928,
+        "minor_faults": 28605230,
+        "sampled_program_peak_rss_kib": 18664,
+        "major_faults": 0,
+        "input_block_ops": 0,
+        "output_block_ops": 168,
+        "last_sample": {
+          "seconds": 71.30058550834656,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 117137810356,
+            "wchar": 8501,
+            "syscr": 7016,
+            "syscw": 558,
+            "read_bytes": 0,
+            "write_bytes": 86016,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 28605230,
+            "major_faults": 0,
+            "user_ticks": 4368,
+            "system_ticks": 2753,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 117137810356,
+          "wchar": 8501,
+          "syscr": 7016,
+          "syscw": 558,
+          "read_bytes": 0,
+          "write_bytes": 86016,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "salvage",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 287.66955211758614,
+        "user_seconds": 199.443407,
+        "system_seconds": 86.388159,
+        "max_rss_kib": 50928,
+        "minor_faults": 47262348,
+        "sampled_program_peak_rss_kib": 21980,
+        "major_faults": 3,
+        "input_block_ops": 115673496,
+        "output_block_ops": 114392920,
+        "last_sample": {
+          "seconds": 287.66914086043835,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 182494547547,
+            "wchar": 58568921357,
+            "syscr": 2685803,
+            "syscw": 7241047,
+            "read_bytes": 59224829952,
+            "write_bytes": 58569175040,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 47262348,
+            "major_faults": 3,
+            "user_ticks": 19944,
+            "system_ticks": 8638,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 182494547547,
+          "wchar": 58568921357,
+          "syscr": 2685803,
+          "syscw": 7241047,
+          "read_bytes": 59224829952,
+          "write_bytes": 58569175040,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      },
+      {
+        "operation": "restore",
+        "repeat": 1,
+        "returncode": 0,
+        "timed_out": false,
+        "elapsed_seconds": 1090.7165640592575,
+        "user_seconds": 587.743333,
+        "system_seconds": 489.071999,
+        "max_rss_kib": 50928,
+        "minor_faults": 47295642,
+        "sampled_program_peak_rss_kib": 20756,
+        "major_faults": 41,
+        "input_block_ops": 543259768,
+        "output_block_ops": 114393680,
+        "last_sample": {
+          "seconds": 1090.7154977023602,
+          "unavailable": {
+            "exe": "FileNotFoundError"
+          },
+          "io": {
+            "rchar": 364679852711,
+            "wchar": 58568923432,
+            "syscr": 2431770305,
+            "syscw": 7241047,
+            "read_bytes": 278149001216,
+            "write_bytes": 58569564160,
+            "cancelled_write_bytes": 0
+          },
+          "memory_kib": {},
+          "stat": {
+            "state": "Z",
+            "minor_faults": 47295642,
+            "major_faults": 41,
+            "user_ticks": 58774,
+            "system_ticks": 48907,
+            "block_io_delay_ticks": 0
+          }
+        },
+        "sampled_io_max": {
+          "rchar": 364679852711,
+          "wchar": 58568923432,
+          "syscr": 2431770305,
+          "syscw": 7241047,
+          "read_bytes": 278149001216,
+          "write_bytes": 58569564160,
+          "cancelled_write_bytes": 0
+        },
+        "sampling_interval_seconds": 0.05,
+        "phase_timing": "Polling observations, not exact internal stage boundaries.",
+        "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+        "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+      }
+    ],
+    "tool_sha256": "bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5",
+    "retired_data": true,
+    "scope": "One full-size pilot on new copies; not a repeated median. Runtime source is candidate1, preceding canonical-repeat support."
+  },
+  "full_block_mutation_oracles": {
+    "final-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "restore-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "salvage-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772367,
+            "size": 56409713010,
+            "modified_ns": 1792452625685361557,
+            "changed_ns": 1792452625685361557
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/salvage-output/recovered/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772368,
+            "size": 2159186216,
+            "modified_ns": 1792452625685361557,
+            "changed_ns": 1792452625685361557
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/salvage-output/recovered/blocks.index"
+        }
+      ]
+    },
+    "trim-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713010,
+            "modified_ns": 1792452153812928605,
+            "changed_ns": 1792452153812928605
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186216,
+            "modified_ns": 1792452153832928624,
+            "changed_ns": 1792452153832928624
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "restore-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "418c9147be9b74beb57b2f1cb1a59cdc47de4efb6c11942a1a46dea5feb032eb",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772381,
+            "size": 56409713202,
+            "modified_ns": 1792453530734549897,
+            "changed_ns": 1792453530734549897
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/restore-output/recovered/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772382,
+            "size": 2159186224,
+            "modified_ns": 1792453530734549897,
+            "changed_ns": 1792453530734549897
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/restore-output/recovered/blocks.index"
+        }
+      ]
+    },
+    "salvage-input-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "rollback-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "5032ca8e3099a54d435ee6c085901e4ba1630c8521be259e0f17882862cf9ce8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713198,
+            "modified_ns": 1792452358493117144,
+            "changed_ns": 1792452358493117144
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "cdccfa2408075d9c92ab97cdeb352ea29a769ef977e5263e82216312cc5e7378",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186224,
+            "modified_ns": 1792452358473117124,
+            "changed_ns": 1792452358473117124
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    },
+    "resume-oracle.json": {
+      "ok": true,
+      "files": [
+        {
+          "sha256": "6d57c9799c7c90946209fa9ec13c4fe76c30be2776473bd4aa4cd78530ffab27",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772322,
+            "size": 56409713010,
+            "modified_ns": 1792452153812928605,
+            "changed_ns": 1792452153812928605
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.log"
+        },
+        {
+          "sha256": "50d7cde56668ccd5bfa5e91f43cbdeae4fbca99560a9b0526a78544fa9b1ced8",
+          "stamp": {
+            "device": 66306,
+            "inode": 75772323,
+            "size": 2159186216,
+            "modified_ns": 1792452153832928624,
+            "changed_ns": 1792452153832928624
+          },
+          "path": "/tmp/antelope-qualification-20261019/full-blocks-mutations-pilot/1/blocks.index"
+        }
+      ]
+    }
+  },
+  "baseline_full_trace_inspection": {
+    "prefix": {
+      "entries": 172018839,
+      "first_block": 2,
+      "last_block": 172018840,
+      "physical_end": 55616016557
+    },
+    "inspection": {
+      "entries": 172018839,
+      "excluded_suffix_bytes": 48678454947,
+      "excluded_suffix_sha256": "937b6acabc535e348045b7bbd482d940729a77b2c9c770e2d30b11b674436791",
+      "failure": {
+        "next_block": 172018841,
+        "offset": 55616016557,
+        "reason": "expected block 172018841, found 172018829; fork/gap selection is ambiguous without sufficient canonical evidence"
+      },
+      "first_block": 2,
+      "index_bytes": 2159186216,
+      "index_discrepancies": 97879450,
+      "index_partial_bytes": 0,
+      "index_prefix_sha256": "17ab843bccd5a33cbc2998a3c6aacbe540ec775f42e20491167e490aeec8fee3",
+      "index_present": true,
+      "index_sha256": "fa3a174157384f1a1c8669fab3c6f3d74ab124ca408d8ab60a4ffee6a0018d98",
+      "index_suffix_sha256": "9a479e9447ba3d5f91e37d469d92cfe1eb33d975c088ff404b30947903c63769",
+      "indexed_head_hint": 269898278,
+      "input_sha256": "fd16a3ab1df7d9ec17d14b361136fc3837eb70ede31d0f4bb933c7289f66eb80",
+      "last_block": 172018840,
+      "omitted_fork_entries": 139,
+      "physical_prefix_end": 55616016557,
+      "physical_prefix_sha256": "d442b1d36dc77f24e77e69841020f039626c36d85a51b75912c2ba1bdba4d713",
+      "reference_checked_entries": 172018839,
+      "reference_evidence_sha256": "9f90f45f1091f486d9f834ad5038fb1cf256c52d3f006df2bbd4cec66e7eb1e0"
+    },
+    "metrics": {
+      "returncode": 0,
+      "timed_out": false,
+      "elapsed_seconds": 2133.178011789918,
+      "user_seconds": 820.598528,
+      "system_seconds": 1304.281027,
+      "max_rss_kib": 49700,
+      "minor_faults": 1919651734,
+      "sampled_program_peak_rss_kib": 17256,
+      "major_faults": 27,
+      "input_block_ops": 217662280,
+      "output_block_ops": 432,
+      "last_sample": {
+        "seconds": 2133.1770510971546,
+        "unavailable": {
+          "exe": "FileNotFoundError"
+        },
+        "io": {
+          "rchar": 145699988720,
+          "wchar": 7562,
+          "syscr": 516931961,
+          "syscw": 369,
+          "read_bytes": 111443087360,
+          "write_bytes": 221184,
+          "cancelled_write_bytes": 0
+        },
+        "memory_kib": {},
+        "stat": {
+          "state": "Z",
+          "minor_faults": 1919651734,
+          "major_faults": 27,
+          "user_ticks": 82059,
+          "system_ticks": 130428,
+          "block_io_delay_ticks": 0
+        }
+      },
+      "sampled_io_max": {
+        "rchar": 145699988720,
+        "wchar": 7562,
+        "syscr": 516931961,
+        "syscw": 369,
+        "read_bytes": 111443087360,
+        "write_bytes": 221184,
+        "cancelled_write_bytes": 0
+      },
+      "sampling_interval_seconds": 0.5,
+      "phase_timing": "Polling observations, not exact internal stage boundaries.",
+      "io_counters": "Last /proc sample is a lower bound; wait4 CPU/RSS belongs to this child.",
+      "rss_caveat": "wait4 RSS may include fork-before-exec launcher memory; sampled VmHWM is exe-matched."
+    },
+    "coverage": "Incomplete; benchmark oracle rejected the early stop. Neither a timeout nor successful full coverage."
+  },
+  "real_canonical_repeat": {
+    "wanted": 172018829,
+    "indexed_offset": 55616016557,
+    "failure_offset": 55616016557,
+    "records": [
+      {
+        "block": 172018829,
+        "offset": 55616006693,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616007104,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+        "decoded_sha256": "7749e843576ecd861aafc893b8a0925b2ec835068fac6798f58dc5afaca6c3df",
+        "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616007515,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+        "decoded_sha256": "968f5cd19934c46e874ee555cbeb993e6e005f0b34b001ce89e5fcebf84febda",
+        "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616007926,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+        "decoded_sha256": "5c638d3660c64cb26da52c2874ab9721556ac8e925ebd1b225d40b3f861916b1",
+        "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616008337,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+        "decoded_sha256": "e180da5fa9945c904b6c634ab7b9aa1a26b15fcb7928f4489ec27a617ba74133",
+        "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616008748,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+        "decoded_sha256": "d5364f16efe0f65b77d5aa8a98ed0c0cd01ed801c0421668747030ebd6c12e49",
+        "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616009159,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+        "decoded_sha256": "4a5f5c0470cdb3e820742c4ecca1b0211c2b625fd2adbd72b1d9e299da80da75",
+        "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616009570,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+        "decoded_sha256": "73a5a24abbebe24798c6e9b47279e50f9647b692cc81c865932d6423ece80a11",
+        "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616009981,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+        "decoded_sha256": "8bcb44871c0160c4e14d3e5d2fd68e8c15a7661abbee0e2d43014dc0573160eb",
+        "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616010392,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+        "decoded_sha256": "dac37a9bcb9c1df93bf537cc4dfac3f7e71f4aec84992ed2b6d92c2a1e6e5f14",
+        "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616010803,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+        "decoded_sha256": "ec720d445f74a9c4240fb802e79ada3d01e12f87ee7234ab9765df8e8a9f9d79",
+        "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616011214,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+        "decoded_sha256": "fba88a0a63424ee403d0d4ab72eebf6e74894b0f1f154ac2475cee8eef34573f",
+        "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+      },
+      {
+        "block": 172018829,
+        "offset": 55616011625,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4a951665cc5d1aa9e783c855c130bef07b361f8a1fd3901f4b439ab0f19f9cc2",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc59f740ff69fa128454ec39230e037099683f10ca7f7f56320d62570"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616012036,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "5953200af039bcc182edcad3c1042cc8c9a47890bbeed263daf4701b1a054c63",
+        "decoded_sha256": "dee168931e75559f0a67f124480a9f2001b053c759fdb13793b3513d0a23122c",
+        "id": "0a40cc8eb134a2a028ce3075c7ee1224d42ec4e1b250a3f4de79466bd9004cca"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616012447,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "7bbe9fa44e60e8e30017fd9cdd11b6332a79a4685b58042df5994536107419fb",
+        "decoded_sha256": "cea94c30962764c155d6424546f03676ff05417c8c7f7524f0ede2b3f2eb4c2f",
+        "id": "0a40cc8fea4cf29d9d821d3791ff74cf95a527e50c314ea56d7e9ea459377024"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616012858,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "75a7f20dd19138dd6d8e3220bbccc72f077e741b66a9649213e931696fd36b9b",
+        "decoded_sha256": "4dbd27bc0c1f2c846e672521793815a79fe55187e0e8476e2ab244058e1bbc79",
+        "id": "0a40cc90e5c739da357fbf3984c1a33035c8a62f0078af12d3bedecf424d87fb"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616013269,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "66cf5a14d74f01fdaff7ced9055c24a75e00c3a9b69bdf9dc28372446c4f3d11",
+        "decoded_sha256": "d518442585c2fa4388c2d8c55592481df64c1afaebaf0653a0e4736adef10762",
+        "id": "0a40cc91f9ed60f0478e24b3f0ab45e56fbcf9a8df66f6ce7df0197807fad3ce"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616013680,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "6853478a472aed280ddcd156880211bf24c2af7e7b0a91f80df5f77a33a4c196",
+        "decoded_sha256": "489c91c866b55b12a62c5b3b89efafde15052d43cd0596efac2e9791d1f78c40",
+        "id": "0a40cc924be041645949e0246858ff4eff63649f7c57cec5c392a8e1e460afc7"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616014091,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "8cb26c9a380b1bd3fcc50ed8b1cbc77bce3bc106394ab943733eba05ddde92a9",
+        "decoded_sha256": "ff69fb1f0dbfff11c0c4fcbba4ad5f35900a247d2ee587caa5174df84cd38249",
+        "id": "0a40cc9356c6668274c0e519ed8d9c0554d1e52789ab4231ccd1706e6b0347bb"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616014502,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "0c57b582c0afa4934ed29aa5bb565509ba63ef0bfdff0c977a1ac6e8af596b90",
+        "decoded_sha256": "c2b263980a12657b491ba9f37884d1820b349ef75d5562e61f9522c9b60bf75e",
+        "id": "0a40cc941cb77047c3f800a782c0ccca6a602fcb900411ca5ef7430b2791d01c"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616014913,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "05da090b0ae1e3be058ead3aebd6548305f9999ac78a953ea72704f564bd3878",
+        "decoded_sha256": "d437fc825de23aaf507f87c085ce31db0dd37dc04cac254ee645fa5a8413e408",
+        "id": "0a40cc95dc1cfeb9afff21396836472c49e73b6b46e53bfa4f5bb06b25360229"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616015324,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "81e48b813a1c3e67f6c59faac193fbae081ab0dfa63f145202d69ec592167107",
+        "decoded_sha256": "cdf7e7323b5090cf9266a9bae38d783c9d09416330d54361abeb65ba62d98535",
+        "id": "0a40cc96cb68d6a49b2c854ff52edb7b51dfa80039a16a0d2abc0cb3eedc0d23"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616015735,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "10986722b467929803685115c8b7c5926f8cd06036c03a6e6f579f5c8d4405f0",
+        "decoded_sha256": "bc7d1a745ce15529c2d4c003b044fabc103ab0f51b94cd64c979d6633c143c9d",
+        "id": "0a40cc97b7ee14bb9b5c164376d8e07af1ec856f6d0a7602117a771e25814bc3"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616016146,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "89d7cede5132a0f0efd057641433fe144d26c93b57bc93c5b1c0d062b2fb439f",
+        "decoded_sha256": "b472bbfceacbe1df26440c6a3d4c0a6adf7d715c8f0880b7ed49ef702fd9e83f",
+        "id": "0a40cc9883b250be89eaee9c527366f2f84788a105e45a915787e434211bf143"
+      },
+      {
+        "block": 172018829,
+        "offset": 55616016557,
+        "indexed_for_wanted": true,
+        "body_bytes": 403,
+        "encoded_sha256": "632e0416c6a819b767dc892a36ba7b219cd1a46188837e5f9185e2771b8c3848",
+        "decoded_sha256": "bfc8fa806e76d0aa928861f095cb024362bbfe2ccf46b3703a4bc535e87a4b58",
+        "id": "0a40cc8dc657ac89c975a08e83df31fe641070da2712ac9c84869c4ebb9ec01e"
+      },
+      {
+        "block": 172018830,
+        "offset": 55616016968,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "2d70adcd9f71d5d568eb56da198b490d3e772b05b825097cb350b81261bc062b",
+        "decoded_sha256": "7749e843576ecd861aafc893b8a0925b2ec835068fac6798f58dc5afaca6c3df",
+        "id": "0a40cc8e906e7f8801f22724990e806578146cda03d74c87d8c30b3e87c7a38d"
+      },
+      {
+        "block": 172018831,
+        "offset": 55616017379,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "afca3f7571f528b5372a0267d5f47eb9dd116d2118bae179b0c610fe9f24edb6",
+        "decoded_sha256": "968f5cd19934c46e874ee555cbeb993e6e005f0b34b001ce89e5fcebf84febda",
+        "id": "0a40cc8f691a3a4a96992a60023f6bc3cdf294e68b9e8d3c5116b3fd82919fe9"
+      },
+      {
+        "block": 172018832,
+        "offset": 55616017790,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "b55ab0bf9d8d9e5c277b83c2a232615484973fb4cdc52a7b370929cc87626474",
+        "decoded_sha256": "5c638d3660c64cb26da52c2874ab9721556ac8e925ebd1b225d40b3f861916b1",
+        "id": "0a40cc903fbadb915f6e3389486f912098297e1491f9cdc39e462e8ab663232e"
+      },
+      {
+        "block": 172018833,
+        "offset": 55616018201,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "fe98ea089b75eb935bccd6127c2766a93609ab49dfff163814a261d2c5ebff69",
+        "decoded_sha256": "e180da5fa9945c904b6c634ab7b9aa1a26b15fcb7928f4489ec27a617ba74133",
+        "id": "0a40cc9173e68bc6f5d281904af9daeea47726088886283f26cc2aca12d1cf2f"
+      },
+      {
+        "block": 172018834,
+        "offset": 55616018612,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "53884ce9d79b261a86c07e9938e5fec02b3003f685c3094cb9ef68bc776a8793",
+        "decoded_sha256": "d5364f16efe0f65b77d5aa8a98ed0c0cd01ed801c0421668747030ebd6c12e49",
+        "id": "0a40cc9287a9ff29372c6416d6ce98aed59972d0af4f6c5e9b841f614864dae9"
+      },
+      {
+        "block": 172018835,
+        "offset": 55616019023,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "c503588cccfb36ba1a810ffb92b932e84a47fe875a75e0d7284abbd20787fe35",
+        "decoded_sha256": "4a5f5c0470cdb3e820742c4ecca1b0211c2b625fd2adbd72b1d9e299da80da75",
+        "id": "0a40cc938a37044b7f33672c0039a86163c0037e6e8db5ab08e6289e74f49703"
+      },
+      {
+        "block": 172018836,
+        "offset": 55616019434,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "60c7be5d3bbb6e5f65a4c79f8503aaa27ea1277fac37f6357d05c89986fbc524",
+        "decoded_sha256": "73a5a24abbebe24798c6e9b47279e50f9647b692cc81c865932d6423ece80a11",
+        "id": "0a40cc94077e642de34537f964f6e1ed6ddcbef3cdea18d1db0bc190161a2009"
+      },
+      {
+        "block": 172018837,
+        "offset": 55616019845,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "ea0cbf0f760bb4f543f77e0170448528c764ce3d87af7c68df9c668f123912c1",
+        "decoded_sha256": "8bcb44871c0160c4e14d3e5d2fd68e8c15a7661abbee0e2d43014dc0573160eb",
+        "id": "0a40cc95788bebb735901abf8a2c06bf4ad62abecd843a8873fb6d15a6025cdf"
+      },
+      {
+        "block": 172018838,
+        "offset": 55616020256,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "cfbbcee05bfb9d19b5f3dc34228b60cbcd518ff958fd3f47b55c66abd4ba66e9",
+        "decoded_sha256": "dac37a9bcb9c1df93bf537cc4dfac3f7e71f4aec84992ed2b6d92c2a1e6e5f14",
+        "id": "0a40cc96bf44df25e0d4c0e6919cb57f3193c332bddc460b0ba115138d787438"
+      },
+      {
+        "block": 172018839,
+        "offset": 55616020667,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "acc02f43e2b3fb66d20cf6f1e6d46e36225b58e8e340320994f245a86430d4a7",
+        "decoded_sha256": "ec720d445f74a9c4240fb802e79ada3d01e12f87ee7234ab9765df8e8a9f9d79",
+        "id": "0a40cc97393d786a99d35b489c9bbd8a6bed1332bbc946c4e8ab8fdd9dae43da"
+      },
+      {
+        "block": 172018840,
+        "offset": 55616021078,
+        "indexed_for_wanted": false,
+        "body_bytes": 403,
+        "encoded_sha256": "4c4a9bdd59b41fb6d856ad70f8b9e0f4d82e39a14f4063fb6778c572d0fbd7ae",
+        "decoded_sha256": "fba88a0a63424ee403d0d4ab72eebf6e74894b0f1f154ac2475cee8eef34573f",
+        "id": "0a40cc9840eddba7e3c9d45add7281e69367743244d159837ea9c1892b2cb765"
+      },
+      {
+        "block": 172018841,
+        "offset": 55616021489,
+        "indexed_for_wanted": false,
+        "body_bytes": 965,
+        "encoded_sha256": "3893fbffaeba1a8fecdaa0033888cf405ffcd4f0b6e1ebc7fd31da10f58edb74",
+        "decoded_sha256": "14f5910b007604c9d07ccf99d60c17472bb5d39213177d13475df027c253a353",
+        "id": "0a40cc997fa9212a6d82ccd65380c13683d5798f2678ec0c19121961292378c4"
+      }
+    ],
+    "policy": "Canonical block evidence and byte-identical encoded bodies, bounded by 4 MiB and 4096 blocks. Other repeats keep the ambiguity stop."
+  }
 }

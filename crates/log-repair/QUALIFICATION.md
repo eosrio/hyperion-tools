@@ -29,11 +29,22 @@ These are three kinds from the same chain. They do not establish qualification o
 another chain or storage system. Copying, full input hashing and cache observation
 are preparation costs and are excluded from measured child-process wall times.
 
-A larger independent **128 GiB EOS block-log prefix** is being copied on
-wrx80-5965wx/ZFS: blocks 332037539–383405748, 137,438,957,092 log bytes and
-410,945,680 index bytes. The selected source is non-pruned; pruned API logs on
-that host are excluded explicitly. Capacity was checked before copying. Snapshot
-verification and the repeated baseline/candidate benchmarks remain in progress.
+The attempted **128 GiB EOS/ZFS** copy was stopped after `zpool status -v`
+reported a permanent data error in the selected original block log. Its partial
+copy and diagnostics remain; no complete corpus manifest was published. A smaller
+1 GiB prefix had independently matching source/copy hashes. It supplies useful
+parser fixtures, including a block with 128 transactions, but its timing results
+are diagnostic observations under a reported pool error, not healthy-ZFS evidence.
+The tool did not modify the original, clear errors, or initiate storage repair.
+
+A separate **64 GiB Ultra/ext4/NVMe** prefix completed independent source/copy
+hashing: blocks 1–192881743, 68,719,476,814 log bytes and 1,543,053,944 index bytes.
+Repeated baseline/candidate `scan` and `verify` measurements are in progress.
+The 10,000-block preflight passed those indexed commands but tail recovery refused
+Ultra's different genesis layout: its first position is 127, versus 126 for the
+supported v3 classic genesis. No heuristic preamble search or format relaxation
+was added. This is indexed-command coverage and an explicit recovery refusal,
+not full recovery qualification for Ultra. Other pruned logs were excluded.
 Linux page-cache residency does not measure ZFS ARC residency.
 
 ```sh
@@ -138,12 +149,28 @@ IDs were checked against the frozen block log, and all report fields except time
 matched. The first initial-state payload is not claimed equal to the historical
 incremental delta.
 
-The current candidate also fixes a reproduced `verify` panic from overflowing
+The first candidate also fixes a reproduced `verify` panic from overflowing
 SHIP entry lengths. A release binary wrapped a malformed length to zero and
 panicked while slicing its trailer. Saturating the computed extent keeps it out
 of bounds, so verification reports corruption. Boundary cases are tested in both
 SHIP kinds. Candidate SHA-256:
 `bcaed15639cb0e9338d1bee4093132c5815e51195852f1bbf8f382765a1d3dc5`.
+
+The full baseline tail inspection found another real case: after a fork, Libre
+repeats canonical entries 172018829–172018840 with byte-identical encoded bodies.
+It stopped at offset 55,616,016,557 with a complete prefix ending at 172018840;
+the benchmark oracle correctly rejected that as incomplete coverage. This was
+not a timeout or a successful inspection of the full trace log.
+
+The follow-up candidate retains at most 4 MiB of canonical SHIP bodies over
+4,096 blocks. With canonical block evidence, exact repeated bodies can be omitted;
+an index pointing to either identical occurrence is valid. Changed payloads,
+different encodings, invalid checksums, and repeats outside the bounds keep the
+existing ambiguity stop. Regression tests exercise both SHIP kinds, missing and
+partial indexes, wrong positions and cache eviction. The new artifact was built
+on Windows for Linux/musl after WSL stopped responding, so it has separate build
+provenance and is not substituted into the earlier measured experiments. SHA-256:
+`ca5294ae4719e97f0d16ceffe272b09a304e4c39f35f3a8d63ddfe1067661381`.
 
 The [structured checkpoint](../../docs/performance/evidence/log-repair-20261019/checkpoint.json)
 retains per-run CPU/RSS/I/O, allocation counts, input and binary hashes, and scope
@@ -175,37 +202,42 @@ python3 crates/log-repair/tests/qualify.py extract \
   --first FIRST --last LAST --out /scratch/new-small-fixture
 ```
 
-The full issue remains the acceptance scope. Current work still needs evidence for:
+The full issue remains open. This ledger separates acquired evidence from remaining
+release work; individual measured pilots do not qualify an entire family.
 
-- Repeated ordinary and file-advised baselines for scan, verify and inspection;
-  timed copy-out salvage/restore, in-place trim, resume and rollback.
-- Native CPU and allocation profiles, a measured optimization, matching
-  before/after correctness, profiler overhead and regression budgets.
-- Torn headers/payloads/trailers, aligned truncation, garbage/zeros and no-anchor
-  refusals; missing/torn/stale/wrong indexes; readable corruption and interior gaps.
-- Media errors, conflicting/missing sources, SHIP framing/zlib/forks, bounded large
-  entries, and unsupported/pruned-format refusals.
-- Journal/write/fsync interruptions, partial rollback, ENOSPC, replaced paths,
-  concurrent openers/appends and tampered evidence.
-- Independent utility smoke tests, isolated nodeos snapshot replay and SHIP
-  coverage. A verified same-chain snapshot at block **209394282** is available for
-  a short historical replay. Other snapshots, versions and current-network catch-up
-  remain unqualified; the completed narrow pilot is described below.
-- An explicit supported/refused/unqualified ledger, remaining gaps and release
-  evidence. Simulated states, actual process termination, injected syscall faults
-  and storage power-cut behavior must remain distinct.
+| Family | Acquired evidence | Remaining or deliberately refused |
+|---|---|---|
+| Performance | Repeated SHIP decoder experiments, full trace verification, native sampling, allocation/RSS and syscall evidence; separately timed full block recovery pilot | Repeat every command/operation on the final artifact; controlled cache and profiler overhead; healthy ZFS/storage diversity |
+| Torn tails and indexes | Real-body EOF, framing, trailer, zeros/garbage and index mutations; exact copy-out and trim/rollback oracles | More transaction/extension/signature layouts and large damaged entries; no-anchor and unsupported preambles remain refused |
+| Readable corruption | Header/body/checksum edits and an interior zeroed entry, with reference comparison | Broader multi-extent/gap combinations; signature, Merkle-root and SHIP semantic authentication are outside the validator |
+| SHIP and sources | Mixed encodings, large initial state, forks, byte-identical canonical repeats, donor disagreements, missing evidence and source-change tests | Conflicting/differently encoded repeats stop; older/oversize repeats stop; broader writer/version and large donor combinations |
+| Media failures | Private kernel EIO read detection and failed-write refusal with intent preservation | Successful healing, ENODATA and multiple actual error extents; readable EOF damage is a separate workflow |
+| Interrupted recovery | Actual process kills at truncate boundaries, injected ENOSPC and deterministic journal/rollback tampering tests | Other actual write/fsync/short-write boundaries and VM/storage power cuts |
+| Acceptance | Matching utility smoke test and isolated Libre snapshot replay with head and SHIP payload oracles | Other versions/snapshots and current-network catch-up; catching up blocks does not recover missing historical SHIP |
+
+No release tag is qualified by this checkpoint. Simulated interruption states,
+actual process termination, syscall fault injection and storage power cuts remain
+distinct evidence classes.
 
 Completed evidence so far:
 
-- **158 deterministic cases** over eight real Libre block/trace/delta bodies:
+- **174 deterministic cases** over eight real Libre block/trace/delta bodies:
   torn and aligned tails, zeros/garbage, malformed preambles, index variants,
-  readable header/signature/checksum damage and an interior zeroed entry.
+  readable header/signature/checksum damage, an interior zeroed entry and canonical
+  repeats with first/latest index positions or conflicting payloads/encodings.
   Restore/salvage outputs use independent byte/hash oracles; eligible trims have
-  exact saved-byte and rollback checks. The current candidate passed on the real
-  server and Linux/WSL, including malformed-length findings from `verify`.
+  exact saved-byte and rollback checks. The latest candidate passed on the real
+  server; the earlier 158-case candidate also passed on Linux/WSL. These include
+  malformed-length findings from `verify`.
   This small fixture does not establish large-entry or storage power-loss behavior.
-- All **89 Rust tests** passed with allocation instrumentation, including mixed
-  compressed/stored streams, recovery from failed decoder calls and overflow guards.
+- A separate **26-case EOS block matrix** passed, including an EOF cut inside
+  block 332255806's two-byte count of 128 transactions. The three committed real
+  bodies and independent header-ID oracles came from the hash-verified 1 GiB prefix.
+- All **92 Linux Rust tests** passed with allocation instrumentation, including
+  mixed compressed/stored streams, decoder-error recovery, overflow guards and
+  bounded canonical repeats. Native Windows passed Clippy, 67 ordinary Rust tests
+  and the allocation-counter test. All 20 Python harness tests passed on Linux;
+  Windows passed the three portable cases and explicitly skipped 17 Linux cases.
 - Four actual tracee SIGKILL cases around the two truncate calls passed resume
   and exact rollback. Five injected ENOSPC cases covered pre-intent fsync,
   truncation and rollback writes. Linux pidfds constrain signals to owned children.
@@ -245,7 +277,24 @@ trim, no-op resume, rollback, salvage and restore processes. By default every da
 file remains. `--retire-data` removes only this invocation's individually verified
 log/index copies after their oracles pass; journals, receipts and hashes remain.
 Changed files, hard links and paths outside the fresh run directory refuse
-retirement. A three-repeat real-entry smoke passed; the full 56.4 GB pilot is running.
+retirement. Cleanup also rehashes each file immediately before retirement: a real
+ext4 run demonstrated that same-length edits can share observed timestamps.
+The regression deliberately matches metadata while retaining a stale byte proof.
+
+A three-repeat real-entry smoke passed. The full **56.4 GB pilot** completed with
+the first candidate and independently matching recovery/rollback bytes:
+
+| Operation | Seconds (one full-size run) |
+|---|---:|
+| In-place trim | 165.148 |
+| No-op resume | 35.387 |
+| Rollback | 71.301 |
+| Copy-out salvage | 287.670 |
+| Copy-out restore | 1,090.717 |
+
+These are individual pilots, not repeated medians or a cross-version speedup claim.
+The selected original corpus remained read-only. Only disposable files whose
+independent oracles passed were retired; journals and hashes remain.
 
 The opt-in interruption matrix uses `strace` 5.16 or compatible syscall injection:
 
