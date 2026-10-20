@@ -6,3 +6,5 @@
 *.yml text eol=lf
 # The vendored Spring SHiP ABI is pinned by its sha256 and served byte for byte: always LF.
 crates/core/src/ship_abi.json text eol=lf
+# Preserve source receipts, reports and their manifest byte for byte on every platform.
+docs/qualification/evidence/wire-testnet-20261020/* -text

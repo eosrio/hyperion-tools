@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "runtime": {
+    "version": "v24.19.0",
+    "executable": "C:\\Users\\igorl\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "executableSha256": "3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237"
+  },
+  "inputSha256": "b8edf652dd0ad265917bf0111ca48789ec7a3f1976f2113783202cc3dd38acb4",
+  "packageRevision": "8b7d8a39f098bde77fa8d8f22a20a4fffc3e457b",
+  "componentManifestSha256": "7c9d12d85ff32bc2426034fd8f3be68aff23520664063992a6f549521122db99",
+  "componentFiles": 68,
+  "observations": [
+    {
+      "kind": "status",
+      "requestSha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+      "responseSha256": "b7bb780f41f37327e66f97dbc5c5aa4380ec652de8da4f1f62315e8eb9841a76"
+    },
+    {
+      "kind": "block1",
+      "requestSha256": "6d4887bb7d8ff3069825b0323656c657d5b5234535becd1793d34041d122ac95",
+      "responseSha256": "5e873c4f7a29d74e2c604571e2f6077673d8069a5abfb91a6f7bb53798c1c04c",
+      "deltaFraming": {
+        "declaredCount": 8,
+        "actualCount": 9,
+        "compatibility": "wire-resource-index-count-v1"
+      },
+      "streams": [
+        {
+          "name": "account",
+          "rows": 3
+        },
+        {
+          "name": "account_metadata",
+          "rows": 1
+        },
+        {
+          "name": "global_property",
+          "rows": 1
+        },
+        {
+          "name": "protocol_state",
+          "rows": 1
+        },
+        {
+          "name": "permission",
+          "rows": 9
+        },
+        {
+          "name": "resource_limits",
+          "rows": 3
+        },
+        {
+          "name": "resource_usage",
+          "rows": 3
+        },
+        {
+          "name": "resource_limits_state",
+          "rows": 1
+        },
+        {
+          "name": "resource_limits_config",
+          "rows": 1
+        }
+      ],
+      "deltaRows": 23
+    }
+  ],
+  "networkAttempts": 0,
+  "requestBoolRepresentation": "Documented uint8 carriers; original input and decoded request re-encode to exact captured bytes.",
+  "fullInitialTableCompletenessValidated": false,
+  "canonicalAbiBootstrapQualified": false,
+  "nativeWorkerAcceptance": false,
+  "limits": [
+    "Offline installed Node codec against real original testnet bytes only; no initializer, canonical ABI frontier, worker, API, Rust or full testnet qualification."
+  ]
+}
