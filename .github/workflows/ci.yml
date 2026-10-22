@@ -11,6 +11,13 @@ env:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ['1.95.0', stable]
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Verify Wire node setup evidence checksums
@@ -26,13 +33,14 @@ jobs:
         run: node --test scripts/profile-runtime-smoke.test.mjs
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.rust }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --release --all-targets -- -D warnings
+        run: cargo clippy --locked --release --all-targets -- -D warnings
       - name: Build
-        run: cargo build --release --verbose
+        run: cargo build --locked --release --verbose
       - name: Test
-        run: cargo test --release --verbose
+        run: cargo test --locked --release --verbose

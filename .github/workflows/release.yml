@@ -42,7 +42,7 @@ jobs:
       - name: Install cross
         run: cargo install cross --locked
       - name: Build (all bins)
-        run: cross build --release --target ${{ matrix.target }} --bins
+        run: cross build --locked --release --target ${{ matrix.target }} --bins
       - name: Package
         shell: bash
         run: |

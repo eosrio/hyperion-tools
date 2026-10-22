@@ -1,5 +1,10 @@
 # Wire Rust provider integration
 
+Historical integration record: the 0.6.0 engine observations and Rust 1.88 mismatch below describe
+the original #41 slice. [Tools #48's current Rust baseline](rs-abieos-070.md) selects rs_abieos
+0.7.0 and Rust 1.95; its new regression checks preserved sysio table metadata against the retained
+clio observation. The custom Wire codec and source revision in this record remain in use.
+
 This is implementation evidence for [tools #41](https://github.com/eosrio/hyperion-tools/issues/41).
 The full issue remains open. Selected-testnet qualification and coordinated operator distribution
 remain [Wire #3](https://github.com/eosrio/hyperion-wire-plugin/issues/3) and
