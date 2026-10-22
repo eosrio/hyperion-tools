@@ -1194,7 +1194,12 @@ async fn a_body_larger_than_its_first_reservation_is_rendered_again() {
     )
     .await;
     assert_eq!(a.body, rendered(block, GetBlockHeader, true));
-    assert_eq!(server.budget.used(), 0);
+    // Reading Content-Length bytes at the client can precede Hyper dropping the final
+    // server-side body owner. Require bounded release, including the resized response.
+    until("the rendered responses return their reservations", || {
+        server.budget.used() == 0
+    })
+    .await;
     drop(server);
 
     // A budget holding the first reservation but not the second answers 503.
@@ -1205,7 +1210,10 @@ async fn a_body_larger_than_its_first_reservation_is_rendered_again() {
     let first = 4 * len as u64 + (64 << 10);
     let want = busy(&format!("Too many bytes in flight: {first}"));
     assert_eq!((a.status, a.text()), (503, want.as_str()));
-    assert_eq!(server.budget.used(), 0);
+    until("the refused render returns its reservation", || {
+        server.budget.used() == 0
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

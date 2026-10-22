@@ -44,6 +44,24 @@ cargo +stable test --locked --workspace
 cargo +stable clippy --locked --workspace --all-targets -- -D warnings
 ```
 
+## Archive reservation completion during validation
+
+The [initial Node 22 CI job](https://github.com/eosrio/hyperion-tools/actions/runs/39730166208/job/119663132315)
+passed the Node/Rust comparison and preflight checks, then exposed an unchanged archive HTTP test
+race at implementation `5fc48a0b7e113e8cbb44652fc340943d1ae8d5f3`: its immediate budget assertion
+saw 712 bytes after the client had read the response. The corresponding Node 24 job passed.
+The raw failed-job log is retained with SHA-256
+`993f3fe269f96c37e8ffcba3c7526b03f73d80b7e195fe2172ba9b7f733ab3be`.
+
+Reading Content-Length bytes does not synchronize with Hyper dropping its final server-side
+response owner. One hundred unmodified Windows stress attempts passed; a temporary 20 ms delay
+at that owner's final drop reproduced the exact 712-versus-zero assertion. The corrected test
+uses its existing bounded completion helper to require that reservations return to zero, and
+passes under the same delayed cleanup. A diagnostic mutation retaining the reservation still
+fails at the helper's 20-second deadline. All diagnostic server changes were removed; only the
+test's completion assertions changed. This test race is separate from the engine update and
+does not establish a reservation leak or alter production memory accounting.
+
 The engine update preserves its Antelope name, ABI/value and historical-version APIs. New sysio
 metadata support does not replace the custom Wire codec: its 2025 timestamp epoch, slug/protobuf
 values, extra crypto families, complete keys and strict framing remain behind the selected provider.
