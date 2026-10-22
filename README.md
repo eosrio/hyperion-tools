@@ -75,11 +75,12 @@ Deploy frozen SHiP archives beside live nodes with the
 
 ## Build
 
-The workspace declares Rust **1.88**, but the current locked `rs_abieos` 0.6.0 requires **1.95**;
-the provider integration is checked on stable Rust 1.99. The
-[integration record](docs/qualification/wire-rust-provider.md) preserves this toolchain gap.
-No C++/clang is needed: the pure-Rust abieos backend remains in use. The internal Wire component
-is an exact source-pinned Cargo git dependency; the other external dependencies come from crates.io.
+Rust **1.95 or newer** is required. CI checks the minimum compiler and current stable with the
+locked `rs_abieos` **0.7.0** pure-Rust backend; no C++/clang is needed. The
+[Rust baseline record](docs/qualification/rs-abieos-070.md) identifies the published artifact,
+compatibility checks and the historical 1.88 mismatch resolved by this baseline.
+The internal Wire codec remains a separate, exact source-pinned Cargo git dependency within
+the coordinated Wire package; the other external dependencies come from crates.io.
 
 ```bash
 git clone https://github.com/eosrio/hyperion-tools
@@ -87,6 +88,10 @@ cd hyperion-tools
 cargo build --release --locked
 # binaries land in target/release/
 ```
+
+`rust-toolchain.toml` selects current stable for development. To exercise the supported minimum,
+install it with `rustup toolchain install 1.95.0 --profile minimal` and use
+`cargo +1.95.0 build --release --locked`. Keep `Cargo.lock` when building release artifacts.
 
 Build a single tool with `cargo build --release --bin <name>`. The shared `hyperion-ship` library lives in
 `crates/core`; each binary is its own crate under `crates/`.
