@@ -3,6 +3,50 @@
 Work in progress for [#46](https://github.com/eosrio/hyperion-tools/issues/46).
 This document is a coverage ledger, not a completed release qualification.
 
+## Saved inspection checkpoint follow-up (2026-10-20)
+
+[#55](https://github.com/eosrio/hyperion-tools/issues/55) adds guarded inspection
+reuse for `trim-tail`. The structured results are in
+[`qualification.json`](../../docs/performance/evidence/log-repair-20261020-checkpoints/qualification.json).
+The qualification executable SHA-256 is
+`5e9f52c11e8868c88ee00815aafc0c2c18b85a6793941af5e9f688c681da4c5c`.
+
+An independent copy reproduced the Libre incident: 48,477,356,032 log bytes,
+1,853,814,976 index bytes, complete blocks 1..231726802, 327 excluded log bytes,
+and 560 surplus index bytes. Ordinary trim and checkpoint trim both retained the
+same prefix. Matching `spring-util` accepted the trimmed pair; both variants
+rolled back, and independent full-file hashes matched the frozen damaged source.
+Source file identities and timestamps remained unchanged. Live logs were not
+modified, and node startup/replay was not repeated in this follow-up.
+
+| Stage | Elapsed, s | User CPU, s | System CPU, s | Full parser passes |
+|---|---:|---:|---:|---:|
+| Ordinary trim, including preparation and verification | 125.91 | 94.29 | 30.40 | 2 |
+| Save inspection checkpoint | 58.26 | 47.18 | 11.00 | 1 |
+| Trim using that checkpoint, including verification | 58.35 | 46.92 | 11.20 | 1 |
+| Roll back checkpoint trim and verify originals | 60.91 | 42.53 | 18.28 | 0, full hash checks instead |
+
+These are single sequential observations on a shared Ryzen 9 7950X/ext4/NVMe
+host. Baseline preparation overlapped unit tests; preceding operations warmed the
+cache, and baseline physical input counters were higher. The phase reduction is
+verified, but this is not a controlled or repeated throughput comparison. Saving
+the checkpoint is a separate cost: it does not eliminate the original inspection
+or the final full parser/hash verification. Earlier operator terminal output
+cannot be reused as a checkpoint.
+
+Separate 10,000-block copies from Ultra mainnet and FIO mainnet, each with the
+final trailer cut by one byte, completed ordinary trim, saved inspection reuse,
+and byte-exact rollback. Each retained 9,999 entries. Ultra's matching utility
+accepted its trimmed pair. These are bounded real-log prefixes, not qualification
+of Michael's full Ultra/FIO incident files. Captured mainnet/testnet fixtures and
+synthetic v1 coverage also exercise reuse in the Linux regression suite.
+
+Inspection, checkpoint trim and rollback also succeeded as UID 1000 (`eosrio`)
+on a disposable Ultra prefix. Restricted `/proc` visibility produced the expected
+warning; root privileges were not required by the repair executable. All readers
+and writers must still be stopped. Reboots, binary changes, changed file stamps
+and invalid checkpoint artifacts require fresh inspection.
+
 The baseline is merged revision `2b4ebbcc8e9e265e995d1c46670fc79c5257cae2`.
 All destructive cases use independently created disposable files. Live Libre logs
 are opened read-only only to create bounded historical copies; nodeos keeps running.

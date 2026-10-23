@@ -85,7 +85,7 @@ fn complete_captured_transport_keeps_raw_bytes_and_corrects_only_the_pinned_bug(
 }
 
 #[test]
-fn exact_locked_abieos_cannot_replace_the_wire_meta_abi_codec() {
+fn exact_locked_abieos_preserves_sysio_table_metadata() {
     let vectors = fixture("oracle-vectors.json");
     let vector = vectors["vectors"]
         .as_array()
@@ -94,24 +94,13 @@ fn exact_locked_abieos_cannot_replace_the_wire_meta_abi_codec() {
         .find(|v| v["id"] == "6508c9e8-abi-test_kv_sec_query")
         .unwrap();
     let bytes = hex::decode(vector["hex"].as_str().unwrap()).unwrap();
-    let wire: ProtocolProvider = "wire-sysio-6508c9e8-engineering-v1".parse().unwrap();
-    let expected = wire.decode_abi(&bytes).unwrap();
-    assert!(
-        expected["tables"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|t| t["table_id"].is_number())
-    );
-    let legacy = rs_abieos::Abieos::new().abi_bin_to_json(&bytes);
-    match legacy {
-        Err(error) => eprintln!("locked rs_abieos Wire ABI experiment: {error:?}"),
-        Ok(text) => assert_ne!(
-            serde_json::from_str::<Value>(&text).unwrap(),
-            expected,
-            "legacy decoder must not be assumed to preserve Wire table metadata"
-        ),
-    }
+    let engine = rs_abieos::Abieos::new();
+    let decoded: Value = serde_json::from_str(&engine.abi_bin_to_json(&bytes).unwrap()).unwrap();
+    // Compare with the retained independent clio observation, not a second codec's output.
+    assert_eq!(decoded["version"], vector["expected"]["version"]);
+    assert_eq!(decoded["tables"], vector["expected"]["tables"]);
+    let handle = rs_abieos::AbiHandle::from_bin(&bytes).unwrap();
+    assert_eq!(handle.type_for_table_name("users"), Some("user_val"));
 }
 
 #[test]

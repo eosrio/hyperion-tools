@@ -1,11 +1,97 @@
 # Wire implementation delivery plan
 
-Status: Active implementation frontier, 2026-10-19. This plan applies ADRs 0005 and 0030–0032;
+Status: Active implementation frontier, 2026-10-21. This plan applies ADRs 0005 and 0030–0032;
 it does not change the mandatory working-Wire release gate or select final testnet launch pins.
 Preparation and qualification remain [tools #22](https://github.com/eosrio/hyperion-tools/issues/22),
 coordinated through [release #24](https://github.com/eosrio/hyperion-tools/issues/24).
 
 ## Current implementation and evidence
+
+### Production worker/MongoDB integration candidate — 2026-10-21
+
+[History API #242](https://github.com/eosrio/hyperion-history-api/pull/242), code
+`ad590df3fc820cbf9723c5d6530b5e88c4b967e4`, passes two complete native Linux Node
+22/24 runs over original testnet blocks 1–1480 on Hyperion-3. Existing workers and
+RabbitMQ feed the shared runtime and real MongoDB adapter; the real HTTP API returns
+the independent physical-row/official-clio insert/update/delete oracle for two
+`sysio.msgch` primary KV definitions. It binds the actual ABI deployment at block 222.
+
+Actual Mongo update faults retain exact source intents and fence queries. Healthy
+projections recover, a deliberately invalid mapping remains unavailable, and block
+history/source acknowledgments continue. Durable admission before source decoding
+and mapping prevents rejected diagnostic writes from reopening old state. Normal
+unadmitted lag remains permitted. The new source/backend path adds no state barrier
+to history acknowledgments and does not reuse the legacy Mongo delivery route.
+
+The [checksummed source/run/observer evidence](https://github.com/eosrio/hyperion-history-api/tree/codex/portable-state-production/docs/performance/evidence/portable-state-worker-20261021)
+retains exact versions, two held CRUD prefixes, actual ACKs, failure/recovery,
+process exits and cleanup. Independent final Spec/Standards reviews have zero
+actionable findings. Per-process CPU/RSS observations are limited to this paced,
+fault-injected replay. Each run retains five one-copy Elasticsearch startup
+acknowledgments; later reads do not strengthen those original guarantees.
+
+The source uses upstream `6508c9e8`, Wire package `e8c7162` and SDK recovery contract
+`414e7c2` from [SDK #13](https://github.com/eosrio/hyperion-sdk/pull/13). SDK #13 and
+History API #242 remain pending merge. Test workers run inside an owned bounded
+Linux container; test services/container are removed after evidence verification,
+and the original Wire node, MongoDB, Elasticsearch and `tibs` services remain intact.
+
+This is the M1 integration candidate for [#191](https://github.com/eosrio/hyperion-history-api/issues/191).
+Full Wire support remains unqualified. [Wire #15](https://github.com/eosrio/hyperion-wire-plugin/issues/15)
+records real `sysio::onblock` decoding discrepancies, including trailing bytes after
+ABI deployment. The operator reports a separate rs_abieos compatibility implementation;
+evaluate its PR against these original inputs rather than duplicate that work.
+Required Rust consumers, contract/build/deployment receipts, secondary projections,
+live/bulk equivalence and actual process-crash/fork recovery remain M3 gates. M2
+auto-map/live mapping reload and stream-client integration #231 also remain required.
+
+### Actual testnet input update — 2026-10-20
+
+The operator's new testnet and synced SHiP node are available on Hyperion-3. The
+[dated source record and original captures](../qualification/wire-testnet-20261020.md) bind the
+observed node6508 binary, chain/genesis and schema to an offline Node 22/24 codec regression over
+real block 1 input. The existing codec consumes all nine physical streams and 23 rows, including the
+source-specific count discrepancy, without altering source bytes. Complete initialization and
+canonical ABI coverage, contract/CDT/artifact pins, integrated Node/Rust paths and recovery
+acceptance remain open. The earlier isolated `7dede884` engineering-chain evidence below is kept separate.
+
+### Reviewed native-genesis candidates — 2026-10-20
+
+[SDK PR #10](https://github.com/eosrio/hyperion-sdk/pull/10) adds the portable optional native-genesis
+verification contract at `38dfdb08d3145ad7fdff1a004e9ae94a43c1fe83`.
+[Wire PR #14](https://github.com/eosrio/hyperion-wire-plugin/pull/14) verifies the original 6508
+initialization at `e8c7162437a0d0f4e2211979b959f2d002bf3552`.
+[History API PR #241](https://github.com/eosrio/hyperion-history-api/pull/241), at
+`2f2124e2bf6f24eab262c2283a33beb5f3341474`, re-verifies retained source with the selected provider,
+then publishes durable ABI coverage and an issued current proof for the actual empty block-1
+application frame. These three PRs are now merged; their original validation is a
+bounded implementation checkpoint rather than release qualification.
+
+The original absent trace section and null SHiP predecessor remain unchanged. The verified decoded
+header's zero predecessor supplies checkpoint 0 → actual block 1 continuity. Native ABI states retain
+physical ordinals and both present-empty barriers. Ordinary later blocks still require complete source
+input. Reader range eligibility, null-parent light-block parsing and interrupted certificate publication
+are covered by host regressions. The public action-coverage gate remains disabled.
+
+A bounded read-only capture of actual blocks 2–4 from the same node/chain/schema extends the frozen
+block-1 source. Original receipt SHA-256 is
+`38d75b7a1ba28e3abd77512854f963e7723631d6837df73bd7aeff656cc8a450` (226,988 bytes); both unchanged
+receipts are retained in the HAPI fixture. Each later header has zero transactions but one real trace
+action. Native Node 22.23.3 and 24.19.0 pass the production parser/coordinator/proof/projection fixture
+through actual block 4, including native ABI action bindings and skipped-block rejection. The full host
+suite passes 881 tests. SDK and Wire local checks, packed consumers and independent Standards/Spec reviews
+also pass. Original source capture involved no remote service/configuration writes.
+
+This regression uses in-memory broker/storage seams. It does not complete
+[production projection integration #191](https://github.com/eosrio/hyperion-history-api/issues/191),
+required Rust genesis/consumer paths under [tools #41](https://github.com/eosrio/hyperion-tools/issues/41),
+MongoDB/full-worker/API acceptance, contract build/deployment pins, or fork/reconnect qualification.
+The 2026-10-21 candidate above supplies subsequent actual-source worker/MongoDB evidence
+while retaining existing Elasticsearch history; merge and broader recovery/launch gates remain explicit.
+The separate [stream-client gate #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+still requires filter, reconnect/recovery and cancellation compatibility.
+
+### Earlier implementation frontier — 2026-10-19
 
 The initial Wire repository was a scaffold at `5218f0a`. Three investigations traced upstream
 protocol differences, existing Node/SDK integration and Rust ingestion/offline paths. The immediate
@@ -51,15 +137,16 @@ checkpoints change. This slice leaves #41 and the working-Wire release gate open
 | Rust live/bulk/offline integration | [tools #41](https://github.com/eosrio/hyperion-tools/issues/41) | Applicable Rust paths select the same protocol semantics before fast-path decoding and produce equivalent output to Node. | Complete #2 fixtures. Independent of Node worker implementation; profile/fast-path extraction and Antelope regressions can start earlier. |
 | Coordinated operator package and integrated qualification | [Wire #3](https://github.com/eosrio/hyperion-wire-plugin/issues/3) | One compatible internal component set installs/preflights/activates together, then passes selected-testnet live/replay and recovery exercises with retained evidence. | Node and Rust integration; selected launch inputs and provisioned testnet under tools #22. Inventory/build preparation can start earlier. |
 
-Only #1 is immediately implementation-ready in full. Later rows expose concrete prerequisites;
-they are not waiting for a speculative complete SDK. Each row owns its implementation PRs in
+This table preserves the workstream ownership and acceptance split. The original #1/#2
+foundation work and the native-genesis host slices have progressed through merged PRs;
+their partial evidence does not close coordinated Wire/testnet acceptance. Each row owns its implementation PRs in
 the repository containing the change, with SDK changes linked from the integration issue.
 Cross-repository dependencies are recorded natively where supported and in issue bodies.
 
-The next coding priority after #1 is complete ABI/value fixtures and codecs in #2, alongside the
-generic provider-selection seam and Rust fast-path extraction. Final testnet availability blocks
-live qualification, not source-derived codec development. Existing profiling/recovery issues remain
-open with their original acceptance requirements; prioritizing Wire does not close them.
+The current next steps are merging the verified #191 integration candidate, evaluating the
+separate rs_abieos compatibility PR against Wire #15, and completing required Rust and
+testnet recovery qualification. The selected testnet is available. Existing profiling/recovery
+issues retain their original acceptance requirements; this state integration does not close them.
 
 ## Why provider selection must precede decoding
 
@@ -88,12 +175,12 @@ provenance remain the host's responsibility.
 | Wire Hyperion extraction reference | `87b5e2e9647e0219fcf77d07b653668601e0ade7`; inspect extension points, do not port it wholesale or use it as the correctness oracle. |
 | CDT source-inspection reference | `187d6a24ddc60c5c3f4238271815c124bcc80f11`; not yet an accepted compiler/build dependency. |
 | Contract fixture inventory | `test_kv_map`, `test_kv_sec_query`, `proto_abi_test`, and representative `sysio.token`, `sysio.chains`/`sysio.opreg`, `sysio.roa` behaviors. |
-| Testnet launch node/CDT builds | Pending operator selection and reproducible build inputs. Investigation revisions are not launch pins. |
+| Testnet launch node/CDT builds | Actual running testnet reports node `6508c9e8f4044df8d5acb082a7af3be6a80cd9a0`; binary/version receipts are retained in the dated source record. Reproducible build/CDT inputs remain pending. |
 | Deployed contracts and WASM/ABI artifacts | Pending inventory, build receipts and SHA-256 digests. A committed WASM beside C++ does not prove a matching build. |
-| Genesis, chain identity/configuration and deployment sequence | Pending; record before node-captured qualification fixtures are accepted. |
+| Genesis, chain identity/configuration and deployment sequence | Actual chain/genesis and selected public configuration are captured in the 2026-10-20 source record; deployment sequence and contract artifact pins remain pending. |
 | Extension/SDK/host/Rust artifact versions and platform set | Pending tested coordinated set and selected packaging mechanism. No catalog support claim yet. |
-| Isolated node setup | Running under tools #42 on inspected Hyperion-1; official release binary verified, RPC/SHIP and clean restart observed. Existing binaries/services preserved. Runtime is bounded to six hours per start; final network/contract qualification is pending. |
-| Final testnet provisioning | Pending selected inputs, contract deployment and qualification. The isolated node setup can begin earlier; neither setup nor prior server-test authorization permits production service replacement. |
+| Isolated node setup | Dated tools #42 engineering setup on Hyperion-1; official release binary, RPC/SHIP and clean restart observed. The retained record is not a current uptime claim or the new testnet source. |
+| Final testnet provisioning | Operator reports launched testnet; advancing node and real block1 SHiP input verified on Hyperion-3. Selected contract inventory, build/deployment receipts and full qualification remain pending. No production service replacement is part of this evidence slice. |
 
 The package profile and corpus explicitly label themselves as engineering fixtures. Track each
 fixture's origin as synthetic/source-derived, regenerated with exact build inputs, or captured from

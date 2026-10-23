@@ -89,8 +89,9 @@ instead of waiting for a speculative complete SDK.
   filters, sorting, counts and pagination. One successful endpoint or snapshot import is not parity.
 - **Wire:** select exact node/contracts/genesis/build inputs, implement the protocol provider before
   affected decoding, and qualify both required language paths, live/bulk input, key preservation
-  and recovery. Investigation revisions are not accepted launch pins. The new testnet must be
-  launched with Wire's contracts before final live qualification.
+  and recovery. Investigation revisions are not accepted launch pins. The new testnet's synced
+  SHiP node is available on Hyperion-3; final live qualification still requires the selected
+  contract/build/deployment receipts and the integrated Node/Rust recovery exercises.
 - **WormDB:** assess required capabilities early and file demonstrated engine gaps in WormDB.
   Qualify the unchanged definitions and plugin queries against the same applicable conformance,
   recovery and parity requirements. If the effort is too high, record an explicit MongoDB-only
@@ -245,9 +246,37 @@ subsequent reader-to-ack profiles; API #197 transport work is deferred by the op
 ## Publication and evidence
 
 The [Wire implementation delivery plan](hyperion-4.5-wire-implementation.md) records the
-2026-10-19 implementation frontier, owning issues, source-derived fixture profile and remaining
-launch decisions. Wire #1 begins executable Node/Rust primitives; codec completeness, provider
-activation, Rust consumer integration and new-testnet recovery remain explicit later gates.
+2026-10-20 native-genesis candidates, actual block-1–4 source evidence, owning issues and remaining
+launch decisions. Reviewed [SDK #10](https://github.com/eosrio/hyperion-sdk/pull/10),
+[Wire #14](https://github.com/eosrio/hyperion-wire-plugin/pull/14) and
+[History API #241](https://github.com/eosrio/hyperion-history-api/pull/241) supply the portable
+contract, source-semantic verifier and durable host admission; all three PRs are merged.
+Their first actual-source regression used in-memory broker/storage seams.
+
+The 2026-10-21 [production integration candidate, History API #242](https://github.com/eosrio/hyperion-history-api/pull/242),
+for [#191](https://github.com/eosrio/hyperion-history-api/issues/191), now passes the existing native
+Node 22/24 workers, RabbitMQ, actual MongoDB adapter and public HTTP API against original Wire
+testnet blocks 1–1480 on Hyperion-3. Independent physical-row/official-clio oracles verify
+insert/update/delete results. Actual Mongo write faults, exact-source retry, scoped query
+unavailability, continuing block history, source/broker acknowledgments and clean shutdown are
+retained in the [checksummed evidence](https://github.com/eosrio/hyperion-history-api/tree/codex/portable-state-production/docs/performance/evidence/portable-state-worker-20261021).
+The prerequisite [SDK #13](https://github.com/eosrio/hyperion-sdk/pull/13) adds a non-serving durable
+recovery view. These two PRs remain pending merge at this checkpoint; the M1 integration is a
+verified candidate, not a completed release-branch milestone.
+
+The finite replay uses native workers inside an owned six-CPU/12-GiB Linux container with isolated
+services. Per-process CPU/RSS observations are profiling leads, not bare-metal throughput, Bun,
+memory-recovery or complete Wire qualification. Five original one-copy Elasticsearch startup
+acknowledgments remain explicit in each run. The original host services are verified unchanged,
+the Wire head advances, and owned test services/container have zero residue.
+
+M2 auto-map, live mapping reload and actual process-crash/fork recovery remain required.
+M3 still requires the applicable Rust paths, selected build/deployment inputs and full testnet
+qualification. [Wire #15](https://github.com/eosrio/hyperion-wire-plugin/issues/15) records actual
+`sysio::onblock` decoding discrepancies; a separate rs_abieos compatibility effort is in progress
+and must be evaluated against that evidence. The stream-client integration gate
+[#231](https://github.com/eosrio/hyperion-history-api/issues/231), AtomicAssets/AtomicMarket parity,
+WormDB qualification and the remaining release matrix remain open.
 
 The operator approved the repository names and first batch on 2026-10-17. The architecture baseline,
 release issue and initial component issues are published with real cross-repository references

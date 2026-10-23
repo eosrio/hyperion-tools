@@ -7,7 +7,7 @@
 //! ABI extraction — the `account` table was just table 0 of ~19. Throughput and bounded
 //! memory are the focus.
 //!
-//! Decode path (rs_abieos 0.6 `AbiHandle`, rust-backend): every (account, valid_from) ABI
+//! Decode path (rs_abieos `AbiHandle`, rust-backend): every (account, valid_from) ABI
 //! version is parsed once into a standalone `AbiHandle` and kept in a per-worker registry —
 //! no `abieos_context`, no `set_abi`/`delete_contract` churn, and the per-row decode
 //! (`decode_table_row_into`) is pure Rust with **zero FFI** and a reused output buffer.

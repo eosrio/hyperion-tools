@@ -5,14 +5,14 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"  # mongodb 3.7 MSRV (snapshot-load Mongo sink)
+rust-version = "1.95"  # rs_abieos minimum; exercised alongside current stable in CI
 license = "MIT"
 repository = "https://github.com/eosrio/hyperion-tools"
 authors = ["EOS Rio"]
 
 [workspace.dependencies]
 # Shared external deps — versions declared once here, referenced as `dep = { workspace = true }`.
-rs_abieos = { version = "0.6", default-features = false, features = ["rust-backend"] }
+rs_abieos = { version = "=0.7.0", default-features = false, features = ["rust-backend"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"
 futures = "0.3"

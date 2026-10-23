@@ -406,3 +406,34 @@ loss behavior remain separate acceptance checks.
 The final operator-help/summary wording was updated afterward; the qualified trim,
 resume and rollback implementation is unchanged. The harness's safety checks also
 reject an aliased fixture under optimized Python (`-O`).
+
+## Saved inspection reuse
+
+Linux regressions exercise inspection capture without input changes, unchanged
+checkpoint reuse, byte-exact rollback without the checkpoint directory, and resume
+or rollback after each durable boundary. Reuse refuses changed log/index bytes
+even with restored mtime, appends, replaced files, incomplete or changed artifacts,
+wrong boot/executable/schema, and changes after journal preparation. A deliberately
+wrong saved prefix hash reaches full read-back and prevents receipt publication.
+Captured Ultra/FIO mainnet and testnet records, a partial v3 log, and synthetic v1
+conformance also exercise checkpoint capture, trim and rollback.
+
+`tests/checkpoint_bench.py` creates a new independent log/index copy, compares
+ordinary trimming against a separately saved inspection plus cached trimming,
+verifies the remaining full-scan phase count, and rolls both variants back. It
+records per-stage elapsed/user/system time, peak RSS and filesystem I/O counters.
+Final independent hashes must match the frozen source, whose identity and
+timestamps must remain unchanged. Cache conditions must be explicitly labeled;
+this harness never evicts the host cache or stops nodes.
+
+```sh
+python tests/checkpoint_bench.py --tool /path/to/antelope-log-repair \
+  --source-dir /frozen/damaged/blocks --out /scratch/checkpoint-comparison-1 \
+  --cache-note 'shared host, normal cache, sequential single runs' \
+  --native-util /path/to/matching/spring-util
+```
+
+The source must already have removable suffix data and a correct retained index.
+The optional native smoke test checks acceptance by the selected utility; it is
+not a full node replay or a simulated storage power failure. Larger-log evidence
+and its limitations are recorded in `QUALIFICATION.md`.

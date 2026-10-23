@@ -5,6 +5,10 @@ accepted under ADR 0030, and working Wire support is required for the 4.5 launch
 Detailed implementation and qualification choices remain open.
 No Wire extension has been implemented or qualified by this investigation.
 
+For the later observed network and component evidence, see the
+[actual testnet input qualification record, 2026-10-20](../qualification/wire-testnet-20261020.md).
+That follow-up preserves this investigation's date and does not close the working-Wire release gate.
+
 ## Inspected revisions
 
 - `Wire-Network/wire-sysio`: `6508c9e8f4044df8d5acb082a7af3be6a80cd9a0`.

@@ -8,6 +8,12 @@ on:
 jobs:
   source-pinned-provider:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    env:
+      RUSTUP_TOOLCHAIN: '1.95.0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -17,7 +23,7 @@ jobs:
           path: out/wire-provider-oracle
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
       - name: Build the exact Node oracle component
         working-directory: out/wire-provider-oracle
         run: |
@@ -25,6 +31,7 @@ jobs:
           npm run build
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.95.0'
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Build affected executables with locked dependencies

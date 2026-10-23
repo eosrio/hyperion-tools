@@ -1,0 +1,32 @@
+name: Actual Wire testnet capture
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  captured-node-codec:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-wire-plugin
+          ref: 8b7d8a39f098bde77fa8d8f22a20a4fffc3e457b
+          path: out/wire-testnet-codec
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify original source evidence
+        run: python3 scripts/check-wire-testnet-evidence.py
+      - name: Build the exact Node component
+        working-directory: out/wire-testnet-codec
+        run: |
+          npm ci
+          npm run build
+      - name: Consume the original actual-testnet frames offline
+        run: node scripts/check-wire-testnet-capture.mjs out/wire-testnet-codec
