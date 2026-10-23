@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "createdBy": "windows:codex:hyperion-tools",
+  "recordedAt": "2026-10-22T17:13:48.917828+00:00",
+  "scope": "Read-only actual released-runtime info/close smoke; no full Hyperion Bun runtime or performance qualification",
+  "host": "Hyperion-3; exclusively owned bounded LXD and Docker fixture",
+  "historyApiHead": "6515c352af1b94b47972c8f895d494fcd443dc81",
+  "historyApiLockCanonicalSha256": "e231b6cb880d8594383d3ac088fd3836f0dcca050f2ef252583d824121b50d4d",
+  "probeScript": "bun-es-client-20261022-probe.mjs",
+  "probeScriptSha256": "15a38830886ed17641a0afa7c0ec5682c667319e90c6892e9fa5172ad8771954",
+  "upstream": {
+    "originalPullRequest": "https://github.com/oven-sh/bun/pull/27338",
+    "consolidationPullRequest": "https://github.com/oven-sh/bun/pull/46528",
+    "observedConsolidationHead": "6d5b5799173ca1e562e7588ef196ebb211523b8a",
+    "observedState": "OPEN",
+    "observedMergeCommit": null,
+    "interpretation": "Original27338 included in part in open46528 with dispatcher work from39250; bundling does not identify a released binary containing the change"
+  },
+  "observations": [
+    {
+      "runtime": {
+        "path": "/root/qualification/runtimes/node-v24.19.0-linux-x64/bin/node",
+        "version": "v24.19.0",
+        "sha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12",
+        "archiveSha256": "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+      },
+      "exitCode": 0,
+      "stdout": {
+        "createdBy": "windows:codex:hyperion-tools",
+        "runtime": "Node v24.19.0",
+        "clientVersion": "8.19.1",
+        "transportVersion": "8.10.1",
+        "undiciVersion": "8.3.0",
+        "kind": "read-only info/close smoke on exclusively owned ES9.5.5 fixture",
+        "clientOrTransportOverrides": false,
+        "info": {
+          "status": "passed",
+          "serverVersion": "9.5.5",
+          "clusterUuid": "VReWqX-eSNm1qn0Zg4Pcqw"
+        },
+        "close": {
+          "status": "passed"
+        },
+        "status": "passed"
+      },
+      "stdoutSha256": "ac79ffe641ab211a1566ddc423d78ca8230dda74b8bc65c7bb03c0d92d2f5a5c",
+      "stderr": "",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "runtime": {
+        "path": "/root/qualification/runtimes/bun144-linux-x64/bun",
+        "version": "1.4.4",
+        "sha256": "10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235",
+        "archiveSha256": "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c",
+        "officialUrl": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip",
+        "typescript": "7.0.2"
+      },
+      "exitCode": 1,
+      "stdout": {
+        "createdBy": "windows:codex:hyperion-tools",
+        "runtime": "Bun 1.4.4",
+        "clientVersion": "8.19.1",
+        "transportVersion": "8.10.1",
+        "undiciVersion": "8.3.0",
+        "kind": "read-only info/close smoke on exclusively owned ES9.5.5 fixture",
+        "clientOrTransportOverrides": false,
+        "info": {
+          "status": "failed",
+          "error": {
+            "name": "TypeError",
+            "code": null,
+            "message": "undefined is not an object (evaluating 'response.headers')"
+          }
+        },
+        "close": {
+          "status": "failed",
+          "error": {
+            "name": "TypeError",
+            "code": null,
+            "message": "this.pool.close is not a function. (In 'this.pool.close()', 'this.pool.close' is undefined)"
+          }
+        },
+        "status": "failed"
+      },
+      "stdoutSha256": "8dcbd1ce6f0d18e27c154213013ec7e432fd497de5a881e90569ad7b5a106719",
+      "stderr": "",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "nextGate": "Verify the merge commit and first official build containing46528, then retest the exact pinned client/transport/undici/server matrix and guarded full workers; preserve197 and28 runtime gates"
+}

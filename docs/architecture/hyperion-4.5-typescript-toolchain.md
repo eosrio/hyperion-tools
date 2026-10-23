@@ -1,6 +1,6 @@
 # Hyperion 4.5 TypeScript toolchain
 
-Status: Accepted engineering baseline, 2026-10-18.
+Status: Accepted engineering baseline, updated 2026-10-22.
 
 Use TypeScript 7 and `bun check` for ongoing TypeScript development in Hyperion 4.5.
 This policy applies to the History API, shared SDK, and new TypeScript plugins and backend
@@ -12,7 +12,7 @@ adapters. Their package and source ownership remains defined in the
 | Responsibility | Baseline |
 |---|---|
 | Project compiler and editor types | Exact `typescript` dependency `7.0.2` |
-| Fast project typecheck | Bun `1.4.3`, pinned in each migrated repository's `.bun-version` and installed from that pin in CI |
+| Fast project typecheck | Bun `1.4.4`, pinned in each migrated repository's `.bun-version` and installed from that pin in CI |
 | Dependency installation | `npm ci` using the committed `package-lock.json` |
 | Emitted JavaScript, source maps and SDK declarations | The pinned TypeScript 7 compiler through the repository's existing build scripts |
 | Node runtime acceptance | Existing Node 22 and Node 24 build/artifact and test coverage |
@@ -20,6 +20,8 @@ adapters. Their package and source ownership remains defined in the
 Bun's checker uses its embedded TypeScript version, independently of the project's installed
 compiler. Keep `bun -p process.versions.typescript` equal to the exact `typescript` dependency;
 select the workspace TypeScript version in editors. Review Bun and compiler pin updates together.
+Bun 1.4.4 was verified to embed TypeScript 7.0.2. CI verifies both the Bun pin and embedded
+compiler before checking the complete project.
 [Bun documents the version relationship and checker behavior](https://bun.sh/docs/runtime/check#bun-check-and-my-editor-disagree).
 
 ## Development and CI
@@ -64,3 +66,19 @@ retains its metadata validators and tests; it needs no empty TypeScript project 
 Catalog compatibility metadata describes declared eligibility and tested combinations, while
 runtime and artifact tests establish execution behavior. A compiler upgrade alone does not qualify
 a plugin, backend, chain protocol, or API domain for the release.
+
+## Bun 1.4.4 adoption boundary
+
+The operator selected Bun 1.4.4 for ongoing development on 2026-10-22 in
+[the coordinated toolchain update](https://github.com/eosrio/hyperion-tools/issues/61).
+Keep previous 1.4.3 measurements and reports at their original versions. This checker update
+preserves TypeScript 7.0.2, npm locks, emitted Node artifacts and Node 22/24 validation.
+
+Checker adoption does not qualify Hyperion to run under Bun. A
+[read-only Linux client observation](../performance/evidence/bun-es-client-20261022.json)
+with its [exact probe](../performance/evidence/bun-es-client-20261022-probe.mjs) records
+Node 24 success and Bun 1.4.4 failures with the locked Elasticsearch client against the owned
+9.5.5 fixture. This observational artifact is separate from test discovery and release acceptance.
+Runtime prerequisites remain tracked in
+[History API #197](https://github.com/eosrio/hyperion-history-api/issues/197) and the
+[profiling program](../performance/hyperion-4.5-profiling.md).
