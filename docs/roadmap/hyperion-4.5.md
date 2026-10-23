@@ -62,6 +62,10 @@ Existing history compatibility and reliability checks run from the beginning. Th
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
 instead of waiting for a speculative complete SDK.
 
+The [draft release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) for
+[P02](https://github.com/eosrio/hyperion-tools/issues/20) names the first retained-history fixture
+and the source/server scope decisions needed before the supported upgrade set is declared.
+
 ## Parallel workstreams and release gates
 
 - **Component profiling and runtime qualification:** follow the
