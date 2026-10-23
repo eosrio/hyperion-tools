@@ -151,7 +151,14 @@ This extends the roadmap without renumbering the published initial issue batch.
    retryable unavailability and explicit recovery without presenting failed requests as empty
    results or disabling unrelated history. Consume completeness/last-valid-state headers when
    their shared contract is defined; history indexing progress does not establish state readiness.
-3. **Release acceptance (M4):** test the built explorer behind the real `/explorer` API proxy with
+3. **Wire testnet preview (planned):** serve a pinned new explorer build with Hyperion 4.5 as the
+   main page at [testnet.wire.eosrio.io](https://testnet.wire.eosrio.io/), tracked in
+   [Explorer #4](https://github.com/eosrio/hyperion-explorer/issues/4). Use the intended Wire chain
+   and API configuration, support root-page assets and deep links, and preserve API, documentation
+   and streaming routes. Verify real Wire browser/SSR workflows, served build identities and rollback
+   before activation. Schedule the preview after a usable pinned Wire API and applicable client
+   integration checks; preview success does not complete Wire or 4.5 release qualification.
+4. **Release acceptance (M4):** test the built explorer behind the real `/explorer` API proxy with
    pinned API and stream-client artifacts. Cover accounts, blocks, transactions, public keys,
    contract tables, filters/pagination, and enabled top-holder/oracle features. Exercise live
    streaming reconnect and finality/fork recovery against representative supported deployments,
