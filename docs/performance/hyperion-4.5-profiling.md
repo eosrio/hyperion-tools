@@ -223,9 +223,10 @@ and original cleanups are complete. These are distinct outcomes.
 The publication verifies 8,040 raw manifest files, the manifest and one bounded log alias.
 Its 8,019 public files preserve 7,986 native/prefix/bulk files byte-for-byte, normalize
 only CPU-frame URLs and diagnostic paths in 28 files, and identify five derived metadata
-records. All original/published hashes remain distinct. The existing process/V8 auditor,
-summary recomputation and deterministic publisher pass on selected Node 24/26 verifiers;
-verifier success does not relabel the Node 24 capture as a Node 26 worker run.
+records. All original/published hashes remain distinct. Selected Node 24/26 verifiers pass
+the existing process/V8 census and summary recomputation; the publisher reproduces all four
+generated files byte-for-byte. Verifier success does not relabel the Node 24 capture as a
+Node 26 worker run.
 
 The next measurement under [#277](https://github.com/eosrio/hyperion-history-api/issues/277),
 [#248](https://github.com/eosrio/hyperion-history-api/issues/248) and
