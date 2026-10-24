@@ -234,7 +234,7 @@ Node 26 worker run.
 
 That capture identified the next measurements under [#277](https://github.com/eosrio/hyperion-history-api/issues/277),
 [#248](https://github.com/eosrio/hyperion-history-api/issues/248) and
-[#196](https://github.com/eosrio/hyperion-history-api/issues/196) separates observer I/O
+[#196](https://github.com/eosrio/hyperion-history-api/issues/196): separating observer I/O
 from actual per-proof-open GET/byte/wait/validation work and queue residence. Keep the
 256-block ancestry, original source/oracles, queue policy, observation durability and all
 deadlines. No production cache, weaker durability or optimization is selected from this
@@ -249,7 +249,7 @@ from native Linux Node 24.19.0 source `7b2fefc`. The original 685 wait **failed*
 661 after holds 1/33/122/256/397; actual sends/ACKs are 661/653. All 14 CPU profiles,
 6,569 settled proof scopes, original cleanup and incumbent preservation reconcile.
 
-Within proof opens, 83,094 immutable GETs produced 283,803 HTTP attempts and
+Proof opens recorded 83,094 immutable GETs and 283,803 HTTP attempts, with
 1,131,454,984 UTF-8-reencoded body bytes. The 189,810 mapping/settings breakdown is
 explicitly a source-model inference. Main-decoder/action-pool/projection logger sync
 elapsed totals are 68.9/39.2/22.6 seconds. Nested elapsed intervals, process CPU,
