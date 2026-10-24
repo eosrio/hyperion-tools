@@ -29,5 +29,6 @@ authorize automatic executable updates. Operators choose and audit installed exe
 Follow the [shared TypeScript toolchain policy](docs/architecture/hyperion-4.5-typescript-toolchain.md)
 for the History API, SDK, and new TypeScript plugins/adapters: TypeScript 7.0.2, Bun 1.4.4,
 `bun check -p tsconfig.json` for the complete project, and `npm ci` with the committed npm lockfile.
-Keep native TypeScript artifact emission and Node 22/24 validation. Rust crates and the JavaScript
-catalog retain their applicable checks; do not add an empty TypeScript gate to them.
+Keep native TypeScript artifact emission and Node 24/26 validation with Node 24 as the 4.5 minimum.
+Rust crates and the JavaScript catalog retain their applicable checks; do not add an empty TypeScript
+gate to them.
