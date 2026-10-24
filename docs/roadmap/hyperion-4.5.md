@@ -256,6 +256,21 @@ persisted checkpoint/restart evidence. API #208 remains open for integrated live
 fork/restart recovery and late old-generation broker callbacks. API #196 owns the
 subsequent reader-to-ack profiles; API #197 transport work is deferred by the operator.
 
+## Native Wire profiling checkpoint: 2026-10-24
+
+The [current profiling ledger](../performance/hyperion-4.5-profiling.md#current-native-wire-capture-checkpoint-2026-10-24)
+now links the audited 14-process native Wire capture in
+[History API #298](https://github.com/eosrio/hyperion-history-api/pull/298).
+The frozen Node 24 run passed holds 1/33/122/256/397 but **failed** the unchanged
+685 progress wait. Profile completeness, preserved evidence and clean teardown do not
+complete the native worker/Mongo path, live fork/restart, #277 proof-capacity or Wire release gates.
+
+The measured stacks distinguish qualification-observer sync calls from production work.
+The next measurement remains in #277/#248/#196: observer write/sync latency, actual
+per-open ancestry GET/bytes/waits and queue residence. Backend/host I/O, dense-input
+retention and paired overhead comparisons are explicitly unmeasured. Preserve the current
+source/oracles, 256-block ancestry, queue policy and deadlines before selecting an optimization.
+
 ## Publication and evidence
 
 The [Wire implementation delivery plan](hyperion-4.5-wire-implementation.md) records the
