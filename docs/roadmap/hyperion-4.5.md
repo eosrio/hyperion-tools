@@ -266,10 +266,27 @@ The frozen Node 24 run passed holds 1/33/122/256/397 but **failed** the unchange
 complete the native worker/Mongo path, live fork/restart, #277 proof-capacity or Wire release gates.
 
 The measured stacks distinguish qualification-observer sync calls from production work.
-The next measurement remains in #277/#248/#196: observer write/sync latency, actual
-per-open ancestry GET/bytes/waits and queue residence. Backend/host I/O, dense-input
+That CPU-only capture left measurements in #277/#248/#196: observer write/sync latency, actual
+per-open ancestry GET/bytes/waits and queue residence. Its backend/host I/O, dense-input
 retention and paired overhead comparisons are explicitly unmeasured. Preserve the current
 source/oracles, 256-block ancestry, queue policy and deadlines before selecting an optimization.
+
+## Native Wire I/O checkpoint: 2026-10-24
+
+The [subsequent profiling ledger](../performance/hyperion-4.5-profiling.md#native-wire-prooflogger-measurement-checkpoint-2026-10-24)
+records [History API #302](https://github.com/eosrio/hyperion-history-api/pull/302)
+and the independently verified [measurements](https://github.com/eosrio/hyperion-history-api/blob/67b544e4f720606e97171dbad999a7e8a92b64b4/docs/performance/native-wire-proof-io-20261024.md).
+The new Node 24 run again failed the original 685 wait at 661, with complete
+14-process CPU and 6,569-proof I/O accounting and successful original cleanup.
+Actual proof-open HTTP counts/body sizes and logger sync latency are now measured;
+source-modeled endpoint counts, exclusive waits, incremental overhead and full
+qualification remain distinct. The old frozen capture is preserved.
+
+The mandatory correctness frontier remains completing #288's same-attempt matrix,
+then #277 prospective count/byte coordination and the complete original 1..1480
+replay/canonical recovery gates. Controlled read/logger experiments and #248's
+dense retained-memory work remain open. No optimization, workload/budget/deadline
+change, runtime ranking or release-readiness conclusion is selected by this checkpoint.
 
 ## Publication and evidence
 

@@ -203,6 +203,9 @@ the server and JavaScript client pins were not upgraded by these runs.
 
 ## Current native Wire capture checkpoint: 2026-10-24
 
+This section preserves the frozen CPU-only capture; the subsequent I/O checkpoint
+below updates its missing read-count and observer-latency measurements.
+
 [History API #298](https://github.com/eosrio/hyperion-history-api/pull/298), for
 [#297](https://github.com/eosrio/hyperion-history-api/issues/297), publishes the
 [frozen-capture report](https://github.com/eosrio/hyperion-history-api/blob/ae1d61cc49b8d7f124392dc9eb60d1234356105a/docs/performance/native-wire-worker-profile-20261024.md)
@@ -229,13 +232,39 @@ the existing process/V8 census and summary recomputation; the publisher reproduc
 generated files byte-for-byte. Verifier success does not relabel the Node 24 capture as a
 Node 26 worker run.
 
-The next measurement under [#277](https://github.com/eosrio/hyperion-history-api/issues/277),
+That capture identified the next measurements under [#277](https://github.com/eosrio/hyperion-history-api/issues/277),
 [#248](https://github.com/eosrio/hyperion-history-api/issues/248) and
-[#196](https://github.com/eosrio/hyperion-history-api/issues/196) separates observer I/O
+[#196](https://github.com/eosrio/hyperion-history-api/issues/196): separating observer I/O
 from actual per-proof-open GET/byte/wait/validation work and queue residence. Keep the
 256-block ancestry, original source/oracles, queue policy, observation durability and all
 deadlines. No production cache, weaker durability or optimization is selected from this
 single capture. Full replay, live fork/restart recovery and release qualification remain open.
+
+## Native Wire proof/logger measurement checkpoint: 2026-10-24
+
+[History API #302](https://github.com/eosrio/hyperion-history-api/pull/302) publishes
+the independently audited [report](https://github.com/eosrio/hyperion-history-api/blob/67b544e4f720606e97171dbad999a7e8a92b64b4/docs/performance/native-wire-proof-io-20261024.md)
+and [evidence](https://github.com/eosrio/hyperion-history-api/tree/67b544e4f720606e97171dbad999a7e8a92b64b4/docs/performance/evidence/native-wire-io-20261024)
+from native Linux Node 24.19.0 source `7b2fefc`. The original 685 wait **failed** at
+661 after holds 1/33/122/256/397; actual sends/ACKs are 661/653. All 14 CPU profiles,
+6,569 settled proof scopes, original cleanup and incumbent preservation reconcile.
+
+Proof opens recorded 83,094 immutable GETs and 283,803 HTTP attempts, with
+1,131,454,984 UTF-8-reencoded body bytes. The 189,810 mapping/settings breakdown is
+explicitly a source-model inference. Main-decoder/action-pool/projection logger sync
+elapsed totals are 68.9/39.2/22.6 seconds. Nested elapsed intervals, process CPU,
+samples and returned body sizes keep their separate meanings. These observations
+support controlled experiments; incremental overhead and a sole stall cause remain unproven.
+
+The 8,045-file publication retains 8,012 original files byte-for-byte. Independent
+Spec/Standards reviews, 18 offline tests, native 24/26 censuses, six checksums and
+exact old/new republication pass. Both captures' frozen results remain unchanged.
+Job-boundary host CPU/memory/disk snapshots are included; backend and per-process
+I/O time series, exclusive waits/parsing/hash CPU, queue residence, dense retained
+memory and five paired/repeated controls remain open. Complete #288's same-attempt
+matrix and #277's prospective count/byte coordination before full original replay
+and canonical recovery acceptance. Preserve current source/oracles, logger
+durability, 256-block ancestry, queue policy and deadlines.
 
 ## Fixture and workload prerequisites
 
