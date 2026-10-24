@@ -1,6 +1,6 @@
 # Hyperion 4.5 TypeScript toolchain
 
-Status: Accepted engineering baseline, updated 2026-10-22.
+Status: Accepted engineering baseline, updated 2026-10-24.
 
 Use TypeScript 7 and `bun check` for ongoing TypeScript development in Hyperion 4.5.
 This policy applies to the History API, shared SDK, and new TypeScript plugins and backend
@@ -15,7 +15,8 @@ adapters. Their package and source ownership remains defined in the
 | Fast project typecheck | Bun `1.4.4`, pinned in each migrated repository's `.bun-version` and installed from that pin in CI |
 | Dependency installation | `npm ci` using the committed `package-lock.json` |
 | Emitted JavaScript, source maps and SDK declarations | The pinned TypeScript 7 compiler through the repository's existing build scripts |
-| Node runtime acceptance | Existing Node 22 and Node 24 build/artifact and test coverage |
+| Minimum Node runtime for 4.5 | Node 24, declared in owned package engine constraints and lock metadata |
+| CI Node runtime acceptance | Node 24 and Node 26 build/artifact and test coverage |
 
 Bun's checker uses its embedded TypeScript version, independently of the project's installed
 compiler. Keep `bun -p process.versions.typescript` equal to the exact `typescript` dependency;
@@ -45,7 +46,7 @@ Keep the native `tsc` build for emitted artifacts. `bun check` does not emit Jav
 maps or `.d.ts` files; passing it is insufficient build acceptance.
 [Bun documents these emission limits](https://bun.sh/docs/runtime/check#differences-from-tsc).
 Validate the generated Node artifacts and the SDK's packed exports and declarations through their
-existing tests on Node 22 and 24. Preserve any existing Bun-based test coverage alongside those gates.
+existing tests on Node 24 and 26. Preserve any existing Bun-based test coverage alongside those gates.
 
 The toolchain change does not change dependency installation or require Bun as the production
 runtime. Keep `package-lock.json` authoritative; install dependencies with npm even when running
@@ -67,12 +68,26 @@ Catalog compatibility metadata describes declared eligibility and tested combina
 runtime and artifact tests establish execution behavior. A compiler upgrade alone does not qualify
 a plugin, backend, chain protocol, or API domain for the release.
 
+## Node 24 minimum and Node 26 CI
+
+The operator selected Node 24 as the minimum for Hyperion 4.5 and replaced Node 22 with
+Node 26 in maintained CI. [The coordinated change](https://github.com/eosrio/hyperion-tools/issues/65)
+tracks the History API and MongoDB adapter, SDK, Wire package, stream client and catalog tooling.
+Keep runtime-specific builds, installed-package consumers and applicable real-service checks on
+Node 24 and 26. Node-independent checks may run once; Node/Rust comparisons still run on both.
+Documentation-only packages and Rust-only crates retain their applicable checks.
+
+Cancel superseded PR validation runs without cancelling push or manually requested runs.
+Replacing one matrix version alone does not reduce job count; distinguish expected savings from
+measured CI duration. Keep historical Node 22 source/runtime labels and evidence unchanged.
+CI adoption does not upgrade production hosts or establish full worker, backend or release acceptance.
+
 ## Bun 1.4.4 adoption boundary
 
 The operator selected Bun 1.4.4 for ongoing development on 2026-10-22 in
 [the coordinated toolchain update](https://github.com/eosrio/hyperion-tools/issues/61).
 Keep previous 1.4.3 measurements and reports at their original versions. This checker update
-preserves TypeScript 7.0.2, npm locks, emitted Node artifacts and Node 22/24 validation.
+preserves TypeScript 7.0.2, npm locks, emitted Node artifacts and the then-current Node 22/24 validation.
 
 Checker adoption does not qualify Hyperion to run under Bun. A
 [read-only Linux client observation](../performance/evidence/bun-es-client-20261022.json)

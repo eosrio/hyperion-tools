@@ -9,6 +9,12 @@ This roadmap turns it into verifiable delivery milestones. Component designs bel
 work that implements them; another round of detailed architecture interviews is not required
 before starting.
 
+Hyperion 4.5 requires **Node 24 or newer**, with maintained CI on **Node 24 and 26**.
+[The runtime baseline transition](https://github.com/eosrio/hyperion-tools/issues/65) covers the
+History API/MongoDB adapter, SDK, Wire package, stream client and catalog tooling. Preserve historical
+Node 22 evidence at its original versions; current runtime and release acceptance must use the
+selected 24/26 baseline. This does not activate a production runtime upgrade.
+
 ## Repository ownership
 
 Use one release coordination issue in hyperion-tools, with implementation issues in the repository

@@ -94,7 +94,7 @@ bun scripts/profile-runtime-smoke.mjs cluster /path/to/hyperion-history-api
 ```
 
 Repeat for `uws`, `abieos` and `heap`. Exit 1 is a failed prerequisite; exit 2 is invalid usage.
-Use a Node 22/24 executable rather than assuming the executable named `node` is that version.
+Use an explicit Node 24/26 executable for new qualification under the current baseline, rather than assuming the executable named `node` is that version.
 
 [Recorded evidence](evidence/runtime-smoke-2026-10-18.json) uses the TS7 migration source
 `b571c5fb2e7c1422aa5bff31c45c1c7ac54caddc`, Node 24.19.0, Bun 1.4.3 and Windows x64:
