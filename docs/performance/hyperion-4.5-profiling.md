@@ -201,6 +201,40 @@ the next #196 stage instrumentation. Bun native transport work in #197 is deferr
 by operator choice. #198 and retained-history/server-selection gates remain open;
 the server and JavaScript client pins were not upgraded by these runs.
 
+## Current native Wire capture checkpoint: 2026-10-24
+
+[History API #298](https://github.com/eosrio/hyperion-history-api/pull/298), for
+[#297](https://github.com/eosrio/hyperion-history-api/issues/297), publishes the
+[frozen-capture report](https://github.com/eosrio/hyperion-history-api/blob/ae1d61cc49b8d7f124392dc9eb60d1234356105a/docs/performance/native-wire-worker-profile-20261024.md)
+and [audited evidence](https://github.com/eosrio/hyperion-history-api/tree/ae1d61cc49b8d7f124392dc9eb60d1234356105a/docs/performance/evidence/native-wire-profile-20261024).
+Native Linux Node 24.19.0 executes the original installed Wire worker path at
+`3febe95e9faf52067f96350b9f9df0dd2e2a2678`. Its replay **failed** the unchanged
+block-685 wait after passing held prefixes 1/33/122/256/397. All 14 process profiles
+and original cleanups are complete. These are distinct outcomes.
+
+| Component / observation | Evidence and remaining gap |
+|---|---|
+| API, master, reader, two deserializers, seven ingestors, action pool and projection | Fourteen CPU profiles and per-PID CPU/RSS/heap/event-loop samples; physical starts/forks, saved files and successful flushes reconcile. This finite failed replay is not a complete workload baseline. |
+| Source and shared-reader backpressure | The driver released 685, while actual sessions sent 661 blocks and received 653 SHIP ACKs. DS queue peak/final is 81/15, above resume 8 at the last sample. Master-local pause/resume records remain archived. |
+| Stack attribution | All 4,348 main-deserializer and 2,450 action-pool `fsync` leaf samples have the qualification native observer's `record` ancestor. Observer write/sync latency and overhead are **not measured**; these samples do not attribute production journal I/O. |
+| Proof/ancestry reads | Canonical JSON, transport parsing and store/adapter reads appear in stacks. Actual per-open GET counts/bytes, exclusive waits, dense-input retained-memory recovery and cancellation/fork pressure remain **not measured** by this capture. |
+| Backend/host and comparisons | Backend native CPU/I/O, capture-time host CPU topology, representative domain load and paired profiler-overhead/runtime comparisons remain **not measured** in this archive. |
+
+The publication verifies 8,040 raw manifest files, the manifest and one bounded log alias.
+Its 8,019 public files preserve 7,986 native/prefix/bulk files byte-for-byte, normalize
+only CPU-frame URLs and diagnostic paths in 28 files, and identify five derived metadata
+records. All original/published hashes remain distinct. The existing process/V8 auditor,
+summary recomputation and deterministic publisher pass on selected Node 24/26 verifiers;
+verifier success does not relabel the Node 24 capture as a Node 26 worker run.
+
+The next measurement under [#277](https://github.com/eosrio/hyperion-history-api/issues/277),
+[#248](https://github.com/eosrio/hyperion-history-api/issues/248) and
+[#196](https://github.com/eosrio/hyperion-history-api/issues/196) separates observer I/O
+from actual per-proof-open GET/byte/wait/validation work and queue residence. Keep the
+256-block ancestry, original source/oracles, queue policy, observation durability and all
+deadlines. No production cache, weaker durability or optimization is selected from this
+single capture. Full replay, live fork/restart recovery and release qualification remain open.
+
 ## Fixture and workload prerequisites
 
 The local `wax-probe` manifest declares WAX blocks **437200000–437201999** with SHIP v0 and
