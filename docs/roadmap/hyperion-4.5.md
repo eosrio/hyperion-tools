@@ -288,6 +288,30 @@ replay/canonical recovery gates. Controlled read/logger experiments and #248's
 dense retained-memory work remain open. No optimization, workload/budget/deadline
 change, runtime ranking or release-readiness conclusion is selected by this checkpoint.
 
+## Native Wire broker recovery checkpoint: 2026-10-25
+
+[History API #320](https://github.com/eosrio/hyperion-history-api/pull/320) merged into
+still-draft [#289](https://github.com/eosrio/hyperion-history-api/pull/289), completing
+the scoped [#319](https://github.com/eosrio/hyperion-history-api/issues/319) owned-broker
+handoff case. The actual Linux Node 24 run verifies the held/fenced original receipt,
+the replacement's own fresh write/end/retained association, exactly both original
+block-33 publishers, separate broker counter windows and resumed block-34 state,
+native and API checks. Broker settlement remains unknown.
+
+[The frozen evidence and gate record](https://github.com/eosrio/hyperion-history-api/issues/319#issuecomment-6399124139)
+has two independent custody audits covering 19,155 payloads and all source, emission,
+component, input and oracle pins. Both unchanged full workloads **failed** at the
+original 685 barrier. The fault's master exit 1 and false software-shutdown assertion
+are preserved; physical cleanup and incumbent preservation were independently verified.
+
+The remaining [#288 recovery matrix](https://github.com/eosrio/hyperion-history-api/issues/288)
+includes generic/reversible inputs and other combined storage/live-fork cases.
+[#277](https://github.com/eosrio/hyperion-history-api/issues/277) still requires prospective
+count/byte coordination and the complete original 1..1480 replay on Node 24/26.
+The parent stays draft; source/oracles, 256-block ancestry, budgets, durability,
+defaults and deadlines are unchanged. This checkpoint grants no capacity or full
+Wire/release qualification.
+
 ## Publication and evidence
 
 The [Wire implementation delivery plan](hyperion-4.5-wire-implementation.md) records the
