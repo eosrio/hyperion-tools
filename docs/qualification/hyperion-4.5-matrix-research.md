@@ -67,3 +67,51 @@ Other published v4.1.0 Mongo-backed named routes include [`get_proposals`](https
 4. Choose an exact MongoDB server patch/build and adapter release for launch, then make the explicit WormDB qualify/defer decision from [#23](https://github.com/eosrio/hyperion-tools/issues/23). Decide whether supported irreversible-only mode is exercised on every offered chain/backend or on a representative chain with an explicit rationale; do not remove the mode from any chain's product contract.
 
 Implementation mechanisms for the API/adapters, fixture execution, and endpoint-level parity belong to their owning issues. Until their evidence exists, every row above remains proposed or pending, not passed.
+
+## 2026-10-26 development-pin refresh
+
+The research and Elastic release observations above retain their 2026-10-23 date. In particular,
+8.19.23 remains the proposed landing patch recorded by that research; this refresh does not
+assert it is still the latest published patch. The source-release choices and 7.x-created-index
+boundary are unchanged. This addendum records source-declared development pins, not installed
+artifacts, new compatibility results or a supported release manifest.
+
+The compared snapshots are [release/4.5 at `635e9930`](https://github.com/eosrio/hyperion-history-api/tree/635e9930dd71e65a72615eec54518ccedea135b4)
+and [draft #289 at `11078df8`](https://github.com/eosrio/hyperion-history-api/tree/11078df8594d1e3a8bba68185d4a08e606ee82f4).
+Their root package and lock metadata agree on these pins:
+
+| Component | Declared pin in both snapshots | Qualification boundary |
+| --- | --- | --- |
+| Elasticsearch JavaScript client / transport | `@elastic/elasticsearch` 8.19.1 / locked `@elastic/transport` 8.10.1 | Exact requests against each selected server and retained-index combination still require evidence. |
+| MongoDB driver / adapter package | `mongodb` 7.2.0 / private `@eosrio/hyperion-backend-mongodb` 0.0.0-dev.1 | The driver and development package are separate from the as-yet-unselected supported MongoDB engine/build and adapter release. |
+| Root SDK dependency | [`339b5c93d1338968c18ed14254961439dcab16a0`](https://github.com/eosrio/hyperion-sdk/commit/339b5c93d1338968c18ed14254961439dcab16a0) | A newer repository HEAD does not change this declared dependency. |
+| Wire package dependency | [`7167659e9c043cb3351074fcacb40200cc57f3a3`](https://github.com/eosrio/hyperion-wire-plugin/commit/7167659e9c043cb3351074fcacb40200cc57f3a3) | This engineering package pin does not establish the full testnet launch profile or integrated worker acceptance. |
+
+Sources: the [release package](https://github.com/eosrio/hyperion-history-api/blob/635e9930dd71e65a72615eec54518ccedea135b4/package.json),
+[release lock](https://github.com/eosrio/hyperion-history-api/blob/635e9930dd71e65a72615eec54518ccedea135b4/package-lock.json),
+[draft package](https://github.com/eosrio/hyperion-history-api/blob/11078df8594d1e3a8bba68185d4a08e606ee82f4/package.json),
+and [draft lock](https://github.com/eosrio/hyperion-history-api/blob/11078df8594d1e3a8bba68185d4a08e606ee82f4/package-lock.json).
+The adapter's independent development installation in both snapshots still selects SDK
+`c0156c7bc65bee780b2215ba731ee6e5fe2bb52d`; the [recovery refresh #351](https://github.com/eosrio/hyperion-history-api/pull/351)
+aligns that development pin to the existing root SDK after a clean installation exposed missing
+recovery exports. That draft change is not a released adapter or a newly qualified engine pair.
+The 9.5.5 harness default and floating `mongo:8` tag likewise remain fixture choices.
+
+The current [toolchain policy](../architecture/hyperion-4.5-typescript-toolchain.md) requires
+Node 24 minimum and maintained Node 24/26 validation, Bun 1.4.4 and TypeScript 7.0.2 for applicable
+packages, scripts-enabled `npm ci` from committed locks, whole-project checks and normal artifact
+emission. Preserve historical runtime measurements. Bun production-runtime qualification remains
+separate in [History API #197](https://github.com/eosrio/hyperion-history-api/issues/197).
+
+The mandatory matrix now explicitly includes always-string `action_count` alongside all-chain
+exact sequence strings, ABI-deployment-versioned declarative mapping live reload, and the planned
+Wire explorer root. [Wire worker integration #191](https://github.com/eosrio/hyperion-history-api/issues/191),
+[bounded backpressure #277](https://github.com/eosrio/hyperion-history-api/issues/277),
+[integrated profiling #329](https://github.com/eosrio/hyperion-history-api/issues/329),
+[stream compatibility #231](https://github.com/eosrio/hyperion-history-api/issues/231),
+[WormDB qualification #23](https://github.com/eosrio/hyperion-tools/issues/23), and
+[explorer delivery #64](https://github.com/eosrio/hyperion-tools/issues/64) remain open gates.
+Component fixtures and merged implementation slices do not pass these rows. The outstanding
+source-server artifacts, representative Antelope/AtomicAssets deployments, Wire launch pins,
+MongoDB engine/adapter release, public state-API migration decisions and operator distribution
+pins above still require selection and evidence.
