@@ -15,6 +15,12 @@ History API/MongoDB adapter, SDK, Wire package, stream client and catalog toolin
 Node 22 evidence at its original versions; current runtime and release acceptance must use the
 selected 24/26 baseline. This does not activate a production runtime upgrade.
 
+The [release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) records the
+selected upgrade sources, Elasticsearch lanes and mandatory runtime, state, parity, Wire,
+stream and explorer gates. Its [dated pin inventory](../qualification/hyperion-4.5-matrix-research.md#2026-10-26-development-pin-refresh)
+separates current development dependencies from supported release combinations; no row is qualified
+by the plan alone.
+
 ## Repository ownership
 
 Use one release coordination issue in hyperion-tools, with implementation issues in the repository
@@ -69,13 +75,17 @@ Existing history compatibility and reliability checks run from the beginning. Th
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
 instead of waiting for a speculative complete SDK.
 
+The [draft release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) for
+[P02](https://github.com/eosrio/hyperion-tools/issues/20) names the first retained-history fixture
+and the source/server scope decisions needed before the supported upgrade set is declared.
+
 ## Parallel workstreams and release gates
 
 - **Component profiling and runtime qualification:** follow the
   [profiling program](../performance/hyperion-4.5-profiling.md) across every shipping component.
   Establish guarded, ABI-correct fixtures and correctness oracles, then collect CPU/native,
   allocation/GC, queue/wait, storage and p50/p95/p99 profiles under live, bulk and mixed workloads.
-  Evaluate Bun 1.4.3 against the Node controls with explicit runtime/transport qualification.
+  Evaluate Bun 1.4.4 against the Node controls with explicit runtime/transport qualification.
   Review Elasticsearch release notes and qualify server/client changes without requiring a
   full Hyperion history reindex. Historical reports and faster typechecking are not runtime evidence.
 - **Upgrade and reliability:** preserve usable existing Elasticsearch history and continued history
