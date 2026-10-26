@@ -8,3 +8,6 @@
 crates/core/src/ship_abi.json text eol=lf
 # Preserve source receipts, reports and their manifest byte for byte on every platform.
 docs/qualification/evidence/wire-testnet-20261020/* -text
+
+# Preserve the original measured observation bytes and their published SHA-256.
+docs/performance/evidence/bun-es-client-20261022.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

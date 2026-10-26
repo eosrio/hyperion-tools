@@ -9,6 +9,12 @@ This roadmap turns it into verifiable delivery milestones. Component designs bel
 work that implements them; another round of detailed architecture interviews is not required
 before starting.
 
+Hyperion 4.5 requires **Node 24 or newer**, with maintained CI on **Node 24 and 26**.
+[The runtime baseline transition](https://github.com/eosrio/hyperion-tools/issues/65) covers the
+History API/MongoDB adapter, SDK, Wire package, stream client and catalog tooling. Preserve historical
+Node 22 evidence at its original versions; current runtime and release acceptance must use the
+selected 24/26 baseline. This does not activate a production runtime upgrade.
+
 ## Repository ownership
 
 Use one release coordination issue in hyperion-tools, with implementation issues in the repository
@@ -19,6 +25,7 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 |---|---|---|
 | eosrio/hyperion-tools | Release plan, Rust ingestion/codec and snapshot tooling, reusable processing/recovery components where appropriate, replay and cross-component qualification. | Existing; retain as the main coordination home. |
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
+| eosrio/hyperion-stream-client | Client protocol, lifecycle and packaging; qualify actual client/server compatibility with the History API. | Existing; track server integration in History API #231. |
 | eosrio/hyperion-explorer | Companion explorer frontend, dependency/toolchain upgrades, browser UX, and client compatibility with the 4.5 API and stream contracts. | Existing; modernization started locally; publish implementation and qualify against pinned 4.5 components. |
 | eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
@@ -104,8 +111,11 @@ and the source/server scope decisions needed before the supported upgrade set is
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
   query/filter/sort/page behavior, cache/stream/archive paths and retained-history exact coverage;
   document the intentional 4.5 response-type change without requiring a full history reindex.
-  [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231) explicitly owns
-  stream-client filter, reconnect/recovery and cancellation compatibility; it remains a release gate.
+- **Stream client/server compatibility:** complete [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+  across real history/live filters, reconnect cleanup, cancellation and request-scoped terminal
+  failures. Qualify exact sequence strings and retryable errors through the actual client/server
+  route, with source-count/identity, transport-drop, fork and LIB checks. Client-only fixtures
+  do not satisfy server or Elasticsearch completeness acceptance.
 - **Explorer modernization and compatibility:** upgrade the existing frontend and qualify its
   routes, SSR/proxy deployment, live streaming and browser behavior against the 4.5 contracts.
   Preserve exact sequence identities and distinguish unavailable projections from empty results.
@@ -119,6 +129,17 @@ and the source/server scope decisions needed before the supported upgrade set is
 Do not schedule transport replacement, an untrusted-code sandbox, a wholesale worker-pool rewrite
 or zero-downtime backend cutover as prerequisites for 4.5. Revisit only with a concrete requirement
 or measurement and a separate scope decision.
+
+## Stream client compatibility gate
+
+- [ ] Complete [History API #231](https://github.com/eosrio/hyperion-history-api/issues/231)
+  before M4 acceptance, coordinated with [qualification matrix #20](https://github.com/eosrio/hyperion-tools/issues/20)
+  and [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24).
+
+Use #231 as the implementation and acceptance source; do not duplicate its backlog. Server
+fixes can proceed alongside other backend work. Package, browser and loopback client tests
+are supporting evidence; closing this gate requires the actual server/client integration
+against a known Antelope dataset and its history/live recovery checks.
 
 ## Explorer delivery slices
 
@@ -140,7 +161,14 @@ This extends the roadmap without renumbering the published initial issue batch.
    retryable unavailability and explicit recovery without presenting failed requests as empty
    results or disabling unrelated history. Consume completeness/last-valid-state headers when
    their shared contract is defined; history indexing progress does not establish state readiness.
-3. **Release acceptance (M4):** test the built explorer behind the real `/explorer` API proxy with
+3. **Wire testnet preview (planned):** serve a pinned new explorer build with Hyperion 4.5 as the
+   main page at [testnet.wire.eosrio.io](https://testnet.wire.eosrio.io/), tracked in
+   [Explorer #4](https://github.com/eosrio/hyperion-explorer/issues/4). Use the intended Wire chain
+   and API configuration, support root-page assets and deep links, and preserve API, documentation
+   and streaming routes. Verify real Wire browser/SSR workflows, served build identities and rollback
+   before activation. Schedule the preview after a usable pinned Wire API and applicable client
+   integration checks; preview success does not complete Wire or 4.5 release qualification.
+4. **Release acceptance (M4):** test the built explorer behind the real `/explorer` API proxy with
    pinned API and stream-client artifacts. Cover accounts, blocks, transactions, public keys,
    contract tables, filters/pagination, and enabled top-holder/oracle features. Exercise live
    streaming reconnect and finality/fork recovery against representative supported deployments,
@@ -231,6 +259,62 @@ the release gates or qualify a runtime/server upgrade. API #195 remains open for
 persisted checkpoint/restart evidence. API #208 remains open for integrated live
 fork/restart recovery and late old-generation broker callbacks. API #196 owns the
 subsequent reader-to-ack profiles; API #197 transport work is deferred by the operator.
+
+## Native Wire profiling checkpoint: 2026-10-24
+
+The [current profiling ledger](../performance/hyperion-4.5-profiling.md#current-native-wire-capture-checkpoint-2026-10-24)
+now links the audited 14-process native Wire capture in
+[History API #298](https://github.com/eosrio/hyperion-history-api/pull/298).
+The frozen Node 24 run passed holds 1/33/122/256/397 but **failed** the unchanged
+685 progress wait. Profile completeness, preserved evidence and clean teardown do not
+complete the native worker/Mongo path, live fork/restart, #277 proof-capacity or Wire release gates.
+
+The measured stacks distinguish qualification-observer sync calls from production work.
+That CPU-only capture left measurements in #277/#248/#196: observer write/sync latency, actual
+per-open ancestry GET/bytes/waits and queue residence. Its backend/host I/O, dense-input
+retention and paired overhead comparisons are explicitly unmeasured. Preserve the current
+source/oracles, 256-block ancestry, queue policy and deadlines before selecting an optimization.
+
+## Native Wire I/O checkpoint: 2026-10-24
+
+The [subsequent profiling ledger](../performance/hyperion-4.5-profiling.md#native-wire-prooflogger-measurement-checkpoint-2026-10-24)
+records [History API #302](https://github.com/eosrio/hyperion-history-api/pull/302)
+and the independently verified [measurements](https://github.com/eosrio/hyperion-history-api/blob/67b544e4f720606e97171dbad999a7e8a92b64b4/docs/performance/native-wire-proof-io-20261024.md).
+The new Node 24 run again failed the original 685 wait at 661, with complete
+14-process CPU and 6,569-proof I/O accounting and successful original cleanup.
+Actual proof-open HTTP counts/body sizes and logger sync latency are now measured;
+source-modeled endpoint counts, exclusive waits, incremental overhead and full
+qualification remain distinct. The old frozen capture is preserved.
+
+The mandatory correctness frontier remains completing #288's same-attempt matrix,
+then #277 prospective count/byte coordination and the complete original 1..1480
+replay/canonical recovery gates. Controlled read/logger experiments and #248's
+dense retained-memory work remain open. No optimization, workload/budget/deadline
+change, runtime ranking or release-readiness conclusion is selected by this checkpoint.
+
+## Native Wire broker recovery checkpoint: 2026-10-25
+
+[History API #320](https://github.com/eosrio/hyperion-history-api/pull/320) merged into
+still-draft [#289](https://github.com/eosrio/hyperion-history-api/pull/289), completing
+the scoped [#319](https://github.com/eosrio/hyperion-history-api/issues/319) owned-broker
+handoff case. The actual Linux Node 24 run verifies the held/fenced original receipt,
+the replacement's own fresh write/end/retained association, exactly both original
+block-33 publishers, separate broker counter windows and resumed block-34 state,
+native and API checks. Broker settlement remains unknown.
+
+[The frozen evidence and gate record](https://github.com/eosrio/hyperion-history-api/issues/319#issuecomment-6399124139)
+has two independent custody audits covering 19,155 payloads and all source, emission,
+component, input and oracle pins. Both unchanged full workloads **failed** at the
+original 685 barrier. The fault's master exit 1 and false software-shutdown assertion
+are preserved; physical cleanup and incumbent preservation were independently verified.
+
+The remaining [#288 recovery matrix](https://github.com/eosrio/hyperion-history-api/issues/288)
+includes generic/reversible inputs and other combined storage/live-fork cases.
+[#277](https://github.com/eosrio/hyperion-history-api/issues/277) still requires prospective
+count/byte coordination and the complete original 1..1480 replay on Node 24/26.
+The parent stays draft; source/oracles, 256-block ancestry, budgets, durability,
+defaults and deadlines are unchanged. This checkpoint grants no capacity or full
+Wire/release qualification.
 
 ## Publication and evidence
 

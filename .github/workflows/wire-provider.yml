@@ -5,13 +5,17 @@ on:
     branches: [main, master]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   source-pinned-provider:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ['24', '26']
     env:
       RUSTUP_TOOLCHAIN: '1.95.0'
     steps:
