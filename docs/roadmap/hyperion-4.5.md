@@ -27,10 +27,10 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
 | eosrio/hyperion-stream-client | Client protocol, lifecycle and packaging; qualify actual client/server compatibility with the History API. | Existing; track server integration in History API #231. |
 | eosrio/hyperion-explorer | Companion explorer frontend, dependency/toolchain upgrades, browser UX, and client compatibility with the 4.5 API and stream contracts. | Existing; modernization started locally; publish implementation and qualify against pinned 4.5 components. |
-| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
+| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Published foundations; stateful source/view/candidate contracts and adapter integration remain in progress. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
-| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Created; scaffold CI passed. |
-| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Created; scaffold CI passed. |
+| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Original PostgreSQL oracle and pure formatters published; portable lifecycle and full API parity remain open. |
+| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Provider and codec foundations published; selected testnet and full-worker qualification remain open. |
 | igorls/wormdb | Database engine capabilities and engine-specific correctness/performance fixes. | Existing; file engine work here when demonstrated necessary. |
 | eosrio/hyperion-docs | Operator-facing upgrade, installation, configuration and recovery documentation. | Existing; publish operator guidance as behavior becomes qualified. |
 
@@ -69,13 +69,34 @@ Existing history compatibility and reliability checks run from the beginning. Th
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
 instead of waiting for a speculative complete SDK.
 
+### Current delivery checkpoint: 2026-10-27
+
+This is a progress snapshot of the linked work, not completion of M1–M4.
+
+| Workstream | Verified result | Remaining gate |
+|---|---|---|
+| Stateful SDK | [Proposal #33](https://github.com/eosrio/hyperion-sdk/pull/33) and [internal value foundation #34](https://github.com/eosrio/hyperion-sdk/pull/34) merged. The value slice passed 100 tests on each native Node 24/26 runtime, packed consumers, independent Standards/Spec review and product CI. | [SDK #32](https://github.com/eosrio/hyperion-sdk/issues/32) still needs the source/view/candidate/reducer and adapter conformance seams. The proposal remains proposed; no new family is activated by the internal value helper. |
+| AtomicAssets and AtomicMarket | [Original PostgreSQL oracle #13](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/13) and [pure sale formatter #15](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/15) merged. Both native Node 24/26 original PostgreSQL 16.15 runs passed seven SQL/view/HTTP stages, expected rejection controls and owned cleanup. | [Asset lifecycle #10](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/10) needs actual portable MongoDB integration and coherent reads. [Full 2.7.0 parity #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1), marketplace state and remaining APIs stay open. |
+| Wire worker/MongoDB candidate | Complete source review and CI pass for [History API #361](https://github.com/eosrio/hyperion-history-api/pull/361). Its latest plain Node 24 control passed 34 cursor waits, then failed target 1037 with completed recovery polls at 1036. Original cleanup, host guards and independent complete custody verification passed. | Keep #361 draft. Fault 1244, final 1480, current full replay and the remaining recovery/launch matrix are unqualified. Source ACKs and green component checks do not close [#191](https://github.com/eosrio/hyperion-history-api/issues/191) or [#277](https://github.com/eosrio/hyperion-history-api/issues/277). |
+
+The [current profiling checkpoint](../performance/hyperion-4.5-profiling.md#native-wire-and-domain-foundation-checkpoint-2026-10-27)
+records the two separate failed Wire observations and their evidence boundaries.
+The next Wire diagnostic needs a faithful restartable backlog fixture; a raw block corpus alone
+does not preserve store state, queued bodies and in-flight ownership. The original deadline and
+correctness gates remain intact. Experimental capacity stays off and requires an explicit per-chain
+qualification budget with no derived default.
+
+Retained-history upgrades, Bun runtime support, stream-client integration, final Wire launch pins,
+WormDB qualification, explorer delivery and operator distribution remain separate release gates.
+These component merges do not close them.
+
 ## Parallel workstreams and release gates
 
 - **Component profiling and runtime qualification:** follow the
   [profiling program](../performance/hyperion-4.5-profiling.md) across every shipping component.
   Establish guarded, ABI-correct fixtures and correctness oracles, then collect CPU/native,
   allocation/GC, queue/wait, storage and p50/p95/p99 profiles under live, bulk and mixed workloads.
-  Evaluate Bun 1.4.3 against the Node controls with explicit runtime/transport qualification.
+  Evaluate the current Bun 1.4.4 candidate against the Node controls with explicit runtime/transport qualification.
   Review Elasticsearch release notes and qualify server/client changes without requiring a
   full Hyperion history reindex. Historical reports and faster typechecking are not runtime evidence.
 - **Upgrade and reliability:** preserve usable existing Elasticsearch history and continued history
