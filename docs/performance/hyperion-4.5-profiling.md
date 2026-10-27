@@ -266,6 +266,52 @@ matrix and #277's prospective count/byte coordination before full original repla
 and canonical recovery acceptance. Preserve current source/oracles, logger
 durability, 256-block ancestry, queue policy and deadlines.
 
+## Native Wire and domain foundation checkpoint: 2026-10-27
+
+The current authoring/runtime candidate is **Bun 1.4.4**; earlier dated captures retain their
+original versions. TypeScript checks and package consumers do not qualify Bun as a full worker runtime.
+Current release validation uses native Node 24/26, with Node 24 as the minimum.
+
+The source-equivalent f307/tree155657 candidate in
+[History API #361](https://github.com/eosrio/hyperion-history-api/pull/361), including
+[the combined metadata read #372](https://github.com/eosrio/hyperion-history-api/pull/372),
+has two distinct owned Linux observations:
+
+| Observation | Actual outcome | Evidence scope |
+|---|---|---|
+| CPU/stage capture enabled | Failed target 749; last recorded healthy checkpoint 746. | All 14 physical CPU profiles, observer census, original cleanup and 18,044 guest payloads plus 45 host receipts verified. This remains a failed replay. |
+| Plain native Node 24 control | Passed 34 cursor waits, including 749 and 1005, then failed target 1037 after 60.096654 seconds; completed recovery polls observed 1036. | All 14 physical processes have disabled CPU receipts and clean observer flushes; no CPU profiles. Original cleanup, host postguard, no-writer checks, 24,966 guest payloads/191,494,164 bytes and 55 host receipts verified. |
+
+The [independently audited control record](https://github.com/eosrio/hyperion-history-api/issues/277#issuecomment-6453121714)
+preserves the original 1–1480 workload, 900/60/90/1050-second budgets, six CPUs, 16 GiB/no swap,
+queue64/resume8, prefetch8/8/32, window32 and ancestry256. The source sent and acknowledged
+1–1037 with zero outstanding, while complete projection/native/history holds reached
+1/33/122/256/397. Captured bulk requests have no request/item failures. Fault1244, final1480,
+final ACK/drain, native final ancestry and physical Mongo state/undo/isolation sampling were not reached.
+
+A 60.020304-second reader pause overlaps 49.496795 seconds of the failed phase. Endpoint-calibrated
+wall alignment places the first successful 1037 proof just after its deadline; that alignment lacks
+an intra-run clock-adjustment proof and does not assign exclusive cost or a remedy. Boundary resource
+counters are not peaks or time series. These unpaired observations establish no causal performance
+gain. The [qualification issue #371](https://github.com/eosrio/hyperion-history-api/issues/371) remains open.
+
+The plain archive is 41,754,124 bytes, SHA-256
+`48d4f9960dc61b19590291bf3f6352d5d85b578c6cf617bb8bd09a02d5a47d7b`.
+The separately sealed installed package's 18,735 members and 14 dependency-oracle fixture bytes
+were verified as external input provenance, distinct from current guest custody. Private raw runtime
+logs and installed inputs are not republished here.
+
+The [original PostgreSQL oracle](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/13)
+now passes its constructed 2.7.0 SQL/view/HTTP slice on Node 24/26. The
+[internal SDK value foundation](https://github.com/eosrio/hyperion-sdk/pull/34) passes focused,
+full and packed-consumer checks. Neither is physical MongoDB domain parity, full marketplace/API
+coverage, a production migration result or a cross-runtime performance comparison.
+
+Next work retains the original criteria: build a faithful backlog capture/restart seam, then select
+experiments using measured stage/resource evidence. Preserve complete genesis/source provenance,
+queued original bodies, store state and attempt/credit ownership; typed headers alone are insufficient.
+Experimental aggregate capacity remains off and requires an explicit per-chain qualification budget.
+
 ## Fixture and workload prerequisites
 
 The local `wax-probe` manifest declares WAX blocks **437200000–437201999** with SHIP v0 and
