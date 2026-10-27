@@ -275,12 +275,13 @@ Current release validation uses native Node 24/26, with Node 24 as the minimum.
 The source-equivalent f307/tree155657 candidate in
 [History API #361](https://github.com/eosrio/hyperion-history-api/pull/361), including
 [the combined metadata read #372](https://github.com/eosrio/hyperion-history-api/pull/372),
-has two distinct owned Linux observations:
+has three distinct owned Linux observations of the same installed source:
 
 | Observation | Actual outcome | Evidence scope |
 |---|---|---|
 | CPU/stage capture enabled | Failed target 749; last recorded healthy checkpoint 746. | All 14 physical CPU profiles, observer census, original cleanup and 18,044 guest payloads plus 45 host receipts verified. This remains a failed replay. |
 | Plain native Node 24 control | Passed 34 cursor waits, including 749 and 1005, then failed target 1037 after 60.096654 seconds; completed recovery polls observed 1036. | All 14 physical processes have disabled CPU receipts and clean observer flushes; no CPU profiles. Original cleanup, host postguard, no-writer checks, 24,966 guest payloads/191,494,164 bytes and 55 host receipts verified. |
+| Plain native Node 26 control | Passed 45 cursor waits through 1308, including the 1244 fault cell, then failed target 1340 after 60.032454 seconds; both primary recovery views in the last completed poll observed 1316. | CPU/stage/capture and experimental capacity remained off. Original cleanup, host postguard, no-writer checks, 31,132 guest payloads/227,473,060 bytes and 55 host receipts verified. The actual partial workload remains failed. |
 
 The [independently audited control record](https://github.com/eosrio/hyperion-history-api/issues/277#issuecomment-6453121714)
 preserves the original 1–1480 workload, 900/60/90/1050-second budgets, six CPUs, 16 GiB/no swap,
@@ -301,6 +302,30 @@ The separately sealed installed package's 18,735 members and 14 dependency-oracl
 were verified as external input provenance, distinct from current guest custody. Private raw runtime
 logs and installed inputs are not republished here.
 
+The separate Node 26 control used the same original workload, limits, native inventory and
+correctness oracles. Six complete projection/native/history prefix holds reached 1/33/122/256/397/1244.
+The [independently audited result](https://github.com/eosrio/hyperion-history-api/issues/277#issuecomment-6455355100)
+and separate root recheck retain the failed workload verdict.
+The actual MongoDB fault counter advanced from zero to six; healthy state queries returned retryable
+503 while the write was pending, unrelated block history remained available, and healthy state
+recovered to 1244. The invalid projection remained pending at 1244 with checkpoint 1243 and retryable
+queries. One accepted physical capture (433,992 bytes) contains three projection observations and
+24 observed documents. These are partial fault/isolation observations, not full domain parity.
+
+All 9,373 captured bulk requests returned HTTP 200 without request/item failures. Exact raw action
+document byte multisets reconcile 1,944 publication attempts, 1,944 confirmation callbacks and
+1,944 successful bulk documents. Two floating-point transfer documents were outside the first
+offline canonical parser's subset; their exact raw byte/hash matches resolve that parser limitation.
+Neither broker confirmations nor these bulk joins establish final source ACK/drain or full replay.
+
+The source sent 1–1316, acknowledged through 1308 and retained eight outstanding credits; target
+1340 was never fed. The final shared-reader pause has no observed resume before failure, while
+earlier deserializer proof work continued through source 1270. The timing diagnosis must distinguish
+nested proof spans, unmeasured service work and cross-process clock alignment; it selects no remedy
+or causal throughput gain. Final 1480, final native ancestry, complete drain and remaining recovery
+cells are still unqualified. The current guest archive is 49,203,524 bytes, SHA-256
+`062017412d87d6ecf535058970f1c73d5a247888ba5c8cc688e9464ef4794a56`.
+
 The [original PostgreSQL oracle](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/13)
 now passes its constructed 2.7.0 SQL/view/HTTP slice on Node 24/26. The
 [internal SDK value foundation](https://github.com/eosrio/hyperion-sdk/pull/34) and
@@ -309,12 +334,20 @@ full and packed-consumer checks on Node 24/26. The latter includes reference ada
 for coherent reads, fixed retries and rollback; it is not a native engine result.
 The [internal asset reducer/current-view component](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/17)
 also passes its local and packed controls, with the safe-image input substitution explicitly separated
-from the original PostgreSQL inputs. None of these results establishes physical MongoDB domain
+from the original PostgreSQL inputs. The [internal fixed-price sale component](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/18)
+adds original callback comparisons and source-derived current-view controls on both runtimes;
+those controls do not execute its SQL view or complete sale API. None of these results establishes physical MongoDB domain
 parity, full marketplace/API coverage, production migration or a cross-runtime performance gain.
 
 Next work retains the original criteria: build a faithful backlog capture/restart seam, then select
 experiments using measured stage/resource evidence. Preserve complete genesis/source provenance,
 queued original bodies, store state and attempt/credit ownership; typed headers alone are insufficient.
+The first service-time measurement slice is [History API #375](https://github.com/eosrio/hyperion-history-api/issues/375),
+using existing worker-profiler spans at the original admission/sealing/handoff/ACK call sites.
+It adds no cache, extra requests or observer fsyncs and grants no new settlement authority.
+The [default-off capture helper #373](https://github.com/eosrio/hyperion-history-api/pull/373) merged
+into draft #361 with bounded payloads and explicit restoration refusal. It was not enabled in the
+installed control and does not supply store snapshots or fresh-owner reconstruction.
 Experimental aggregate capacity remains off and requires an explicit per-chain qualification budget.
 
 ## Fixture and workload prerequisites
