@@ -136,6 +136,13 @@ Dependency activation does not automatically expose another plugin's public APIs
 - Give live indexing priority under contention. Preserve infrastructure backpressure: pause the
   shared reader when Elasticsearch exhausts its queue budget and resume after it drains.
   Contract-specific failures must remain isolated from that shared pipeline.
+- Qualification of experimental prospective count-and-byte admission requires an explicitly
+  configured aggregate byte budget per chain, with no derived default. Existing installations
+  retain their current behavior until operators explicitly enable the experimental path.
+  The numeric budget, operator-facing units, configuration syntax and activation plan remain open.
+  Implementation and qualification belong to [History API #277](https://github.com/eosrio/hyperion-history-api/issues/277)
+  under [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24), preserving
+  the accepted [infrastructure backpressure and contract isolation](../adr/0022-retain-infrastructure-backpressure.md).
 
 ## Releases, trust, and operator changes
 

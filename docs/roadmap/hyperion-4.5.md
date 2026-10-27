@@ -81,6 +81,14 @@ instead of waiting for a speculative complete SDK.
 - **Upgrade and reliability:** preserve usable existing Elasticsearch history and continued history
   indexing without a full reindex; initialize new state separately. Exercise failure/retry,
   reconnect, backpressure and live-priority behavior using the existing worker infrastructure.
+- **Prospective capacity admission:** [History API #277](https://github.com/eosrio/hyperion-history-api/issues/277),
+  coordinated through [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24), must
+  qualify the experimental count-and-byte path with an explicit per-chain aggregate byte budget
+  and no derived default. Existing installations retain current behavior until explicit enablement.
+  Numeric budgets, operator-facing units, configuration syntax and activation remain undecided.
+  Preserve existing queue/resume, prefetch, source-window, ancestry and deadline constraints,
+  [infrastructure backpressure and contract isolation](../adr/0022-retain-infrastructure-backpressure.md),
+  and the original replay/recovery/shutdown gates. This policy decision does not complete those gates.
 - **Projection lifecycle:** add portable reads/writes incrementally, then initialization/resume,
   bounded recovery coverage, ABI deployment and mapping revisions, auto-map of allowed accounts,
   staged live reload and per-projection ordering/declared parallel partitions. Bulk and live paths
