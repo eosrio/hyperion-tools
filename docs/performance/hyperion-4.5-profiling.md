@@ -303,9 +303,14 @@ logs and installed inputs are not republished here.
 
 The [original PostgreSQL oracle](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/13)
 now passes its constructed 2.7.0 SQL/view/HTTP slice on Node 24/26. The
-[internal SDK value foundation](https://github.com/eosrio/hyperion-sdk/pull/34) passes focused,
-full and packed-consumer checks. Neither is physical MongoDB domain parity, full marketplace/API
-coverage, a production migration result or a cross-runtime performance comparison.
+[internal SDK value foundation](https://github.com/eosrio/hyperion-sdk/pull/34) and
+[connected opt-in stateful contract](https://github.com/eosrio/hyperion-sdk/pull/35) pass focused,
+full and packed-consumer checks on Node 24/26. The latter includes reference adapter conformance
+for coherent reads, fixed retries and rollback; it is not a native engine result.
+The [internal asset reducer/current-view component](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/17)
+also passes its local and packed controls, with the safe-image input substitution explicitly separated
+from the original PostgreSQL inputs. None of these results establishes physical MongoDB domain
+parity, full marketplace/API coverage, production migration or a cross-runtime performance gain.
 
 Next work retains the original criteria: build a faithful backlog capture/restart seam, then select
 experiments using measured stage/resource evidence. Preserve complete genesis/source provenance,
