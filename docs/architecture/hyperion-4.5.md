@@ -1,6 +1,6 @@
 # Hyperion 4.5 architecture definition
 
-Status: Working architecture draft, based on operator-approved decisions through 2026-10-20 UTC.
+Status: Working architecture draft, based on operator-approved decisions through 2026-10-29 UTC.
 
 Start here. This document defines the system boundaries, release obligations, and operator workflows
 that implementation agents follow. The [detailed decision record](hyperion-4.5-decisions.md) and
@@ -28,9 +28,11 @@ The release must deliver:
 - Working Wire protocol-extension support, qualified against the new testnet to be launched
   with Wire's contracts. The launch's node, contract, and extension revisions must be pinned.
 
-MongoDB and WormDB are permanent state-backend alternatives. A MongoDB-only 4.5 launch is permitted
-if the WormDB effort is too high; this does not waive the other requirements. Any backend offered as
-supported must satisfy the applicable API, capability, finality, and recovery contracts.
+The 4.5 launch uses MongoDB for state queries and Elasticsearch for history, confirmed by the
+operator on 2026-10-29. WormDB implementation and qualification are follow-up work and do not
+block this release. MongoDB and WormDB remain permanent state-backend alternatives in the
+architecture, with backend-neutral definitions and queries. Any backend offered as supported
+must satisfy the applicable API, capability, finality, and recovery contracts; see [ADR 0007](../adr/0007-allow-mongodb-only-45-release.md).
 
 These are architecture requirements, not claims that implementation or qualification is complete.
 
