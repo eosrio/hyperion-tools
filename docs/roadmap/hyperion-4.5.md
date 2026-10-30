@@ -15,6 +15,17 @@ History API/MongoDB adapter, SDK, Wire package, stream client and catalog toolin
 Node 22 evidence at its original versions; current runtime and release acceptance must use the
 selected 24/26 baseline. This does not activate a production runtime upgrade.
 
+## Release backend decision — 2026-10-29
+
+The operator selected **MongoDB for state queries and Elasticsearch for history** for the 4.5
+launch. WormDB implementation and qualification are follow-up work and do not block this release.
+Preserve portable definitions and queries and the long-term backend alternatives; see
+[ADR 0007](../adr/0007-allow-mongodb-only-45-release.md). Full AtomicAssets/AtomicMarket parity,
+Wire support and the applicable integration, recovery and upgrade gates remain required.
+
+Earlier delivery snapshots below retain their original outcomes. Their conditional WormDB
+release gate is superseded by this decision; other release gates remain.
+
 ## Repository ownership
 
 Use one release coordination issue in hyperion-tools, with implementation issues in the repository
@@ -63,7 +74,7 @@ implementation slices as their immediate prerequisites become clear.
 | M1: First portable MongoDB path | One allowed contract is indexed through the shared interfaces using existing workers and queried through Hyperion, with backend-neutral definitions/queries, durable retryable processing and a real MongoDB fixture. | Minimum SDK and adapter contracts; no full SDK freeze required. |
 | M2: Recoverable dynamic projections | The first path survives replay, restart and fork replacement. A declarative mapping changes without restart, with ABI-bound revisions, initialization coverage and validated activation. Contract failures remain isolated. | M1; extend existing reload/sync mechanisms. |
 | M3: Required domain and protocol support | AtomicAssets plus AtomicMarket pass the pinned parity suite. The Wire package works across applicable Node/Rust paths and passes the selected new testnet profile. | SDK capabilities grow through real slices; Wire profile and parity inventory start in parallel with M1. |
-| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises, explorer compatibility and operator workflows pass together for the supported matrix. Backend qualification decision and known limits are published. | All mandatory outcomes; qualified MongoDB is sufficient if WormDB is deferred. |
+| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises, explorer compatibility and operator workflows pass together for the supported MongoDB-state/Elasticsearch-history matrix. Known limits are published. | All mandatory outcomes; WormDB qualification is follow-up work. |
 
 Existing history compatibility and reliability checks run from the beginning. They are not
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
@@ -138,10 +149,10 @@ These component merges do not close them.
   and recovery. Investigation revisions are not accepted launch pins. The new testnet's synced
   SHiP node is available on Hyperion-3; final live qualification still requires the selected
   contract/build/deployment receipts and the integrated Node/Rust recovery exercises.
-- **WormDB:** assess required capabilities early and file demonstrated engine gaps in WormDB.
-  Qualify the unchanged definitions and plugin queries against the same applicable conformance,
-  recovery and parity requirements. If the effort is too high, record an explicit MongoDB-only
-  release decision; permanent backend support remains the architecture direction.
+- **WormDB follow-up:** implementation and qualification do not block 4.5. Preserve portable
+  definitions and plugin queries. A future supported adapter must satisfy the applicable
+  conformance, recovery and parity requirements. MongoDB serves state for this release;
+  Elasticsearch continues to hold history.
 - **Sequence identity and client migration:** [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219)
   implements exact decimal-string uint64 sequence fields on all chains, including Antelope, under
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
@@ -230,7 +241,7 @@ The [published initial issue batch](hyperion-4.5-initial-issues.md) defines ten 
 6. Serve that contract through the existing Hyperion workers and API.
 7. Prove durable projection rollback and restart recovery.
 8. Define the Wire testnet qualification profile.
-9. Assess WormDB against required backend capabilities.
+9. Assess WormDB against required backend capabilities (follow-up outside the 4.5 release gates).
 10. Establish the pinned AtomicAssets/AtomicMarket parity inventory.
 
 The following already exist and must be reused rather than duplicated:
@@ -261,7 +272,7 @@ registered as native GitHub dependencies.
 | P06 | [eosrio/hyperion-history-api #191](https://github.com/eosrio/hyperion-history-api/issues/191) | M1 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
 | P07 | [eosrio/hyperion-tools #21](https://github.com/eosrio/hyperion-tools/issues/21) | M2 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
 | P08 | [eosrio/hyperion-tools #22](https://github.com/eosrio/hyperion-tools/issues/22) | M3 | None |
-| P09 | [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23) | M4 | None |
+| P09 | [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23) | Follow-up | None |
 | P10 | [eosrio/hyperion-atomicassets-plugin #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1) | M3 | None |
 
 The repository-creation prerequisite for P10 is fulfilled. P01 remains open for adapter source
