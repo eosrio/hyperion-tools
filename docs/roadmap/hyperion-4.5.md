@@ -26,6 +26,15 @@ Wire support and the applicable integration, recovery and upgrade gates remain r
 Earlier delivery snapshots below retain their original outcomes. Their conditional WormDB
 release gate is superseded by this decision; other release gates remain.
 
+## Current delivery checkpoint — 2026-10-31
+
+The [31 October progress report](hyperion-4.5-progress-20261031.md) separates merged components
+from remaining release acceptance. The current priorities are the full Wire/MongoDB replay and
+testnet sync, the measured Linux CI correction in HAPI #401, and AtomicAssets/AtomicMarket parity.
+SDK #42, HAPI #402 and Atomic #50 now own complete marketplace enumeration through the portable
+query interface. Tools #80 owns current guarded server admission; earlier failed preparation,
+replay and postguard results remain failed. No release gate is complete from these source slices.
+
 ## Repository ownership
 
 Use one release coordination issue in hyperion-tools, with implementation issues in the repository
