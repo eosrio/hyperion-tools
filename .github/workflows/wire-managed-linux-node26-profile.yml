@@ -1,0 +1,47 @@
+name: Retained Wire Linux Node 26 deadline profile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/wire-managed-linux-node26-profile.yml
+      - scripts/wire-managed-linux-profile/**
+
+permissions:
+  contents: read
+
+jobs:
+  retained-wire-node26:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: tools
+      - uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-history-api
+          ref: 404d36f58aaaf83b5b25c8e5a62d38ed582f5d57
+          persist-credentials: false
+          path: product
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Validate coverage parser controls without product execution
+        run: node --test tools/scripts/wire-managed-linux-profile/offline.test.mjs
+      - name: Capture original retained Wire workload and actual worker profiles
+        env:
+          CI: 'true'
+        run: node tools/scripts/wire-managed-linux-profile/run.mjs node26-404d "$GITHUB_WORKSPACE/product" "$RUNNER_TEMP/wire-managed-linux-node26-profile"
+      - name: Retain raw verdicts, runtime custody and completed profiles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wire-managed-linux-profile-node26-404d-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/wire-managed-linux-node26-profile
+          if-no-files-found: error
+          retention-days: 14
