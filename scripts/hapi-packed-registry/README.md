@@ -72,8 +72,8 @@ rewrites the packed consumer nor intercepts its npm calls.
 
 ## Evidence and limits
 
-The new workflow produces three files only after success: a registry seed tar, a receipt and a separate
-OUTPUT tar. Raw command receipts include argv, cwd, cap, original wait result, bounded raw stdout/stderr
+V1 produced a registry seed tar, a receipt and a separate OUTPUT tar. V2 requires those three plus the
+independent pre-teardown context proof. Raw command receipts include argv, cwd, cap, original wait result, bounded raw stdout/stderr
 and hashes, pipe EOF, process birth identities and two bounded observations of descendant closure.
 Every process name is considered; a newly observed unrelated process also causes refusal rather than
 being silently exempted. A timeout, uncertain closure or metadata error is a failed producer. No signal,

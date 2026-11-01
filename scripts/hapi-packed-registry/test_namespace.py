@@ -80,6 +80,9 @@ class NamespaceData(unittest.TestCase):
         with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=lambda p,*_:stat_body(int(p.parent.name),90)),mock.patch.object(N.os,'readlink',return_value='pid:[20]'):
             factory.return_value.iterdir.return_value=[PurePosixPath('/proc/'+str(p))for p in range(1,4098)]
             with self.assertRaisesRegex(ValueError,'census bound'):N.census()
+    def test_command_identity_history_is_also_bounded(self):
+        with self.assertRaisesRegex(ValueError,'identity history'):
+            N.classify({}, {5000:row(5000,5000,1,5000)}, {(p,p)for p in range(1,4097)},5000)
     def test_stat_parser_binds_pid_and_birth(self):
         value=N.parse_stat(9,stat_body(9,90));self.assertEqual(value['comm'],'modeled)x');self.assertEqual(value['birth'],90)
         with self.assertRaises(ValueError):N.parse_stat(8,stat_body(9,90))

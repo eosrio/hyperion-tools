@@ -117,6 +117,7 @@ def classify(before, rows, observed, session):
         added = {(pid,row['birth']) for pid,row in rows.items()
                  if row['session'] == session or row['ppid'] in rows and (row['ppid'],rows[row['ppid']]['birth']) in observed}
         updated = observed | added
+        C.need(len(updated) <= MAX_PROCESSES, 'Bounded command identity history exceeded')
         if updated == observed: break
         observed = updated
     live = []
