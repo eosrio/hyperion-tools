@@ -285,7 +285,11 @@ def produce(repo, output):
     consumer = resolver/'consumer'; consumer.mkdir(mode=0o700); fresh(consumer/'package.json',b'{"name":"stateful-native-consumer","private":true,"type":"module"}')
     resolver_cache = resolver/'npm-cache'; resolver_cache.mkdir(mode=0o700)
     call([node,npm,'install','--ignore-scripts','--no-audit','--no-fund',*tarballs,'@types/node@25.5.0'],consumer,'normal-resolver',60,{**env,'npm_config_cache':str(resolver_cache)})
-    lock_bytes = (consumer/'package-lock.json').read_bytes(); lock = C.parse_json(lock_bytes); packages,requests = C.graph(lock,profile)
+    lock_bytes = (consumer/'package-lock.json').read_bytes()
+    # Retain original resolver bytes even when parsing/graph admission refuses.
+    fresh(output/'normal-resolver.package-lock.json',lock_bytes)
+    fresh(output/'normal-resolver.package.json',(consumer/'package.json').read_bytes())
+    lock = C.parse_json(lock_bytes); packages,requests = C.graph(lock,profile)
     installed = evidence_inventory(consumer/'node_modules'); closure = resolver/'closure.json'
     save(closure,{'packages':packages,'requests':{name:sorted(values)for name,values in requests.items()}})
     export_spec = resolver/'export.json'; save(export_spec,{'cacheRoot':str(resolver_cache),'output':str(work/'export'),'closure':str(closure),'consumer':str(consumer),'localPacks':[str(p)for p in tarballs]})

@@ -79,6 +79,8 @@ jobs:
           name: hapi-current103-packed-registry-v1-FAILED-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/hapi-current103-packed-registry/FAILED-PRODUCER.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/normal-resolver.package.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/normal-resolver.package-lock.json
             ${{ runner.temp }}/hapi-current103-packed-registry/work/commands/*.json
           if-no-files-found: warn
           compression-level: 0

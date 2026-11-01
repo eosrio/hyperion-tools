@@ -117,8 +117,10 @@ def graph(lock, profile):
     need(type(lock) is dict and lock.get('lockfileVersion') == 3 and lock.get('name') == 'stateful-native-consumer', 'Actual unlocked consumer lock required')
     packages = lock.get('packages'); need(type(packages) is dict and 3 < len(packages) <= 1024 and '' in packages, 'Complete bounded consumer graph required')
     root = mappings(packages[''], 'dependencies')
-    need(set(root) == set(LOCAL_NAMES) | {'@types/node'} and root['@types/node'] == '25.5.0', 'Original three consumer arguments required')
-    by, requests = {}, {}
+    # npm11.17 saves an explicit version with its default '^' prefix. This is
+    # saved metadata, not permission to change the original CLI selection.
+    need(set(root) == set(LOCAL_NAMES) | {'@types/node'} and root['@types/node'] in ('25.5.0','^25.5.0'), 'Original three consumer arguments required')
+    by, requests = {}, {'@types/node': {'25.5.0'}}  # Original unchanged CLI argument.
     for location, row in packages.items():
         if location == '':
             continue
@@ -132,6 +134,7 @@ def graph(lock, profile):
             need(registry_url(row.get('resolved')).startswith(name + '/-/'), 'Package tarball URL/name differs')
         by[location] = {'name': name, **row}
     need(all('node_modules/' + name in by for name in LOCAL_NAMES), 'Both original local packages required')
+    need(by.get('node_modules/@types/node', {}).get('version') == '25.5.0', 'Original exact root @types/node selection required')
     for field, value in [('mongodb','7.2.0'),('ajv','8.20.0'),('semver','7.8.5'),('@types/node','25.5.0')]:
         need(any(row['name'] == field and row['version'] == value for row in by.values()), 'Fixed direct registry root absent')
     need(mappings(by['node_modules/' + LOCAL_NAMES[0]], 'dependencies') == {'mongodb':'7.2.0'}

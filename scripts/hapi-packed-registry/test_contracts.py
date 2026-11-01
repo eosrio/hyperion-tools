@@ -79,6 +79,24 @@ class Contracts(unittest.TestCase):
     def test_complete_modeled_metadata_and_transitive_tarball_closure(self):
         result=self.validate();self.assertEqual(len(result),10);self.assertEqual(sum('package'in r for r in result),5)
         self.assertTrue(any(r.get('package',{}).get('root')=='node'for r in result))
+    def test_npm_saved_prefix_keeps_exact_selected_root_and_original_cli_cache_key(self):
+        self.lock['packages']['']['dependencies']['@types/node']='^25.5.0'
+        packages,requests=C.graph(self.lock,PROFILE)
+        self.assertEqual(packages['node_modules/@types/node']['version'],'25.5.0')
+        self.assertEqual(requests['@types/node'],{'25.5.0','^25.5.0'})
+        # Pacote can retain the original explicit request, independently of npm's saved range.
+        row=copy.deepcopy(self.entries[7]);row.update(key='pacote:tarball:@types/node@25.5.0',metadata=None)
+        self.entries.append(row);self.validate()
+    def test_other_saved_ranges_and_newer_root_versions_still_refuse(self):
+        for spec in ('~25.5.0','*','^25.6.0','25.5.1'):
+            lock=copy.deepcopy(self.lock);lock['packages']['']['dependencies']['@types/node']=spec
+            with self.subTest(spec=spec):
+                with self.assertRaises(ValueError):C.graph(lock,PROFILE)
+        lock=copy.deepcopy(self.lock);lock['packages']['']['dependencies']['@types/node']='^25.5.0'
+        lock['packages']['node_modules/model-helper/node_modules/@types/node']=copy.deepcopy(lock['packages']['node_modules/@types/node'])
+        lock['packages']['node_modules/model-helper']['dependencies']={'@types/node':'25.5.0'}
+        lock['packages']['node_modules/@types/node']['version']='25.5.1'
+        with self.assertRaisesRegex(ValueError,'exact root @types/node'):C.graph(lock,PROFILE)
     def test_fixed_raw_runtime_inventory_not_a_version_label(self):
         C.verify_runtime_members(MEMBERS['entries'],copy.deepcopy(MEMBERS['entries']))
         changed=copy.deepcopy(MEMBERS['entries']);changed[-1]['mode']^=1
