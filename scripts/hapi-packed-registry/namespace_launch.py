@@ -18,6 +18,7 @@ def launch(product, output):
     C.need(platform.system() == 'Linux' and platform.machine() == 'x86_64' and os.geteuid() > 0, 'Original unprivileged Linux CI runner required')
     raw=(HERE/'profile-pidns.json').read_bytes();profile,_=C.load_contract(raw,(HERE/'npm-members.json').read_bytes())
     N.source_pins(profile,HERE);env=N.selected_environment(os.environ,profile);host=N.host_snapshot()
+    C.need(host['uid'] > 0 and host['gid'] > 0, 'Original nonroot launcher UID/GID required before privileged namespace creation')
     product=product.resolve(strict=True);output=output.absolute();context=output.with_name(output.name+'.pidns')
     C.fresh_target(output.parent.resolve(strict=True),output);C.fresh_target(context.parent.resolve(strict=True),context)
     paths={name:Path(shutil.which(name)).resolve(strict=True) for name in ('sudo','unshare')}

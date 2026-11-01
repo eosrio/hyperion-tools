@@ -538,6 +538,7 @@ def validate_receipt(receipt, profile, profile_pin):
         need(value['kind'] == N.KIND and value['contextPin'] == value['before']['contextPin'] == value['after']['contextPin'], 'Original namespace context pin required')
         need(value['start']['kind'] == N.KIND and value['start']['profile'] == profile_pin and value['start']['initDumpable'] == 1
              and value['before']['actual']['pid'] == value['after']['actual']['pid'], 'Original producer context/source identity required')
+        N.validate_snapshot(value['start']['init'],value['start']['host'],value['start']['uid'],value['start']['gid'],init=True)
         for stage in ('before','after'):
             N.validate_snapshot(value[stage]['actual'],value['start']['host'],value['start']['uid'],value['start']['gid'])
             need(value[stage]['actual']['init']['birth'] == value['start']['init']['init']['birth']
@@ -546,6 +547,8 @@ def validate_receipt(receipt, profile, profile_pin):
         need(type(receipt['commands']) is list and len(receipt['commands']) == len(plan), 'Complete nonempty original command sequence required')
         for command,planned in zip(receipt['commands'],plan):
             validate_command_terminal(command,planned)
+            for stage in ('namespaceBefore','namespaceAfter'):
+                N.validate_snapshot(command[stage]['actual'],value['start']['host'],value['start']['uid'],value['start']['gid'])
             need(command['closurePolicy'] == N.KIND and command['diagnosticErrors'] == []
                  and command['namespaceBefore']['contextPin'] == command['namespaceAfter']['contextPin'] == value['contextPin']
                  and command['lastCompleteCensus']['complete'] is True and command['lastCompleteCensus']['live'] == []

@@ -20,9 +20,13 @@ if(selection==='pidns-v2'){
  assert.equal(pidNamespace,context.init.pidNamespace);assert.notEqual(pidNamespace,context.host.pidNamespace);
  assert.equal(await readlink('/proc/self/ns/mnt'),context.init.mountNamespace);assert.equal(await readlink('/proc/self'),String(process.pid));
  assert.equal(process.getuid(),context.uid);assert.equal(process.getgid(),context.gid);
+ assert.ok(Number.isInteger(context.uid)&&context.uid>0&&Number.isInteger(context.gid)&&context.gid>0);assert.equal(context.initDumpable,1);
  const initStat=String(await readFile('/proc/1/stat')),fields=initStat.slice(initStat.lastIndexOf(')')+2).split(/\s+/);
  assert.equal(Number(fields[19]),context.init.init.birth);assert.equal(await readlink('/proc/1/ns/pid'),pidNamespace);
- const status=String(await readFile('/proc/self/status'));assert.match(status,/^NoNewPrivs:\s+1$/m);assert.match(status,/^CapEff:\s+0+$/m);
+ const status=Object.fromEntries(String(await readFile('/proc/self/status')).trim().split('\n').map(line=>{const at=line.indexOf(':');return[line.slice(0,at),line.slice(at+1).trim()];}));
+ assert.equal(status.NoNewPrivs,'1');for(const key of ['CapEff','CapPrm','CapInh','CapAmb'])assert.match(status[key],/^0+$/);
+ for(const[key,id]of [['Uid',context.uid],['Gid',context.gid]])assert.deepEqual(status[key].split(/\s+/).map(Number),Array(4).fill(id));
+ assert.equal(status.Groups,'');
 }
 assert.equal(sha(await readFile(process.execPath)),profile.runtime.nodeSha256);
 const npmRoot=await realpath(process.env.REGISTRY94_NPM_ROOT),baseline=await readFile(join(root,'npm-members.json'));

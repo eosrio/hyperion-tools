@@ -28,7 +28,7 @@ def enter(request):
     profile,_=C.load_contract(profile_bytes,(HERE/'npm-members.json').read_bytes())
     N.source_pins(profile,HERE)
     C.need(request['kind'] == N.KIND and request['profile'] == C.pin(profile_bytes)
-           and request['uid'] == request['host']['uid'] > 0 and request['gid'] == request['host']['gid'] >= 0, 'Original launcher identity required')
+           and request['uid'] == request['host']['uid'] > 0 and request['gid'] == request['host']['gid'] > 0, 'Original launcher nonroot UID/GID required')
     selected=N.selected_environment(request['environment'],profile)
     before=N.snapshot()
     C.need(before['pidNamespace'] != request['host']['pidNamespace'] and before['mountNamespace'] != request['host']['mountNamespace']

@@ -15,8 +15,9 @@ HERE=Path(__file__).resolve().parent
 def host():return {'pidNamespace':'pid:[10]','mountNamespace':'mnt:[11]','uid':1001,'gid':1001}
 def snapshot(pid=2):
     return {'pid':pid,'ppid':0 if pid==1 else 1,'uid':1001,'gid':1001,'realUids':[1001]*3,'realGids':[1001]*3,
+            'statusUids':[1001]*4,'statusGids':[1001]*4,'supplementaryGids':[],
             'pidNamespace':'pid:[20]','mountNamespace':'mnt:[21]','procSelf':str(pid),'initNamespace':'pid:[20]',
-            'init':{'pid':1,'birth':100},'procMounted':True,'capEff':'0000000000000000','noNewPrivs':'1'}
+            'init':{'pid':1,'birth':100},'procMounted':True,'capEff':'0000000000000000','capPrm':'0','capInh':'0','capAmb':'0','noNewPrivs':'1'}
 def row(pid,birth,ppid=1,session=1,state='S'):
     return {'pid':pid,'birth':birth,'ppid':ppid,'group':session,'session':session,'state':state,'comm':'modeled','pidNamespace':'pid:[20]'}
 def stat_body(pid,birth,state='S'):
@@ -48,6 +49,31 @@ class NamespaceData(unittest.TestCase):
         bad=snapshot(1);bad['ppid']=42
         with self.assertRaises(ValueError):N.validate_snapshot(bad,host(),1001,1001,init=True)
         with self.assertRaises(ValueError):N.validate_snapshot(snapshot(),host(),1001,1001,init=True)
+    def test_retained_permitted_inheritable_or_ambient_capabilities_refuse(self):
+        for key in ('capEff','capPrm','capInh','capAmb'):
+            for bits in ('1','0000000000000001','-0','0x0','',None):
+                value=snapshot();value[key]=bits
+                with self.subTest(key=key,bits=bits):
+                    with self.assertRaises(ValueError):N.validate_snapshot(value,host(),1001,1001)
+    def test_all_proc_uid_gid_values_and_supplementary_groups_are_unprivileged(self):
+        for key in ('statusUids','statusGids'):
+            for index in range(4):
+                value=snapshot();value[key][index]=0
+                with self.subTest(key=key,index=index):
+                    with self.assertRaises(ValueError):N.validate_snapshot(value,host(),1001,1001)
+        for uid,gid in ((0,1001),(1001,0),(True,1001),(1001,True)):
+            with self.assertRaises(ValueError):N.validate_snapshot(snapshot(),host(),uid,gid)
+        value=snapshot();value['supplementaryGids']=[0]
+        with self.assertRaises(ValueError):N.validate_snapshot(value,host(),1001,1001)
+    def test_snapshot_collects_all_proc_credentials_from_mocked_linux_reads(self):
+        status='Uid:\t1001 1001 1001 1001\nGid:\t1001 1001 1001 1001\nGroups:\t\nCapEff:\t0\nCapPrm:\t0\nCapInh:\t0\nCapAmb:\t0\nNoNewPrivs:\t1\n'
+        texts={'/proc/self/status':status,'/proc/1/stat':stat_body(1,100),'/proc/self/mountinfo':'1 2 0:1 / /proc rw - proc proc rw\n'}
+        links={'/proc/self/ns/pid':'pid:[20]','/proc/self/ns/mnt':'mnt:[21]','/proc/self':'2','/proc/1/ns/pid':'pid:[20]'}
+        calls={name:mock.Mock(return_value=value)for name,value in {'getpid':2,'getppid':1,'getuid':1001,'getgid':1001,'getresuid':(1001,)*3,'getresgid':(1001,)*3}.items()}
+        with mock.patch.multiple(N.os,create=True,**calls),mock.patch.object(N.os,'readlink',side_effect=lambda path:links[path]),mock.patch.object(N,'read_text',side_effect=lambda path,*_:texts[path]):
+            value=N.snapshot();N.validate_snapshot(value,host(),1001,1001)
+            self.assertEqual(value['statusUids'],[1001]*4);self.assertEqual(value['statusGids'],[1001]*4)
+            self.assertTrue(all(value[key]=='0'for key in ('capEff','capPrm','capInh','capAmb')))
     def test_shared_host_new_pid_predicate_remains_strict(self):
         baseline={1:row(1,10),2:row(2,20)};rows={**baseline,99:row(99,90)}
         _,live=N.classify(baseline,rows,set(),3)
@@ -133,7 +159,7 @@ class NamespaceData(unittest.TestCase):
         commands=[]
         for index,planned in enumerate(C.command_plan(layout,self.profile)):
             began=index*10;row=model.terminal();row.update(planned)
-            row.update(startedMonotonic=began,closurePolicy=N.KIND,diagnosticErrors=[],namespaceBefore=stage,namespaceAfter=stage,
+            row.update(startedMonotonic=began,closurePolicy=N.KIND,diagnosticErrors=[],namespaceBefore=copy.deepcopy(stage),namespaceAfter=copy.deepcopy(stage),
                        directExit={'at':began+0.3,'exitCode':0,'waitReaped':True},pipeEofTimes={'stdout':began+0.4,'stderr':began+0.45},
                        lastCompleteCensus={'complete':True,'live':[]},closureObservations=[{'complete':True,'live':[],'at':began+0.6},{'complete':True,'live':[],'at':began+0.8}])
             if index<4:
@@ -149,7 +175,7 @@ class NamespaceData(unittest.TestCase):
                  'seedSealedBeforeProof':True,'seedContainsLocalPacksOrBuilds':False,'freshProofSourceAndBuild':True,'proof':proof,
                  'actualOutputPacks':[{'name':name,'role':'OUTPUT','origin':'actual-proof-mutable-cache-after-original-terminal'}for name in C.LOCAL_NAMES],
                  'postUploadArtifact':None,'commands':commands,'commandLayout':layout,
-                 'executionContext':{'kind':N.KIND,'contextPin':start_pin,'start':start,'before':stage,'after':stage}}
+                 'executionContext':{'kind':N.KIND,'contextPin':start_pin,'start':start,'before':copy.deepcopy(stage),'after':copy.deepcopy(stage)}}
         return receipt
     def test_v2_producer_receipt_requires_original_context_and_every_command_proof(self):
         receipt=self.v2_receipt();pin=C.pin(self.raw)
@@ -169,6 +195,15 @@ class NamespaceData(unittest.TestCase):
         for mutate in mutations:
             value=copy.deepcopy(original);mutate(value)
             with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+    def test_receipt_checks_every_recorded_privilege_snapshot(self):
+        original=self.v2_receipt()
+        for key in ('capPrm','capInh','capAmb'):
+            for target in ('init','before','after','command-before','command-after'):
+                value=copy.deepcopy(original);context=value['executionContext']
+                actual=context['start']['init'] if target=='init' else context[target]['actual'] if target in ('before','after') else value['commands'][0]['namespaceBefore' if target=='command-before' else 'namespaceAfter']['actual']
+                actual[key]='1'
+                with self.subTest(key=key,target=target):
+                    with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
     def test_failed_setup_stream_or_direct_exit_cannot_hide_behind_empty_closure(self):
         original=self.v2_receipt()
         mutations=[lambda r:r['commands'][4].update(exitCode=1),lambda r:r['commands'][4].update(timedOut=True),
@@ -197,6 +232,11 @@ class NamespaceData(unittest.TestCase):
         source=ast.get_source_segment((HERE/'namespace_init.py').read_text(),writer)
         self.assertIn('os.fchmod(stream.fileno(),0o600)',source)
         self.assertLess(source.index('os.fchmod'),source.index('stream.write'))
+    def test_nonroot_gid_is_fenced_before_namespace_and_context_effects(self):
+        launcher=(HERE/'namespace_launch.py').read_text();init=(HERE/'namespace_init.py').read_text()
+        self.assertIn("host['gid'] > 0",launcher);self.assertLess(launcher.index("host['gid'] > 0"),launcher.index('subprocess.run'))
+        self.assertIn("request['gid'] == request['host']['gid'] > 0",init)
+        self.assertLess(init.index("request['host']['gid'] > 0"),init.index('libc.prctl(38'))
 
 
 if __name__=='__main__':unittest.main()

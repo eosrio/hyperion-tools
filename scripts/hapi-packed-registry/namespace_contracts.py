@@ -54,12 +54,15 @@ def snapshot():
     status = dict(line.split(':',1) for line in read_text('/proc/self/status').splitlines() if ':' in line)
     return {'pid':os.getpid(),'ppid':os.getppid(),'uid':os.getuid(),'gid':os.getgid(),
             'realUids':list(os.getresuid()),'realGids':list(os.getresgid()),
+            'statusUids':[int(v) for v in status['Uid'].split()],'statusGids':[int(v) for v in status['Gid'].split()],
+            'supplementaryGids':[int(v) for v in status['Groups'].split()],
             'pidNamespace':os.readlink('/proc/self/ns/pid'),'mountNamespace':os.readlink('/proc/self/ns/mnt'),
             'procSelf':os.readlink('/proc/self'),'initNamespace':os.readlink('/proc/1/ns/pid'),
             'init':parse_stat(1,read_text('/proc/1/stat',4096)),
             'procMounted':any(line.split(' - ',1)[-1].split()[:2] == ['proc','proc'] and line.split()[4] == '/proc'
                               for line in read_text('/proc/self/mountinfo').splitlines() if ' - ' in line),
-            'capEff':status['CapEff'].strip(),'noNewPrivs':status['NoNewPrivs'].strip()}
+            'capEff':status['CapEff'].strip(),'capPrm':status['CapPrm'].strip(),
+            'capInh':status['CapInh'].strip(),'capAmb':status['CapAmb'].strip(),'noNewPrivs':status['NoNewPrivs'].strip()}
 
 
 def host_snapshot():
@@ -68,13 +71,17 @@ def host_snapshot():
 
 
 def validate_snapshot(value, host, uid, gid, *, init=False):
+    C.need(type(uid) is int and uid > 0 and type(gid) is int and gid > 0, 'Original nonroot UID and GID required')
     C.need(value['pidNamespace'] != host['pidNamespace'] and value['mountNamespace'] != host['mountNamespace']
            and re.fullmatch(r'pid:\[\d+\]',value['pidNamespace']) and re.fullmatch(r'mnt:\[\d+\]',value['mountNamespace']), 'Fresh private PID/mount namespaces required')
     C.need(value['procMounted'] is True and value['procSelf'] == str(value['pid'])
            and value['initNamespace'] == value['pidNamespace'] and value['init']['pid'] == 1
            and value['init']['birth'] > 0, 'Namespace-local fresh procfs/init identity required')
     C.need(value['uid'] == uid and value['gid'] == gid and value['realUids'] == [uid]*3
-           and value['realGids'] == [gid]*3 and int(value['capEff'],16) == 0 and value['noNewPrivs'] == '1', 'Original unprivileged builder identity required')
+           and value['realGids'] == [gid]*3 and value['statusUids'] == [uid]*4 and value['statusGids'] == [gid]*4
+           and value['supplementaryGids'] == [] and value['noNewPrivs'] == '1'
+           and all(type(value[key]) is str and re.fullmatch('0+',value[key]) for key in ('capEff','capPrm','capInh','capAmb')),
+           'Original unprivileged builder identity and empty capability sets required')
     C.need((value['pid'] == 1 and value['ppid'] == 0) if init else value['pid'] > 1, 'Expected namespace role required')
 
 
@@ -83,7 +90,7 @@ def current_context(path, profile):
     C.need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not stat.S_IMODE(info.st_mode)&0o077
            and info.st_size <= 128*1024, 'Ordinary private init context required')
     raw = path.read_bytes(); value = C.parse_json(raw); C.need(value['kind'] == KIND and value['profile'] == C.pin((path.parent/'profile.json').read_bytes()), 'Exact v2 init context required')
-    C.need(C.parse_json((path.parent/'profile.json').read_bytes()) == profile and value['uid'] > 0 and value['gid'] >= 0
+    C.need(C.parse_json((path.parent/'profile.json').read_bytes()) == profile and value['uid'] > 0 and value['gid'] > 0
            and value['initDumpable'] == 1, 'Current complete profile/identity/proc visibility required')
     actual = snapshot(); validate_snapshot(actual,value['host'],value['uid'],value['gid'])
     C.need(actual['pidNamespace'] == value['init']['pidNamespace'] and actual['mountNamespace'] == value['init']['mountNamespace']
