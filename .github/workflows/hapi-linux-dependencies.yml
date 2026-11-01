@@ -1,0 +1,79 @@
+name: HAPI Linux dependency artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hapi-linux-dependencies.yml'
+      - 'scripts/hapi-linux-dependencies/**'
+  pull_request:
+    paths:
+      - '.github/workflows/hapi-linux-dependencies.yml'
+      - 'scripts/hapi-linux-dependencies/**'
+
+permissions:
+  contents: read
+
+# An independent producer never cancels another workflow or an older qualification.
+concurrency:
+  group: hapi-linux-dependencies-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  linux-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the actual Tools workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tools
+          persist-credentials: false
+      - name: Run offline archive and provenance controls
+        run: python3 -m unittest discover -s tools/scripts/hapi-linux-dependencies -p 'test_*.py' -v
+      - name: Check out the exact reviewed HAPI product
+        uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-history-api
+          ref: 21ef67d84ad94fb35a0c1bba600a42df5318c404
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.4.0'
+          cache: ''
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Produce the source-pinned normal-install dependency closure
+        run: >-
+          python3 tools/scripts/hapi-linux-dependencies/producer.py
+          --product-root "${{ github.workspace }}/product"
+          --output "${{ runner.temp }}/hapi-dependency-artifact"
+      - name: Upload the two immutable dependency input files
+        id: dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: hapi-dependencies-21ef67d84ad9-linux-x64-node26.4.0
+          path: |
+            ${{ runner.temp }}/hapi-dependency-artifact/candidate82-dependencies.tar.gz
+            ${{ runner.temp }}/hapi-dependency-artifact/candidate82-dependencies.receipt.json
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+      - name: Record post-upload identity separately from the immutable receipt
+        env:
+          DEPENDENCY_ARTIFACT_ID: ${{ steps.dependencies.outputs.artifact-id }}
+          DEPENDENCY_ARTIFACT_SHA256: ${{ steps.dependencies.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          value = {key: os.environ[key] for key in ['GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB', 'GITHUB_WORKFLOW_SHA', 'DEPENDENCY_ARTIFACT_ID', 'DEPENDENCY_ARTIFACT_SHA256']}
+          print(json.dumps(value, sort_keys=True))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Dependency input only; Root must freeze API artifact identity, receipt and tar hashes before guest admission.\n\n```json\n' + json.dumps(value, indent=2) + '\n```\n')
+          PY
