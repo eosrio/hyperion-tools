@@ -36,6 +36,42 @@ MAX_ARCHIVE, MAX_RECEIPT, MAX_STREAM = 1024**3, 16 * 1024**2, 2 * 1024**2
 FORBIDDEN = {".git", ".git-credentials", ".npmrc", ".netrc", ".ssh", ".aws"}
 PROFILE = json.loads(Path(__file__).with_name("profile.json").read_bytes())
 
+# Only fixed, source-controlled cases are accepted. Incomplete cases refuse before installs.
+CASES = {
+    "candidate82": {"profile": PROFILE, "receipt": RECEIPT, "archive": ARCHIVE, "artifact": ARTIFACT,
+                    "workflow": WORKFLOW, "kind": "hyperion-candidate82-linux-dependencies", "preparedSdk": PREPARED_SDK},
+    "current88": {"profile": json.loads(Path(__file__).with_name("profile-current88.json").read_bytes()), "receipt": "current88-dependencies.receipt.json",
+                  "archive": "current88-dependencies.tar.gz", "artifact": "hapi-current88-linux-x64-node26.4.0",
+                  "workflow": ".github/workflows/hapi-linux-current-dependencies.yml",
+                  "kind": "hyperion-current88-linux-dependencies", "preparedSdk": "58d68c5cea81490bbb1c9a7736d633d465bab3ef"},
+}
+
+
+def select_case(name):
+    need(name in CASES, "Unknown fixed dependency case")
+    case = CASES[name]
+    profile = case["profile"]
+    need(type(profile) is dict and type(case["preparedSdk"]) is str
+         and re.fullmatch("[a-f0-9]{40}", case["preparedSdk"]), "Dependency case source pins unresolved")
+    need(all(type(profile.get(key)) is str and re.fullmatch("[a-f0-9]{40}", profile[key])
+             for key in ("productHead", "productTree"))
+         and type(profile.get("sourceFiles")) is int and profile["sourceFiles"] > 0
+         and type(profile.get("sourceInventorySha256")) is str
+         and re.fullmatch("[a-f0-9]{64}", profile["sourceInventorySha256"]), "Incomplete dependency case source pins")
+    locks = profile.get("manifestLocks")
+    need(type(locks) is dict and set(locks) == {"package.json", "package-lock.json",
+         "packages/backend-mongodb/package.json", "packages/backend-mongodb/package-lock.json"}
+         and all(type(pin) is dict and set(pin) == {"bytes", "sha256"} and type(pin["bytes"]) is int
+                 and pin["bytes"] > 0 and type(pin["sha256"]) is str and re.fullmatch("[a-f0-9]{64}", pin["sha256"])
+                 for pin in locks.values()), "Incomplete dependency case lock pins")
+    sources = profile.get("dependencySources")
+    need(type(sources) is dict and set(sources) == {"rootSdk", "adapterSdk", "wire", "nodeAbieos"}
+         and all(type(pin) is dict and set(pin) == {"packagePath", "name", "version", "resolved", "integrity"}
+                 and all(type(value) is str and value for value in pin.values()) for pin in sources.values())
+         and all(re.fullmatch("[a-f0-9]{40}", sources[key]["resolved"].split("#")[-1])
+                 for key in ("rootSdk", "adapterSdk", "wire")), "Incomplete dependency case provenance pins")
+    return case
+
 
 def need(value, message):
     if not value:
@@ -276,7 +312,7 @@ def source_links(profile=PROFILE):
              "sourceInventorySha256": profile["sourceInventorySha256"]}]
 
 
-def dependency_provenance(repo, rows, profile=PROFILE):
+def dependency_provenance(repo, rows, profile=PROFILE, prepared_sdk=PREPARED_SDK):
     by, result = validate_inventory(rows), {}
     root_lock = json.loads((repo / "package-lock.json").read_bytes())["packages"]
     adapter_lock = json.loads((repo / "packages/backend-mongodb/package-lock.json").read_bytes())["packages"]
@@ -291,17 +327,17 @@ def dependency_provenance(repo, rows, profile=PROFILE):
         if key != "nodeAbieos":
             value["sourceRevision"] = expected["resolved"].split("#")[-1]
         if key == "wire":
-            need(value["sourceRevision"] == WIRE, "Wire pin differs")
-            value["preparedSdkRevision"] = PREPARED_SDK
+            need(value["sourceRevision"] == profile["dependencySources"]["wire"]["resolved"].split("#")[-1], "Wire pin differs")
+            value["preparedSdkRevision"] = prepared_sdk
             value["artifactReceipts"] = []
             for filename in ("protocol-node-artifact.json", "protocol-rust-artifact.json", "protocol-source-receipt.json", "protocol-npm-lock.json"):
                 name = package_path + "/dist/" + filename
                 value["artifactReceipts"].append({"path": name, **file_pin(repo / name)})
                 receipt = json.loads((repo / name).read_bytes())
                 if filename == "protocol-npm-lock.json":
-                    need(receipt["packages"]["node_modules/@eosrio/hyperion-sdk"]["resolved"].endswith("#" + PREPARED_SDK), "Wire prepared SDK differs")
+                    need(receipt["packages"]["node_modules/@eosrio/hyperion-sdk"]["resolved"].endswith("#" + prepared_sdk), "Wire prepared SDK differs")
                     continue
-                need(receipt["sourceRevision"] == WIRE, "Original Wire receipt source revision differs")
+                need(receipt["sourceRevision"] == value["sourceRevision"], "Original Wire receipt source revision differs")
                 if "sourceModified" in receipt:
                     need(receipt["sourceModified"] is False, "Modified Wire source refused")
                 for field in ("files", "sourceFiles", "outputFiles"):
@@ -362,8 +398,10 @@ def run_install(repo, node, npm, scope):
     return row
 
 
-def validate_receipt(receipt, profile=PROFILE):
-    need(receipt.get("schemaVersion") == 1 and receipt.get("kind") == "hyperion-candidate82-linux-dependencies" and "exampleOnly" not in receipt, "Eligible dependency receipt required")
+def validate_receipt(receipt, profile=PROFILE, case=None):
+    case = CASES["candidate82"] if case is None else case
+    need(profile == case["profile"], "Cross-case source profile refused")
+    need(receipt.get("schemaVersion") == 1 and receipt.get("kind") == case["kind"] and "exampleOnly" not in receipt, "Eligible dependency receipt required")
     for field in ("productHead", "productTree", "sourceInventorySha256", "manifestLocks"):
         need(receipt[field] == profile[field], "Source/manifest/lock receipt drift")
     need(receipt["sourceCleanAfterInstall"] is True and receipt["dependencyUpdatesPerformed"] is False
@@ -375,7 +413,7 @@ def validate_receipt(receipt, profile=PROFILE):
     need(set(producer) == {"kind", "repository", "sourceHead", "runId", "runAttempt", "job", "workflowPath", "workflowRevision", "artifactName"}, "Post-upload artifact identity must remain outside the receipt")
     need(producer["kind"] == "github-actions-normal-npm-ci" and producer["repository"] == "eosrio/hyperion-tools"
          and producer["sourceHead"] == profile["productHead"] and producer["job"] == "linux-dependencies"
-         and producer["workflowPath"] == WORKFLOW and producer["artifactName"] == ARTIFACT
+         and producer["workflowPath"] == case["workflow"] and producer["artifactName"] == case["artifact"]
          and re.fullmatch("[a-f0-9]{40}", producer["workflowRevision"])
          and all(type(producer[key]) is int and producer[key] > 0 for key in ("runId", "runAttempt")), "Actual CI producer identity required")
     need(receipt["sourceLinks"] == source_links(profile), "Exact independently source-bound workspace link required")
@@ -400,7 +438,7 @@ def validate_receipt(receipt, profile=PROFILE):
         if key != "nodeAbieos":
             need(actual["sourceRevision"] == expected["resolved"].split("#")[-1], "Dependency revision drift")
         if key == "wire":
-            need(actual["preparedSdkRevision"] == PREPARED_SDK, "Prepared Wire SDK drift")
+            need(actual["preparedSdkRevision"] == case["preparedSdk"], "Prepared Wire SDK drift")
             names = [expected["packagePath"] + "/dist/" + name for name in ("protocol-node-artifact.json", "protocol-rust-artifact.json", "protocol-source-receipt.json", "protocol-npm-lock.json")]
             need(actual["artifactReceipts"] == [{"path": name, **{field: by[name][field] for field in ("bytes", "sha256")}} for name in names], "Original Wire receipt byte pins differ")
         if key == "nodeAbieos":
@@ -409,22 +447,25 @@ def validate_receipt(receipt, profile=PROFILE):
     return by
 
 
-def ci_identity(tools, env):
+def ci_identity(tools, env, case=None):
+    case = CASES["candidate82"] if case is None else case
     need(env.get("GITHUB_ACTIONS") == "true" and env.get("GITHUB_REPOSITORY") == "eosrio/hyperion-tools", "Public Tools GitHub Actions producer only")
     revision = git(tools, "rev-parse", "HEAD").decode().strip()
     need(re.fullmatch("[a-f0-9]{40}", revision) and revision == env.get("GITHUB_WORKFLOW_SHA"), "Actual Tools workflow revision differs")
-    need(env.get("GITHUB_JOB") == "linux-dependencies" and env.get("GITHUB_WORKFLOW_REF", "").startswith("eosrio/hyperion-tools/" + WORKFLOW + "@"), "Actual workflow/job identity differs")
+    need(env.get("GITHUB_JOB") == "linux-dependencies" and env.get("GITHUB_WORKFLOW_REF", "").startswith("eosrio/hyperion-tools/" + case["workflow"] + "@"), "Actual workflow/job identity differs")
     run_id, attempt = int(env["GITHUB_RUN_ID"]), int(env["GITHUB_RUN_ATTEMPT"])
     need(run_id > 0 and attempt > 0, "Actual CI run/attempt required")
-    return {"kind": "github-actions-normal-npm-ci", "repository": "eosrio/hyperion-tools", "sourceHead": PROFILE["productHead"],
-            "runId": run_id, "runAttempt": attempt, "job": "linux-dependencies", "workflowPath": WORKFLOW,
-            "workflowRevision": revision, "artifactName": ARTIFACT}
+    return {"kind": "github-actions-normal-npm-ci", "repository": "eosrio/hyperion-tools", "sourceHead": case["profile"]["productHead"],
+            "runId": run_id, "runAttempt": attempt, "job": "linux-dependencies", "workflowPath": case["workflow"],
+            "workflowRevision": revision, "artifactName": case["artifact"]}
 
 
-def produce(repo, output):
+def produce(repo, output, case_name="candidate82"):
+    case = select_case(case_name)
+    profile = case["profile"]
     need(platform.system() == "Linux" and platform.machine() == "x86_64", "Only the pinned Linux/x64 CI producer may install")
     tools = Path(__file__).resolve().parents[2]
-    producer = ci_identity(tools, os.environ)
+    producer = ci_identity(tools, os.environ, case)
     node = Path(shutil.which("node") or "").resolve(strict=True)
     npm = Path(shutil.which("npm") or "").resolve(strict=True)
     need(node.name == "node" and npm.name == "npm-cli.js", "Actual native Node/npm entrypoints required")
@@ -432,28 +473,28 @@ def produce(repo, output):
     need(version([str(node), "--version"]) == "v26.4.0" and version(["bun", "--version"]) == "1.4.4", "Pinned runtime/checker required")
     need(version(["bun", "-p", "process.versions.typescript"]) == "7.0.2", "Pinned embedded TypeScript required")
     npm_version = version([str(node), str(npm), "--version"])
-    verify_source(repo)
+    verify_source(repo, profile)
     need(not output.exists() and not output.is_relative_to(repo), "New external artifact output required")
     installs = [run_install(repo, node, npm, "root"), run_install(repo, node, npm, "adapter")]
-    verify_source(repo)
+    verify_source(repo, profile)
     need(json.loads((repo / "node_modules/typescript/package.json").read_bytes())["version"] == "7.0.2", "Installed TypeScript differs")
     rows = dependency_inventory(repo)
-    receipt = {"schemaVersion": 1, "kind": "hyperion-candidate82-linux-dependencies", "productHead": PROFILE["productHead"],
-        "productTree": PROFILE["productTree"], "sourceInventorySha256": PROFILE["sourceInventorySha256"], "manifestLocks": PROFILE["manifestLocks"],
+    receipt = {"schemaVersion": 1, "kind": case["kind"], "productHead": profile["productHead"],
+        "productTree": profile["productTree"], "sourceInventorySha256": profile["sourceInventorySha256"], "manifestLocks": profile["manifestLocks"],
         "platform": {"os": "linux", "architecture": "x64", "node": "v26.4.0", "npmVersion": npm_version, "bun": "1.4.4", "typescript": "7.0.2"},
         "sourceCleanAfterInstall": True, "dependencyUpdatesPerformed": False, "coreOrBackendEmissionsIncluded": False, "normalNpmCi": True,
-        "normalInstalls": installs, "producer": producer, "sourceLinks": source_links(), "dependencyProvenance": dependency_provenance(repo, rows), "inventory": rows}
+        "normalInstalls": installs, "producer": producer, "sourceLinks": source_links(profile), "dependencyProvenance": dependency_provenance(repo, rows, profile, case["preparedSdk"]), "inventory": rows}
     data = encoded(receipt)
-    validate_receipt(receipt)
+    validate_receipt(receipt, profile, case)
     need(len(data) <= MAX_RECEIPT, "Receipt exceeds 16 MiB")
     output.mkdir(mode=0o755)
-    write_archive(repo, rows, output / ARCHIVE)
+    write_archive(repo, rows, output / case["archive"])
     need(dependency_inventory(repo) == rows, "Dependency closure changed during archive")
-    verify_source(repo)
-    with (output / RECEIPT).open("xb") as stream:
+    verify_source(repo, profile)
+    with (output / case["receipt"]).open("xb") as stream:
         stream.write(data)
-    print(json.dumps({"artifactName": ARTIFACT, "receipt": file_pin(output / RECEIPT),
-                      "archive": {"bytes": (output / ARCHIVE).stat().st_size, "sha256": archive_digest(output / ARCHIVE)},
+    print(json.dumps({"artifactName": case["artifact"], "receipt": file_pin(output / case["receipt"]),
+                      "archive": {"bytes": (output / case["archive"]).stat().st_size, "sha256": archive_digest(output / case["archive"])},
                       "entries": len(rows), "operationalAdmissionGranted": False}), flush=True)
 
 
@@ -467,7 +508,12 @@ def archive_digest(path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--product-root", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--case", default="candidate82")
+    parser.add_argument("--check-case", action="store_true")
+    parser.add_argument("--product-root", type=Path)
+    parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
-    produce(arguments.product_root.resolve(strict=True), arguments.output.resolve())
+    select_case(arguments.case)  # Refuse unresolved/unknown cases before touching product or installing.
+    if not arguments.check_case:
+        parser.error("--product-root and --output required") if arguments.product_root is None or arguments.output is None else None
+        produce(arguments.product_root.resolve(strict=True), arguments.output.resolve(), arguments.case)

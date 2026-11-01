@@ -67,3 +67,19 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/hapi-linux-dep
 The POSIX filesystem writer/link test runs in Linux CI; archive, receipt, link-graph, source,
 lock, stream and workflow controls also run on Windows. Local source controls do not establish
 that a Linux dependency artifact exists or that the full Wire/MongoDB replay passes.
+
+
+## Current source case (#88)
+
+The separately selected `current88` case pins HAPI source `f16351b774409802f71d08b3f49c6c5f35c9f63a`
+and tree `7849f9caf466b49e69c6896f797d22a239641de8`. Its profile freezes the complete source
+inventory, four manifest and lock hashes, dependency identities, and Wire prepared SDK revision.
+An unresolved or incomplete case refuses before source access or installs. Its separate workflow
+checks case readiness before checkout and uses distinct output, archive,
+receipt, and artifact names. The default `candidate82` case and its published profile and
+artifact identity remain intact. The current case authorizes no guest or service operation.
+
+Consumers validating the current receipt must select the case and
+pass both its fixed profile and identity to `validate_receipt`; the no-argument verifier
+continues to admit only the original case. Case selection does not accept caller-supplied
+source refs, profiles, runtime pins, or commands.
