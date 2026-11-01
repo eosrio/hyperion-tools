@@ -313,6 +313,39 @@ class ProducerTests(unittest.TestCase):
         self.assertIn("--ignore-scripts=false", Path(__file__).with_name("producer.py").read_text())
         self.assertNotIn("candidate82-dependencies", text)
 
+    def test_current103_is_fixed_source_bound_and_rejects_current88_receipts(self):
+        previous = P.select_case("current88"); case = P.select_case("current103")
+        old, profile = previous["profile"], case["profile"]
+        self.assertEqual(profile["productHead"], "bca518ddfebf04c2af957832f2ad9c0582c17932")
+        self.assertEqual(profile["productTree"], "26cfd37e658d030090059096afc32a574ed787ef")
+        self.assertEqual(profile["sourceInventorySha256"], "e5334bae500bc1afd70f497f69791fc1d0d8b86dc4aca8c482aaef2373359ba3")
+        self.assertEqual(profile["sourceFiles"], 1066)
+        for field in ("manifestLocks", "dependencySources"):
+            self.assertEqual(profile[field], old[field])
+        self.assertEqual(case["preparedSdk"], previous["preparedSdk"])
+        for field in ("kind", "archive", "receipt", "artifact", "workflow"):
+            self.assertNotEqual(case[field], previous[field])
+        current = self.receipt_fixture(profile, case); P.validate_receipt(current, profile, case)
+        prior = self.receipt_fixture(old, previous)
+        with self.assertRaises(ValueError): P.validate_receipt(prior, profile, case)
+        with self.assertRaises(ValueError): P.validate_receipt(current, old, previous)
+        incomplete = {**case, "profile": {**profile, "sourceInventorySha256": None}}
+        with mock.patch.dict(P.CASES, {"current103": incomplete}), mock.patch.object(P, "run_install") as install:
+            with self.assertRaises(ValueError): P.produce(self.root / "absent", self.root / "out", "current103")
+            install.assert_not_called()
+
+    def test_current103_workflow_is_explicit_and_does_not_rebind_current88(self):
+        base = Path(__file__).resolve().parents[2]; case = P.select_case("current103")
+        text = (base / case["workflow"]).read_text(); old = (base / P.CASES["current88"]["workflow"]).read_text()
+        self.assertLess(text.index("--case current103 --check-case"), text.index("repository: eosrio/hyperion-history-api"))
+        self.assertIn("ref: " + case["profile"]["productHead"], text)
+        for field in ("artifact", "archive", "receipt"): self.assertIn(case[field], text)
+        self.assertIn("--case current103", text); self.assertNotIn("current88-dependencies", text)
+        self.assertIn("--case current88", old); self.assertIn("f16351b774409802f71d08b3f49c6c5f35c9f63a", old)
+        self.assertEqual(text.count("persist-credentials: false"), 2)
+        self.assertIn("node-version: '26.4.0'", text); self.assertIn("bun-version: '1.4.4'", text)
+        self.assertIn("cancel-in-progress: false", text)
+
     def test_published_workflow_is_path_scoped_pinned_and_dependency_only(self):
         workflow = Path(__file__).resolve().parents[2] / P.WORKFLOW
         text = workflow.read_text()

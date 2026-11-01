@@ -44,6 +44,10 @@ CASES = {
                   "archive": "current88-dependencies.tar.gz", "artifact": "hapi-current88-linux-x64-node26.4.0",
                   "workflow": ".github/workflows/hapi-linux-current-dependencies.yml",
                   "kind": "hyperion-current88-linux-dependencies", "preparedSdk": "58d68c5cea81490bbb1c9a7736d633d465bab3ef"},
+    "current103": {"profile": json.loads(Path(__file__).with_name("profile-current103.json").read_bytes()), "receipt": "current103-dependencies.receipt.json",
+                   "archive": "current103-dependencies.tar.gz", "artifact": "hapi-current103-linux-x64-node26.4.0",
+                   "workflow": ".github/workflows/hapi-linux-current103-dependencies.yml",
+                   "kind": "hyperion-current103-linux-dependencies", "preparedSdk": "58d68c5cea81490bbb1c9a7736d633d465bab3ef"},
 }
 
 
