@@ -192,7 +192,8 @@ class ProducerTests(unittest.TestCase):
         script = self.root / "fail-install.py"; script.write_text("raise SystemExit(7)\n", encoding="utf-8")
         with self.assertRaises(ValueError): P.run_install(self.root, Path(sys.executable), script, "adapter")
 
-    def receipt_fixture(self):
+    def receipt_fixture(self, profile=P.PROFILE, case=None):
+        case = P.CASES["candidate82"] if case is None else case
         rows, data = self.fixture()
         by = {row["path"]: row for row in rows}
         def file(name, content):
@@ -201,13 +202,13 @@ class ProducerTests(unittest.TestCase):
                 if parent != "." and P.dependency_path(parent): by.setdefault(parent, {"path": parent, "type": "directory"})
             by[name] = {"path": name, "type": "file", "bytes": len(content), "sha256": P.digest(content), "mode": 0o644}
         provenance = {}
-        for key, expected in P.PROFILE["dependencySources"].items():
+        for key, expected in profile["dependencySources"].items():
             name = expected["packagePath"] + "/package.json"
             content = P.encoded({field: expected[field] for field in ("name", "version")}); file(name, content)
             value = {**expected, "packageJson": {"bytes": len(content), "sha256": P.digest(content)}}
             if key != "nodeAbieos": value["sourceRevision"] = expected["resolved"].split("#")[-1]
             if key == "wire":
-                value["preparedSdkRevision"] = P.PREPARED_SDK; value["artifactReceipts"] = []
+                value["preparedSdkRevision"] = case["preparedSdk"]; value["artifactReceipts"] = []
                 for suffix in ["protocol-node-artifact.json", "protocol-rust-artifact.json", "protocol-source-receipt.json", "protocol-npm-lock.json"]:
                     name = expected["packagePath"] + "/dist/" + suffix; content = b"fixture-only"
                     file(name, content); value["artifactReceipts"].append({"path": name, "bytes": len(content), "sha256": P.digest(content)})
@@ -221,12 +222,12 @@ class ProducerTests(unittest.TestCase):
         installs = [{"scope": scope, "argv": ["/pinned/node", "/pinned/npm-cli.js", "ci", "--allow-git=all", "--ignore-scripts=false"] + (["--prefix", "packages/backend-mongodb"] if scope == "adapter" else []),
             "cwd": "/fixture/product", "waitReaped": True, "exitCode": 0, "deadlineExceeded": False, "streamsClosed": True, "lifecycleScriptsEnabled": True,
             "stdout": dict(stream), "stderr": dict(stream)} for scope in ["root", "adapter"]]
-        return {"schemaVersion": 1, "kind": "hyperion-candidate82-linux-dependencies", **{key: P.PROFILE[key] for key in ["productHead", "productTree", "sourceInventorySha256", "manifestLocks"]},
+        return {"schemaVersion": 1, "kind": case["kind"], **{key: profile[key] for key in ["productHead", "productTree", "sourceInventorySha256", "manifestLocks"]},
             "platform": {"os": "linux", "architecture": "x64", "node": "v26.4.0", "npmVersion": "12.1.0", "bun": "1.4.4", "typescript": "7.0.2"},
             "sourceCleanAfterInstall": True, "dependencyUpdatesPerformed": False, "coreOrBackendEmissionsIncluded": False, "normalNpmCi": True,
-            "normalInstalls": installs, "producer": {"kind": "github-actions-normal-npm-ci", "repository": "eosrio/hyperion-tools", "sourceHead": P.PROFILE["productHead"],
-                "runId": 1, "runAttempt": 1, "job": "linux-dependencies", "workflowPath": P.WORKFLOW, "workflowRevision": "f" * 40, "artifactName": P.ARTIFACT},
-            "sourceLinks": P.source_links(), "dependencyProvenance": provenance, "inventory": sorted(by.values(), key=lambda row: row["path"])}
+            "normalInstalls": installs, "producer": {"kind": "github-actions-normal-npm-ci", "repository": "eosrio/hyperion-tools", "sourceHead": profile["productHead"],
+                "runId": 1, "runAttempt": 1, "job": "linux-dependencies", "workflowPath": case["workflow"], "workflowRevision": "f" * 40, "artifactName": case["artifact"]},
+            "sourceLinks": P.source_links(profile), "dependencyProvenance": provenance, "inventory": sorted(by.values(), key=lambda row: row["path"])}
 
     def test_receipt_source_lock_link_runtime_and_postupload_identity_drift(self):
         receipt = self.receipt_fixture(); P.validate_receipt(receipt)
@@ -258,6 +259,59 @@ class ProducerTests(unittest.TestCase):
                        lambda r: r["dependencyProvenance"]["rootSdk"]["packageJson"].update(sha256="0" * 64)]:
             changed = copy.deepcopy(receipt); mutate(changed)
             with self.assertRaises(ValueError): P.validate_receipt(changed)
+
+    def test_fixed_case_selection_and_unresolved_case_fail_before_install(self):
+        self.assertIs(P.select_case("candidate82")["profile"], P.PROFILE)
+        unresolved = {**P.CASES["current88"], "profile": None, "preparedSdk": None}
+        with mock.patch.dict(P.CASES, {"current88": {**unresolved, "profile": {}, "preparedSdk": "a" * 40}}):
+            with self.assertRaisesRegex(ValueError, "Incomplete dependency case"):
+                P.select_case("current88")
+        for name in ("current88", "other", "", "__proto__"):
+            with self.subTest(name=name), mock.patch.dict(P.CASES, {"current88": unresolved}), \
+                    mock.patch.object(P, "run_install") as install, self.assertRaises(ValueError):
+                P.produce(self.root / "absent", self.root / "out", name)
+            install.assert_not_called()
+
+    def test_cross_case_source_and_receipts_are_refused(self):
+        old = self.receipt_fixture()
+        fake_profile = copy.deepcopy(P.PROFILE); fake_profile["productHead"] = "a" * 40
+        current = {**P.CASES["current88"], "profile": fake_profile, "preparedSdk": P.PREPARED_SDK}
+        with self.assertRaisesRegex(ValueError, "Cross-case source profile"):
+            P.validate_receipt(old, P.PROFILE, current)
+        with self.assertRaisesRegex(ValueError, "Eligible dependency receipt"):
+            P.validate_receipt(old, fake_profile, current)
+        wrong_source = copy.deepcopy(old); wrong_source["kind"] = current["kind"]
+        with self.assertRaisesRegex(ValueError, "Source/manifest/lock receipt drift"):
+            P.validate_receipt(wrong_source, fake_profile, current)
+        wrong_identity = copy.deepcopy(old); wrong_identity["kind"] = current["kind"]
+        wrong_identity["productHead"] = fake_profile["productHead"]
+        wrong_identity["producer"]["sourceHead"] = fake_profile["productHead"]
+        with self.assertRaisesRegex(ValueError, "Actual CI producer identity"):
+            P.validate_receipt(wrong_identity, fake_profile, current)
+
+    def test_bound_current_receipt_is_valid_and_cross_case_is_rejected(self):
+        case = P.select_case("current88"); profile = case["profile"]
+        current = self.receipt_fixture(profile, case)
+        P.validate_receipt(current, profile, case)
+        with self.assertRaises(ValueError): P.validate_receipt(current)
+        old = self.receipt_fixture()
+        with self.assertRaises(ValueError): P.validate_receipt(old, profile, case)
+        for key in ("productHead", "productTree", "sourceInventorySha256", "manifestLocks"):
+            changed = copy.deepcopy(current); changed[key] = copy.deepcopy(P.PROFILE[key])
+            with self.subTest(key=key), self.assertRaises(ValueError): P.validate_receipt(changed, profile, case)
+
+    def test_current_workflow_fails_closed_and_has_distinct_outputs(self):
+        workflow = Path(__file__).resolve().parents[2] / P.CASES["current88"]["workflow"]
+        text = workflow.read_text()
+        self.assertLess(text.index("--case current88 --check-case"), text.index("repository: eosrio/hyperion-history-api"))
+        if P.CASES["current88"]["profile"] is None:
+            self.assertIn("UNRESOLVED_CURRENT_HAPI_SOURCE", text)
+        else:
+            self.assertIn("ref: " + P.CASES["current88"]["profile"]["productHead"], text)
+        for name in ("artifact", "archive", "receipt"):
+            self.assertIn(P.CASES["current88"][name], text)
+        self.assertIn("--ignore-scripts=false", Path(__file__).with_name("producer.py").read_text())
+        self.assertNotIn("candidate82-dependencies", text)
 
     def test_published_workflow_is_path_scoped_pinned_and_dependency_only(self):
         workflow = Path(__file__).resolve().parents[2] / P.WORKFLOW
