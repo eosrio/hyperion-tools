@@ -83,3 +83,13 @@ Consumers validating the current receipt must select the case and
 pass both its fixed profile and identity to `validate_receipt`; the no-argument verifier
 continues to admit only the original case. Case selection does not accept caller-supplied
 source refs, profiles, runtime pins, or commands.
+
+
+## Current103 source case (#90)
+
+The separately selected `current103` case pins HAPI commit `bca518ddfebf04c2af957832f2ad9c0582c17932`
+and tree `26cfd37e658d030090059096afc32a574ed787ef`. Its independently declared source
+inventory differs from current88; the four manifest/lock and dependency source identities remain
+unchanged. The dedicated workflow produces distinct archive, receipt and artifact names, while
+current88 remains intact. This source profile alone grants no guest operation or runtime qualification.
+The new producer artifact, API identity, receipt and archive bytes remain pending independent review.
