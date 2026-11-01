@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 2,
+  "id": "current103-packed-registry-pidns-v2",
+  "kind": "hyperion-current103-packed-registry-pidns-v2",
+  "product": {
+    "schemaVersion": 1,
+    "productHead": "bca518ddfebf04c2af957832f2ad9c0582c17932",
+    "productTree": "26cfd37e658d030090059096afc32a574ed787ef",
+    "sourceFiles": 1066,
+    "sourceInventorySha256": "e5334bae500bc1afd70f497f69791fc1d0d8b86dc4aca8c482aaef2373359ba3",
+    "manifestLocks": {
+      "package-lock.json": {
+        "bytes": 127154,
+        "sha256": "8a69136d7e096d06f8c24939e4460775bcbd225eadc1e4ed26cb5b0ad10eab47"
+      },
+      "package.json": {
+        "bytes": 2694,
+        "sha256": "10c3f0f8bff8d69aeaaaea9bda8aa45cdf39058ffbba53943f5eb95b0a278b09"
+      },
+      "packages/backend-mongodb/package-lock.json": {
+        "bytes": 22115,
+        "sha256": "5e373b8ad502b1646427e0b923b4eb13cc261e29eee14c38cb0c88c700307f12"
+      },
+      "packages/backend-mongodb/package.json": {
+        "bytes": 1461,
+        "sha256": "a63644e9195126e18955f91ef663161e6f9d215d262513d1d5375b28300f84d5"
+      }
+    },
+    "dependencySources": {
+      "rootSdk": {
+        "packagePath": "node_modules/@eosrio/hyperion-sdk",
+        "name": "@eosrio/hyperion-sdk",
+        "version": "0.0.0-dev.1",
+        "resolved": "git+https://github.com/eosrio/hyperion-sdk.git#7412889a14c84342551fd864ea3ebfcf28849385",
+        "integrity": "sha512-dZhfozF6N5xb+y+veYS55My0SxOy92IvipVXtH6N8YL9ye1v+adBXF+ZqjvQIROapkgFM772mOhIYONOV/5fmQ=="
+      },
+      "adapterSdk": {
+        "packagePath": "packages/backend-mongodb/node_modules/@eosrio/hyperion-sdk",
+        "name": "@eosrio/hyperion-sdk",
+        "version": "0.0.0-dev.1",
+        "resolved": "git+https://github.com/eosrio/hyperion-sdk.git#7412889a14c84342551fd864ea3ebfcf28849385",
+        "integrity": "sha512-dZhfozF6N5xb+y+veYS55My0SxOy92IvipVXtH6N8YL9ye1v+adBXF+ZqjvQIROapkgFM772mOhIYONOV/5fmQ=="
+      },
+      "wire": {
+        "packagePath": "node_modules/@eosrio/hyperion-wire-plugin",
+        "name": "@eosrio/hyperion-wire-plugin",
+        "version": "0.0.0-dev.1",
+        "resolved": "git+https://github.com/eosrio/hyperion-wire-plugin.git#69a66064c077a405341f5aaf15e84b88b8d86ccb",
+        "integrity": "sha512-XefNyVL1fxKao2/D3pDbkyJG5qPNDOKX32QP2/ITrloZGgsSUbwErnItthnEAIAFZjqNTLjCdXcHPbw/6zmo1g=="
+      },
+      "nodeAbieos": {
+        "packagePath": "node_modules/@eosrio/node-abieos",
+        "name": "@eosrio/node-abieos",
+        "version": "4.2.0-f7d5b45",
+        "resolved": "https://registry.npmjs.org/@eosrio/node-abieos/-/node-abieos-4.2.0-f7d5b45.tgz",
+        "integrity": "sha512-eZKWBHS9Jgx4IAmBM6sDFEGGP2i5jqM3TvwWgr1xTkUCNpMmtDDlm8VK5P5L/XobkktnNajA+EEYyiyZpwSD+w=="
+      }
+    }
+  },
+  "consumer": {
+    "path": "packages/backend-mongodb/scripts/check-package.mjs",
+    "bytes": 3335,
+    "sha256": "9ce817fb35b613ed709949ba4c68f6e748f45c28e55b6ad1992d644e571471f7",
+    "nativeTests": 56
+  },
+  "runtime": {
+    "os": "linux",
+    "architecture": "x64",
+    "node": "v26.4.0",
+    "nodeSha256": "4cfdaeec2e3689e4728b4bc98932a9147a3f98162bdc7955c03c0d7fa3b8aa94",
+    "npm": "11.17.0",
+    "npmPackage": {
+      "bytes": 6597,
+      "sha256": "a4f04ad50219f82e0e8f262d3e1acbdbd678040198ea36fca10fe7bbb38da726"
+    },
+    "npmCli": {
+      "bytes": 54,
+      "sha256": "8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7"
+    },
+    "npmMembers": {
+      "path": "npm-members.json",
+      "bytes": 510548,
+      "sha256": "27ab9f2b7842343504b8d7cbae8be1b8f985f9e4d6237dd6318aee543e55ac57",
+      "entries": 2376
+    },
+    "bun": "1.4.4",
+    "typescript": "7.0.2"
+  },
+  "registry": "https://registry.npmjs.org/",
+  "registryRoots": {
+    "@types/node": "25.5.0",
+    "mongodb": "7.2.0",
+    "ajv": "8.20.0",
+    "semver": "7.8.5"
+  },
+  "localPackages": [
+    "@eosrio/hyperion-backend-mongodb",
+    "@eosrio/hyperion-sdk"
+  ],
+  "cacheFormats": {
+    "index": 5,
+    "content": 2,
+    "integrity": "sha512"
+  },
+  "artifact": {
+    "name": "hapi-current103-packed-registry-pidns-v2-linux-x64-node26.4.0",
+    "archive": "current103-packed-registry-pidns-v2.tar.gz",
+    "receipt": "current103-packed-registry-pidns-v2.receipt.json",
+    "outputs": "current103-packed-registry-pidns-v2.OUTPUT.tar.gz",
+    "context": "current103-packed-registry-pidns-v2.context.json"
+  },
+  "workflow": ".github/workflows/hapi-current103-packed-registry-pidns.yml",
+  "job": "registry-supplement-pidns",
+  "retainedReceiverLimits": {
+    "componentSeconds": 300,
+    "packedCommandSeconds": 60,
+    "cpus": 6,
+    "memoryBytes": 17179869184,
+    "swapBytes": 0,
+    "reserveBytes": 48318382080,
+    "diskGiB": 96
+  },
+  "offlineEnvironment": {
+    "npm_config_offline": "true",
+    "npm_config_update_notifier": "false"
+  },
+  "artifactPins": {
+    "zip": null,
+    "receipt": null,
+    "archive": null,
+    "outputs": null,
+    "context": null
+  },
+  "sourceEnvironment": {
+    "HYPERION_NATIVE_SOURCE_PROFILE": "stateful-owner-v2-7412889-69a6606-complete-kind-engineering"
+  },
+  "executionContext": {
+    "kind": "current103-packed-registry-private-pidns-v2",
+    "sourceFiles": {
+      "namespace_contracts.py": {
+        "bytes": 9701,
+        "sha256": "868fc3732e85064c7d58354efc40c378ea80fdbf237b85e2ef4c13332da4734c"
+      },
+      "namespace_init.py": {
+        "bytes": 6483,
+        "sha256": "4ec64e2c7014e2402aec63c68e0c70d760765bac44919e2997da6b82d957f1b2"
+      },
+      "namespace_launch.py": {
+        "bytes": 3584,
+        "sha256": "937cfd3eddab3401b3f841d8731b119d7cce0bb2ea1cae5b153d4b4ec6974c30"
+      },
+      "pidns_runner.py": {
+        "bytes": 7392,
+        "sha256": "ce7c7ba53920f7362a97a43ba4ad9d644d2480f6952d76b772f3234f62d14f5f"
+      },
+      "producer.py": {
+        "bytes": 26812,
+        "sha256": "c87b93e2d00774f7a18157f59f39591548befc935ef102d18b883e435e1d8b05"
+      },
+      "contracts.py": {
+        "bytes": 39756,
+        "sha256": "4332b284c33fa13d034d2bb0dcc650a4a7b62dbf364d1de86ec5cc4d20ddd0d8"
+      },
+      "cache-bridge.mjs": {
+        "bytes": 10059,
+        "sha256": "f07aef6debf06aaf24d295afb53e7ecd10ec25285ed36a456bd453c2ee3c7e85"
+      }
+    },
+    "maxProcesses": 4096,
+    "lastCensusIntervalSeconds": 5
+  }
+}

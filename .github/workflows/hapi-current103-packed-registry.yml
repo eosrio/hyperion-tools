@@ -1,0 +1,83 @@
+name: HAPI current103 offline packed registry supplement
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hapi-current103-packed-registry-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  registry-supplement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the actual Tools workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tools
+          persist-credentials: false
+      - name: Run inert cache and receipt controls
+        run: python3 -m unittest discover -s tools/scripts/hapi-packed-registry -p 'test_contracts.py' -v
+      - name: Check out the exact BCA source
+        uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-history-api
+          ref: bca518ddfebf04c2af957832f2ad9c0582c17932
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.4.0'
+          cache: ''
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Produce the registry-only seed and unchanged offline packed proof
+        run: >-
+          python3 tools/scripts/hapi-packed-registry/producer.py
+          --product-root "${{ github.workspace }}/product"
+          --output "${{ runner.temp }}/hapi-current103-packed-registry"
+      - name: Upload the sealed seed, immutable receipt and separate actual OUTPUT packs
+        id: supplement
+        uses: actions/upload-artifact@v4
+        with:
+          name: hapi-current103-packed-registry-v1-linux-x64-node26.4.0
+          path: |
+            ${{ runner.temp }}/hapi-current103-packed-registry/current103-packed-registry-v1.tar.gz
+            ${{ runner.temp }}/hapi-current103-packed-registry/current103-packed-registry-v1.receipt.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/current103-packed-registry-v1.OUTPUT.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+      - name: Record actual post-upload identity separately
+        env:
+          SUPPLEMENT_ARTIFACT_ID: ${{ steps.supplement.outputs.artifact-id }}
+          SUPPLEMENT_ARTIFACT_SHA256: ${{ steps.supplement.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          value = {key: os.environ[key] for key in ['GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB', 'GITHUB_WORKFLOW_SHA', 'SUPPLEMENT_ARTIFACT_ID', 'SUPPLEMENT_ARTIFACT_SHA256']}
+          print(json.dumps(value, sort_keys=True))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Isolated packed-consumer evidence only; full Wire component NOT_RUN. Root must verify the actual ZIP, receipt, cache and output inventories before any receiver integration.\n\n```json\n' + json.dumps(value, indent=2) + '\n```\n')
+          PY
+      - name: Retain original failed command outcomes and stream evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hapi-current103-packed-registry-v1-FAILED-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/hapi-current103-packed-registry/FAILED-PRODUCER.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/normal-resolver.package.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/normal-resolver.package-lock.json
+            ${{ runner.temp }}/hapi-current103-packed-registry/work/commands/*.json
+          if-no-files-found: warn
+          compression-level: 0
+          overwrite: false

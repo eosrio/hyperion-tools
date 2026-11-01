@@ -1,0 +1,82 @@
+name: HAPI current103 isolated offline packed registry supplement
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/hapi-current103-packed-registry-pidns.yml'
+      - 'scripts/hapi-packed-registry/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hapi-current103-packed-registry-pidns-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  registry-supplement-pidns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tools
+          persist-credentials: false
+      - name: Run only inert source and namespace data controls
+        run: python3 -m unittest discover -s tools/scripts/hapi-packed-registry -p 'test_*.py' -v
+      - uses: actions/checkout@v4
+        with:
+          repository: eosrio/hyperion-history-api
+          ref: bca518ddfebf04c2af957832f2ad9c0582c17932
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.4.0'
+          cache: ''
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Run the original producer inside its private PID and procfs context
+        run: >-
+          python3 -B tools/scripts/hapi-packed-registry/namespace_launch.py
+          --product-root "${{ github.workspace }}/product"
+          --output "${{ runner.temp }}/hapi-current103-packed-registry-pidns"
+      - name: Upload actual producer and pre-teardown context proof
+        id: supplement
+        uses: actions/upload-artifact@v4
+        with:
+          name: hapi-current103-packed-registry-pidns-v2-linux-x64-node26.4.0
+          path: |
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.tar.gz
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.receipt.json
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.OUTPUT.tar.gz
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.context.json
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: false
+      - name: Record actual post-upload identity separately
+        env:
+          SUPPLEMENT_ARTIFACT_ID: ${{ steps.supplement.outputs.artifact-id }}
+          SUPPLEMENT_ARTIFACT_SHA256: ${{ steps.supplement.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          print(json.dumps({key: os.environ[key] for key in ['GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB', 'GITHUB_WORKFLOW_SHA', 'SUPPLEMENT_ARTIFACT_ID', 'SUPPLEMENT_ARTIFACT_SHA256']}, sort_keys=True))
+          PY
+      - name: Retain original outcomes and bounded pre-teardown diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hapi-current103-packed-registry-pidns-v2-FAILED-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/*.json
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/work/commands/*.json
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns.pidns/*.json
+          if-no-files-found: warn
+          compression-level: 0
+          overwrite: false
