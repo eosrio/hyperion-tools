@@ -1,16 +1,29 @@
 // Linux CI only. Python validates the data graph independently; this bridge uses the actual pinned npm cache API.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFile,readdir,lstat,mkdir,writeFile,realpath} from 'node:fs/promises';
+import {readFile,readdir,lstat,mkdir,writeFile,realpath,readlink} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname,join,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const root=dirname(fileURLToPath(import.meta.url)),profile=JSON.parse(await readFile(join(root,'profile.json')));
+const selection=process.env.REGISTRY_PROFILE??'v1';assert.ok(['v1','pidns-v2'].includes(selection));
+const root=dirname(fileURLToPath(import.meta.url)),profile=JSON.parse(await readFile(join(root,selection==='pidns-v2'?'profile-pidns.json':'profile.json')));
 assert.equal(process.platform,'linux');assert.equal(process.arch,'x64');assert.equal(process.env.GITHUB_ACTIONS,'true');
 assert.equal(process.env.GITHUB_REPOSITORY,'eosrio/hyperion-tools');assert.equal(process.env.GITHUB_JOB,profile.job);
 assert.ok(process.env.GITHUB_WORKFLOW_REF?.startsWith('eosrio/hyperion-tools/'+profile.workflow+'@'));
 assert.equal(process.version,profile.runtime.node);assert.equal(process.env.NODE_OPTIONS,undefined);assert.equal(process.env.NODE_PATH,undefined);
 const sha=b=>createHash('sha256').update(b).digest('hex'),pin=b=>({bytes:b.length,sha256:sha(b)}),max=256*1024**2;
+if(selection==='pidns-v2'){
+ const contextPath=process.env.REGISTRY_PIDNS_CONTEXT;assert.ok(contextPath?.startsWith('/'));
+ const info=await lstat(contextPath);assert.ok(info.isFile()&&!info.isSymbolicLink()&&info.nlink===1&&info.size<=128*1024&&(info.mode&0o077)===0);
+ const context=JSON.parse(await readFile(contextPath)),pidNamespace=await readlink('/proc/self/ns/pid');
+ assert.equal(context.kind,'current103-packed-registry-private-pidns-v2');assert.deepEqual(context.profile,pin(await readFile(join(root,'profile-pidns.json'))));
+ assert.equal(pidNamespace,context.init.pidNamespace);assert.notEqual(pidNamespace,context.host.pidNamespace);
+ assert.equal(await readlink('/proc/self/ns/mnt'),context.init.mountNamespace);assert.equal(await readlink('/proc/self'),String(process.pid));
+ assert.equal(process.getuid(),context.uid);assert.equal(process.getgid(),context.gid);
+ const initStat=String(await readFile('/proc/1/stat')),fields=initStat.slice(initStat.lastIndexOf(')')+2).split(/\s+/);
+ assert.equal(Number(fields[19]),context.init.init.birth);assert.equal(await readlink('/proc/1/ns/pid'),pidNamespace);
+ const status=String(await readFile('/proc/self/status'));assert.match(status,/^NoNewPrivs:\s+1$/m);assert.match(status,/^CapEff:\s+0+$/m);
+}
 assert.equal(sha(await readFile(process.execPath)),profile.runtime.nodeSha256);
 const npmRoot=await realpath(process.env.REGISTRY94_NPM_ROOT),baseline=await readFile(join(root,'npm-members.json'));
 assert.deepEqual(pin(baseline),{bytes:profile.runtime.npmMembers.bytes,sha256:profile.runtime.npmMembers.sha256});

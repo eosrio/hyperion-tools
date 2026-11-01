@@ -227,11 +227,18 @@ def evidence_inventory(root):
     return rows
 
 
-def produce(repo, output):
+def produce(repo, output, case='v1'):
     C.need(platform.system() == 'Linux' and platform.machine() == 'x86_64', 'Linux/x64 CI entry point only')
     C.need(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('GITHUB_REPOSITORY') == 'eosrio/hyperion-tools', 'Actual Tools CI required')
-    profile_bytes = (HERE/'profile.json').read_bytes(); profile, expected = C.load_contract(profile_bytes, (HERE/'npm-members.json').read_bytes())
+    profile_bytes = (HERE/('profile-pidns.json' if case == 'pidns-v2' else 'profile.json')).read_bytes(); profile, expected = C.load_contract(profile_bytes, (HERE/'npm-members.json').read_bytes())
     C.need(os.environ.get('GITHUB_JOB') == profile['job'] and os.environ.get('GITHUB_WORKFLOW_REF','').startswith('eosrio/hyperion-tools/' + profile['workflow'] + '@'), 'Actual selected workflow/job required')
+    context_start = context_before = None
+    if case == 'pidns-v2':
+        import namespace_contracts as N
+        import pidns_runner as P
+        N.source_pins(profile,HERE)
+        context_start,context_before=N.current_context(os.environ['REGISTRY_PIDNS_CONTEXT'],profile)
+        C.need(os.environ.get('REGISTRY_PROFILE') == 'pidns-v2', 'Explicit isolated profile selection required')
     git = lambda path,*args:subprocess.check_output(['git','-C',str(path),*args],stderr=subprocess.PIPE).decode().strip()
     revision, tree = git(TOOLS,'rev-parse','HEAD'), git(TOOLS,'rev-parse','HEAD^{tree}')
     C.need(revision == os.environ['GITHUB_WORKFLOW_SHA'], 'Actual workflow source revision differs')
@@ -251,7 +258,10 @@ def produce(repo, output):
     output.mkdir(mode=0o700); work = output/'work'; work.mkdir(mode=0o700); commands = work/'commands'; commands.mkdir(mode=0o700)
     env = environment(work,node,npm_root,profile); commands_seen = []
     def call(argv,cwd,label,seconds=120,selected_env=None,observer=None):
-        data,row = run([str(x)for x in argv],cwd,selected_env or env,commands,label,seconds,observer); commands_seen.append(row); return data,row
+        args=([str(x)for x in argv],cwd,selected_env or env,commands,label,seconds,observer)
+        data,row = (P.run(*args,profile=profile,context_path=os.environ['REGISTRY_PIDNS_CONTEXT'],resources=resources)
+                    if case == 'pidns-v2' else run(*args))
+        commands_seen.append(row); return data,row
     def reserve():
         C.need(shutil.disk_usage(output).free >= profile['retainedReceiverLimits']['reserveBytes'], 'Original45GiB reserve crossed')
     version,_ = call([node,'--version'],repo,'node-version',15); C.need(version.decode().strip() == profile['runtime']['node'], 'Actual Node version differs')
@@ -336,21 +346,24 @@ def produce(repo, output):
     output_rows = C.cache_inventory(output_dir); write_archive(output_dir,output_rows,output/profile['artifact']['outputs'])
     C.need(C.pin(archive.read_bytes()) == archive_pin and C.validate_cache_tree(seed,catalog['entries'],lock,profile)['inventory'] == cache['inventory'], 'Sealed seed changed during proof')
     old.verify_source(repo,profile['product']); old.verify_source(proof_root,profile['product']); _,runtime_after = runtime(node,npm,profile,expected); C.need(runtime_after == runtime_before, 'Runtime changed during producer')
-    reserve(); receipt = {'schemaVersion':1,'kind':profile['kind'],'profile':C.pin(profile_bytes),'product':profile['product'],'consumer':profile['consumer'],
+    reserve(); receipt = {'schemaVersion':profile['schemaVersion'],'kind':profile['kind'],'profile':C.pin(profile_bytes),'product':profile['product'],'consumer':profile['consumer'],
         'producer':identity,'runtime':profile['runtime'],'runtimeMembersBefore':runtime_before,'runtimeMembersAfter':runtime_after,'offlineEnvironment':profile['offlineEnvironment'],
         'scope':{'isolatedPackedConsumer':True,'fullWireComponent':'NOT_RUN','receiverLimitsUnchanged':profile['retainedReceiverLimits']},
         'seedSealedBeforeProof':True,'seedContainsLocalPacksOrBuilds':False,'freshProofSourceAndBuild':True,'proof':terminal,'actualOutputPacks':outputs,
         'registry':{'consumerLock':lock,'consumerLockPin':C.pin(lock_bytes),'installedGraph':installed,'catalog':catalog,'validatedCatalog':cache['entries'],'inventory':cache['inventory']},
         'archive':archive_pin,'outputsArchive':C.pin((output/profile['artifact']['outputs']).read_bytes()),'freshEmissions':{'resolver':normal_emissions,'proof':proof_emissions},
         'dependencyProvenance':provenance,'commands':commands_seen,'consumerTmp':observed,'postUploadArtifact':None}
+    if case == 'pidns-v2':
+        _,context_after=N.current_context(os.environ['REGISTRY_PIDNS_CONTEXT'],profile)
+        receipt['executionContext']={'kind':N.KIND,'contextPin':context_before['contextPin'],'start':context_start,'before':context_before,'after':context_after}
     C.validate_receipt(receipt,profile,C.pin(profile_bytes)); body = C.encoded(receipt); C.need(len(body) <= C.MAX_RECEIPT, 'Receipt16MiB bound'); fresh(output/profile['artifact']['receipt'],body)
     print(json.dumps({'artifact':profile['artifact']['name'],'receipt':C.pin(body),'archive':archive_pin,'fullWireComponent':'NOT_RUN'}),flush=True)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(); parser.add_argument('--product-root',type=Path,required=True); parser.add_argument('--output',type=Path,required=True); args = parser.parse_args()
+    parser = argparse.ArgumentParser(); parser.add_argument('--profile',choices=['v1','pidns-v2'],default='v1'); parser.add_argument('--product-root',type=Path,required=True); parser.add_argument('--output',type=Path,required=True); args = parser.parse_args()
     try:
-        produce(args.product_root,args.output)
+        produce(args.product_root,args.output,args.profile)
     except BaseException as error:
         if args.output.is_dir():
             try:

@@ -1,5 +1,26 @@
 # current103 packed registry supplement
 
+The automatic producer now selects the separately named **private-pidns-v2** workflow/profile.
+The original v1 profile bytes and failed runs remain historical inputs; its workflow is manual-only.
+The v2 Linux launcher uses existing `sudo`/`unshare` and a source-pinned stdlib PID1 reaper, mounts a
+private procfs, checks namespace/init identity, drops back to the runner's original UID/GID and
+sets inherited no-new-privileges. No host-process fallback is permitted. The original all-new-process
+guard remains strict inside that owned namespace, including escaped/reparented children and zombies.
+
+The failed 8a run's npm child exited zero and reached EOF, but its wrapper timed out with incomplete
+closure. Its blocking census was not captured; a particular unrelated process is not an established
+cause. V2 adds fixed start, direct-exit, EOF and terminal observations, a five-second mutable last-census
+diagnostic slot, complete final process/birth/state/reason records and a separate pre-teardown context
+completion receipt. Census coverage is bounded to 4,096 processes and excess/unknown scope refuses.
+Diagnostics consume the original command caps. Original failure and unknown closure stay failed even
+if namespace teardown later removes processes. Kernel teardown is never used as successful closure.
+
+V2 carries only the required CI/PATH/lifecycle-tracking environment into the builder, records existing
+launcher binary identities and verifies the same exact Node/npm/Bun/TypeScript/source inputs. A successful
+producer receipt also needs the separate context proof before its four-file artifact can be considered.
+Actual namespace execution and v2 cache/artifact qualification remain pending Linux CI and Root review.
+No Wire resource, workload, deadline or release requirement changes with this CI isolation.
+
 This is the producer and read-only contract slice of [Tools #94](https://github.com/eosrio/hyperion-tools/issues/94).
 It leaves the current103 two-`node_modules` artifact, producer, profile and receiver unchanged.
 It does not implement receiver installation or grant permission to continue a Wire case.

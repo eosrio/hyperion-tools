@@ -358,8 +358,10 @@ def no_authority(value):
 
 def validate_profile(profile, npm_members):
     no_authority(profile)
-    need(profile.get('schemaVersion') == 1 and profile.get('id') == 'current103-packed-registry-v1'
-         and profile.get('kind') == 'hyperion-current103-packed-registry-v1', 'Named fixed supplement required')
+    pidns = profile.get('id') == 'current103-packed-registry-pidns-v2'
+    need(profile.get('schemaVersion') == (2 if pidns else 1)
+         and profile.get('id') == ('current103-packed-registry-pidns-v2' if pidns else 'current103-packed-registry-v1')
+         and profile.get('kind') == ('hyperion-current103-packed-registry-pidns-v2' if pidns else 'hyperion-current103-packed-registry-v1'), 'Named fixed supplement required')
     product = profile['product']
     need(product['productHead'] == 'bca518ddfebf04c2af957832f2ad9c0582c17932'
          and product['productTree'] == '26cfd37e658d030090059096afc32a574ed787ef'
@@ -379,11 +381,23 @@ def validate_profile(profile, npm_members):
     need(profile['offlineEnvironment'] == {'npm_config_offline':'true','npm_config_update_notifier':'false'}, 'Named strict offline environment required')
     need(profile['sourceEnvironment'] == {'HYPERION_NATIVE_SOURCE_PROFILE':'stateful-owner-v2-7412889-69a6606-complete-kind-engineering'}, 'Original engineering source profile required')
     need(profile['cacheFormats'] == {'index':5,'content':2,'integrity':'sha512'}, 'Exact npm cache format required')
-    need(profile['artifactPins'] == {'zip':None,'receipt':None,'archive':None,'outputs':None}, 'Examples/source profiles cannot admit artifacts')
-    need(profile['workflow'] == '.github/workflows/hapi-current103-packed-registry.yml' and profile['job'] == 'registry-supplement'
-         and profile['artifact'] == {'name':'hapi-current103-packed-registry-v1-linux-x64-node26.4.0',
-              'archive':'current103-packed-registry-v1.tar.gz','receipt':'current103-packed-registry-v1.receipt.json',
-              'outputs':'current103-packed-registry-v1.OUTPUT.tar.gz'}, 'Explicit fixed producer/artifact identities required')
+    stem = 'current103-packed-registry-pidns-v2' if pidns else 'current103-packed-registry-v1'
+    pins = {'zip':None,'receipt':None,'archive':None,'outputs':None}
+    artifacts = {'name':'hapi-'+stem+'-linux-x64-node26.4.0','archive':stem+'.tar.gz',
+                 'receipt':stem+'.receipt.json','outputs':stem+'.OUTPUT.tar.gz'}
+    if pidns:
+        pins['context'] = None; artifacts['context'] = stem+'.context.json'
+        context = profile['executionContext']
+        need(set(context) == {'kind','sourceFiles','maxProcesses','lastCensusIntervalSeconds'}
+             and context['kind'] == 'current103-packed-registry-private-pidns-v2'
+             and context['maxProcesses'] == 4096 and context['lastCensusIntervalSeconds'] == 5, 'Explicit bounded private PID namespace required')
+        need(set(context['sourceFiles']) == {'namespace_contracts.py','namespace_init.py','namespace_launch.py','pidns_runner.py','producer.py','contracts.py','cache-bridge.mjs'}
+             and all(set(pin) == {'bytes','sha256'} and type(pin['bytes']) is int and 0 < pin['bytes'] <= 256*1024
+                     and re.fullmatch('[a-f0-9]{64}',pin['sha256']) for pin in context['sourceFiles'].values()), 'Complete pinned namespace source files required')
+    need(profile['artifactPins'] == pins, 'Examples/source profiles cannot admit artifacts')
+    need(profile['workflow'] == ('.github/workflows/hapi-current103-packed-registry-pidns.yml' if pidns else '.github/workflows/hapi-current103-packed-registry.yml')
+         and profile['job'] == ('registry-supplement-pidns' if pidns else 'registry-supplement')
+         and profile['artifact'] == artifacts, 'Explicit fixed producer/artifact identities required')
     runtime = profile['runtime']
     need(runtime['npmMembers'] == {'path':'npm-members.json','bytes':510548,'sha256':'27ab9f2b7842343504b8d7cbae8be1b8f985f9e4d6237dd6318aee543e55ac57','entries':2376}, 'Exact derived npm member body required')
     need(runtime['os'] == 'linux' and runtime['architecture'] == 'x64' and runtime['node'] == 'v26.4.0'
@@ -447,7 +461,7 @@ def verify_archive(path, rows):
 
 def validate_receipt(receipt, profile, profile_pin):
     no_authority(receipt)
-    need(receipt.get('schemaVersion') == 1 and receipt.get('kind') == profile['kind'] and receipt.get('profile') == profile_pin, 'Source-selected supplement receipt required')
+    need(receipt.get('schemaVersion') == profile['schemaVersion'] and receipt.get('kind') == profile['kind'] and receipt.get('profile') == profile_pin, 'Source-selected supplement receipt required')
     need(receipt['product'] == profile['product'] and receipt['consumer'] == profile['consumer'], 'Exact source/consumer receipt required')
     producer = receipt['producer']
     need(producer['repository'] == 'eosrio/hyperion-tools' and producer['workflowPath'] == profile['workflow'] and producer['job'] == profile['job']
@@ -462,4 +476,20 @@ def validate_receipt(receipt, profile, profile_pin):
          and {p['name']for p in receipt['actualOutputPacks']} == set(LOCAL_NAMES)
          and all(p['role'] == 'OUTPUT' and p['origin'] == 'actual-proof-mutable-cache-after-original-terminal' for p in receipt['actualOutputPacks']), 'Actual selected output custody required; never a seed')
     need(receipt.get('postUploadArtifact') is None, 'API artifact identity remains separate until Root review')
+    if profile['schemaVersion'] == 2:
+        import namespace_contracts as N
+        value = receipt['executionContext']
+        need(value['kind'] == N.KIND and value['contextPin'] == value['before']['contextPin'] == value['after']['contextPin'], 'Original namespace context pin required')
+        need(value['start']['kind'] == N.KIND and value['start']['profile'] == profile_pin
+             and value['before']['actual']['pid'] == value['after']['actual']['pid'], 'Original producer context/source identity required')
+        for stage in ('before','after'):
+            N.validate_snapshot(value[stage]['actual'],value['start']['host'],value['start']['uid'],value['start']['gid'])
+            need(value[stage]['actual']['init']['birth'] == value['start']['init']['init']['birth']
+                 and value[stage]['actual']['pidNamespace'] == value['start']['init']['pidNamespace'], 'Producer init/namespace lifetime differs')
+        for command in receipt['commands']:
+            need(command['closurePolicy'] == N.KIND and command['diagnosticErrors'] == []
+                 and command['namespaceBefore']['contextPin'] == command['namespaceAfter']['contextPin'] == value['contextPin']
+                 and command['lastCompleteCensus']['complete'] is True and command['lastCompleteCensus']['live'] == []
+                 and len(command['closureObservations']) == 2 and all(row['complete'] is True and row['live'] == [] for row in command['closureObservations']),
+                 'Every v2 command needs complete original namespace closure evidence')
     return receipt
