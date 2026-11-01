@@ -16,6 +16,7 @@ HERE = Path(__file__).resolve().parent
 def write(path, value):
     body=C.encoded(value)
     with path.open('xb') as stream:
+        os.fchmod(stream.fileno(),0o600)
         stream.write(body);stream.flush();os.fsync(stream.fileno())
     return C.pin(body)
 
@@ -37,6 +38,9 @@ def enter(request):
     C.need(libc.prctl(38,1,0,0,0) == 0, 'Cannot set inherited no_new_privs')
     os.setgroups([]);os.setgid(request['gid']);os.setuid(request['uid'])
     initial=N.snapshot();N.validate_snapshot(initial,request['host'],request['uid'],request['gid'],init=True)
+    # setuid/setgid reset dumpability. Restore only the already-unprivileged PID1's
+    # normal same-user proc visibility; never retain capabilities or bypass proc guards.
+    C.need(libc.prctl(4,1,0,0,0) == 0 and libc.prctl(3,0,0,0,0) == 1, 'Unprivileged init proc visibility required')
     rows=N.census();C.need(set(rows) == {1}, 'Private init starts alone; no host/context fallback')
     context=Path(request['contextRoot']);output=Path(request['output']);repo=Path(request['product'])
     C.fresh_target(context.parent,context);C.fresh_target(output.parent,output)
@@ -46,7 +50,7 @@ def enter(request):
         stream.write(profile_bytes);stream.flush();os.fsync(stream.fileno())
     os.chmod(context/'profile.json',0o600)
     start={'kind':N.KIND,'profile':C.pin(profile_bytes),'uid':request['uid'],'gid':request['gid'],'host':request['host'],
-           'init':initial,'startedMonotonic':time.monotonic(),'launcherInputs':request['launcherInputs']}
+           'init':initial,'initDumpable':1,'startedMonotonic':time.monotonic(),'launcherInputs':request['launcherInputs']}
     write(context/'start.json',start)
     env={**selected,'REGISTRY_PIDNS_CONTEXT':str(context/'start.json'),'REGISTRY_PROFILE':'pidns-v2'}
     argv=[sys.executable,'-B','-u',str(HERE/'producer.py'),'--profile','pidns-v2','--product-root',str(repo),'--output',str(output)]

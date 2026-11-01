@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import io
 import json
+import math
 from pathlib import Path, PurePosixPath
 import re
 import stat
@@ -351,6 +352,61 @@ def validate_terminal(row, seconds=60):
     need(all(line in tap for line in ['# tests 56','# pass 56','# fail 0','# cancelled 0','# skipped 0']), 'Unchanged original56 packed controls required')
 
 
+def command_plan(layout, profile):
+    """Exact v2 original commands. Paths describe custody; this function grants no execution."""
+    need(type(layout) is dict and set(layout) == {'productRoot','workRoot','toolsRoot','node','npm'}, 'Complete command layout required')
+    for path in layout.values():
+        need(type(path) is str and path.startswith('/') and len(path) <= 4096 and safe_path(path[1:]), 'Canonical absolute command path required')
+    repo,work,tools,node,npm = (layout[k] for k in ('productRoot','workRoot','toolsRoot','node','npm'))
+    need(node.endswith('/bin/node') and npm == str(PurePosixPath(node).parent.parent/'lib/node_modules/npm/bin/npm-cli.js'), 'Original Node/npm layout required')
+    plan=[]
+    def add(label,argv,cwd,seconds):plan.append({'label':label,'argv':argv,'cwd':cwd,'limitSeconds':seconds})
+    for label,argv in [('node-version',[node,'--version']),('npm-version',[node,npm,'--version']),('bun-version',['bun','--version']),('typescript-version',['bun','-p','process.versions.typescript'])]:
+        add(label,argv,repo,15)
+    def prepare(path,label):
+        add(label+'-npm-root',[node,npm,'ci','--allow-git=all','--ignore-scripts=false'],path,1200)
+        add(label+'-npm-native',[node,npm,'ci','--allow-git=all','--ignore-scripts=false','--prefix','packages/backend-mongodb'],path,1200)
+        add(label+'-whole-check',['bun','check','-p','tsconfig.json'],path,60)
+        add(label+'-adapter-check',['bun','check','-p','packages/backend-mongodb/tsconfig.json'],path,60)
+        add(label+'-native-build',[node,npm,'run','build','--prefix','packages/backend-mongodb'],path,120)
+        add(label+'-root-build',[node,path+'/node_modules/typescript/bin/tsc','-p','tsconfig.json'],path,120)
+    prepare(repo,'resolver-source')
+    packs=work+'/resolver/packs';bridge=tools+'/scripts/hapi-packed-registry/cache-bridge.mjs'
+    add('resolver-pack-adapter',[node,npm,'pack','--ignore-scripts','--pack-destination',packs],repo+'/packages/backend-mongodb',60)
+    add('resolver-pack-sdk',[node,npm,'pack','--ignore-scripts','--pack-destination',packs],repo+'/packages/backend-mongodb/node_modules/@eosrio/hyperion-sdk',60)
+    tarballs=[packs+'/'+name.removeprefix('@').replace('/','-')+'-0.0.0-dev.1.tgz' for name in LOCAL_NAMES]
+    add('normal-resolver',[node,npm,'install','--ignore-scripts','--no-audit','--no-fund',*sorted(tarballs),'@types/node@25.5.0'],work+'/resolver/consumer',60)
+    add('export-registry',[node,bridge,'export',work+'/resolver/export.json'],tools,120)
+    proof=work+'/proof-product'
+    add('fresh-proof-clone',['git','clone','--no-local','--no-hardlinks','--no-checkout',repo,proof],work,120)
+    add('fresh-proof-checkout',['git','checkout','--detach',profile['product']['productHead']],proof,60)
+    prepare(proof,'proof-source')
+    add('unchanged-offline-packed',[node,npm,'run','test:package','--prefix','packages/backend-mongodb'],proof,60)
+    add('actual-pack-output-custody',[node,bridge,'outputs',work+'/output-spec.json'],tools,60)
+    return plan
+
+
+def validate_command_terminal(row, planned):
+    need(type(row) is dict and all(row.get(k) == planned[k] for k in ('label','argv','cwd','limitSeconds')), 'Exact original command identity/order/cap required')
+    need(row.get('waitReaped') is True and type(row.get('exitCode')) is int and row['exitCode'] == 0
+         and row.get('timedOut') is False and row.get('streamsClosed') is True and row.get('descendantsClosed') is True
+         and row.get('readerErrors') == [] and row.get('diagnosticErrors') == [], 'Original successful command outcome required')
+    finite=lambda v:type(v) in (int,float) and math.isfinite(v)
+    start,elapsed=row['startedMonotonic'],row['elapsedSeconds']
+    need(finite(start) and start >= 0 and finite(elapsed) and 0 <= elapsed < planned['limitSeconds'], 'Original command timing/cap required')
+    end=start+elapsed;direct=row['directExit'];eof=row['pipeEofTimes']
+    need(direct['waitReaped'] is True and type(direct['exitCode']) is int and direct['exitCode'] == row['exitCode']
+         and finite(direct['at']) and start <= direct['at'] <= end, 'Original direct-exit agreement required')
+    need(set(eof) == {'stdout','stderr'} and all(finite(at) and start <= at <= end for at in eof.values()), 'Original stream EOF timestamps required')
+    for name in ('stdout','stderr'):
+        value=row[name];body=base64.b64decode(value['base64'],validate=True)
+        need(value.get('eof') is True and len(body) <= MAX_STREAM and pin(body) == {k:value[k]for k in ('bytes','sha256')}, 'Original complete stream bytes/hash/EOF required')
+    closures=row['closureObservations']
+    need(type(closures) is list and len(closures) == 2 and all(item['complete'] is True and item['live'] == []
+         and finite(item['at']) and start <= item['at'] <= end for item in closures)
+         and max(direct['at'],*eof.values()) <= closures[0]['at'] < closures[1]['at'], 'Original post-exit/EOF closure observations required')
+
+
 def no_authority(value):
     need(type(value) is dict and not ({'executionReady','hostAdmission','continuation','exampleOnly'} & set(value)), 'Evidence does not grant operational readiness')
     return value
@@ -480,16 +536,25 @@ def validate_receipt(receipt, profile, profile_pin):
         import namespace_contracts as N
         value = receipt['executionContext']
         need(value['kind'] == N.KIND and value['contextPin'] == value['before']['contextPin'] == value['after']['contextPin'], 'Original namespace context pin required')
-        need(value['start']['kind'] == N.KIND and value['start']['profile'] == profile_pin
+        need(value['start']['kind'] == N.KIND and value['start']['profile'] == profile_pin and value['start']['initDumpable'] == 1
              and value['before']['actual']['pid'] == value['after']['actual']['pid'], 'Original producer context/source identity required')
         for stage in ('before','after'):
             N.validate_snapshot(value[stage]['actual'],value['start']['host'],value['start']['uid'],value['start']['gid'])
             need(value[stage]['actual']['init']['birth'] == value['start']['init']['init']['birth']
                  and value[stage]['actual']['pidNamespace'] == value['start']['init']['pidNamespace'], 'Producer init/namespace lifetime differs')
-        for command in receipt['commands']:
+        plan=command_plan(receipt['commandLayout'],profile)
+        need(type(receipt['commands']) is list and len(receipt['commands']) == len(plan), 'Complete nonempty original command sequence required')
+        for command,planned in zip(receipt['commands'],plan):
+            validate_command_terminal(command,planned)
             need(command['closurePolicy'] == N.KIND and command['diagnosticErrors'] == []
                  and command['namespaceBefore']['contextPin'] == command['namespaceAfter']['contextPin'] == value['contextPin']
                  and command['lastCompleteCensus']['complete'] is True and command['lastCompleteCensus']['live'] == []
                  and len(command['closureObservations']) == 2 and all(row['complete'] is True and row['live'] == [] for row in command['closureObservations']),
                  'Every v2 command needs complete original namespace closure evidence')
+        packed=receipt['commands'][-2]
+        need(packed['label'] == 'unchanged-offline-packed' and receipt['proof'] == packed, 'Original packed proof must equal its actual command row')
+        need(all(later['startedMonotonic'] >= earlier['startedMonotonic']+earlier['elapsedSeconds']
+                 for earlier,later in zip(receipt['commands'],receipt['commands'][1:])), 'Original sequential command timing required')
+        for command,key in zip(receipt['commands'][:4],('node','npm','bun','typescript')):
+            need(base64.b64decode(command['stdout']['base64']).decode().strip() == profile['runtime'][key], 'Original runtime version output differs')
     return receipt

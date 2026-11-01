@@ -356,6 +356,7 @@ def produce(repo, output, case='v1'):
     if case == 'pidns-v2':
         _,context_after=N.current_context(os.environ['REGISTRY_PIDNS_CONTEXT'],profile)
         receipt['executionContext']={'kind':N.KIND,'contextPin':context_before['contextPin'],'start':context_start,'before':context_before,'after':context_after}
+        receipt['commandLayout']={'productRoot':str(repo),'workRoot':str(work),'toolsRoot':str(TOOLS),'node':str(node),'npm':str(npm)}
     C.validate_receipt(receipt,profile,C.pin(profile_bytes)); body = C.encoded(receipt); C.need(len(body) <= C.MAX_RECEIPT, 'Receipt16MiB bound'); fresh(output/profile['artifact']['receipt'],body)
     print(json.dumps({'artifact':profile['artifact']['name'],'receipt':C.pin(body),'archive':archive_pin,'fullWireComponent':'NOT_RUN'}),flush=True)
 

@@ -1,5 +1,6 @@
 """Pure namespace/process models and AST controls only; no execution-entry import."""
 import ast
+import base64
 import copy
 import importlib
 from pathlib import Path,PurePosixPath
@@ -124,12 +125,22 @@ class NamespaceData(unittest.TestCase):
         for text in ('pull_request:','namespace_launch.py','timeout-minutes: 45','cancel-in-progress: false','pidns-v2.context.json'):
             self.assertIn(text,new)
         self.assertNotIn('continue-on-error',new)
-    def test_v2_producer_receipt_requires_original_context_and_every_command_proof(self):
+    def v2_receipt(self):
         model=importlib.import_module('test_contracts');proof=model.terminal();pin=C.pin(self.raw);start_pin=C.pin(b'modeled-context')
-        start={'kind':N.KIND,'profile':pin,'host':host(),'uid':1001,'gid':1001,'init':snapshot(1)}
+        start={'kind':N.KIND,'profile':pin,'host':host(),'uid':1001,'gid':1001,'init':snapshot(1),'initDumpable':1}
         stage={'contextPin':start_pin,'actual':snapshot()}
-        proof.update(closurePolicy=N.KIND,diagnosticErrors=[],namespaceBefore=stage,namespaceAfter=stage,
-                     lastCompleteCensus={'complete':True,'live':[]},closureObservations=[{'complete':True,'live':[]},{'complete':True,'live':[]}])
+        layout={'productRoot':'/model/product','workRoot':'/model/work','toolsRoot':'/model/tools','node':'/runtime/bin/node','npm':'/runtime/lib/node_modules/npm/bin/npm-cli.js'}
+        commands=[]
+        for index,planned in enumerate(C.command_plan(layout,self.profile)):
+            began=index*10;row=model.terminal();row.update(planned)
+            row.update(startedMonotonic=began,closurePolicy=N.KIND,diagnosticErrors=[],namespaceBefore=stage,namespaceAfter=stage,
+                       directExit={'at':began+0.3,'exitCode':0,'waitReaped':True},pipeEofTimes={'stdout':began+0.4,'stderr':began+0.45},
+                       lastCompleteCensus={'complete':True,'live':[]},closureObservations=[{'complete':True,'live':[],'at':began+0.6},{'complete':True,'live':[],'at':began+0.8}])
+            if index<4:
+                body=(self.profile['runtime'][('node','npm','bun','typescript')[index]]+'\n').encode()
+                row['stdout']={**C.pin(body),'base64':base64.b64encode(body).decode(),'eof':True}
+            commands.append(row)
+        proof=commands[-2]
         receipt={'schemaVersion':2,'kind':self.profile['kind'],'profile':pin,'product':self.profile['product'],'consumer':self.profile['consumer'],
                  'producer':{'repository':'eosrio/hyperion-tools','workflowPath':self.profile['workflow'],'job':self.profile['job'],
                              'workflowRevision':'a'*40,'workflowTree':'b'*40,'runId':1,'runAttempt':1},
@@ -137,8 +148,11 @@ class NamespaceData(unittest.TestCase):
                  'scope':{'isolatedPackedConsumer':True,'fullWireComponent':'NOT_RUN','receiverLimitsUnchanged':self.profile['retainedReceiverLimits']},
                  'seedSealedBeforeProof':True,'seedContainsLocalPacksOrBuilds':False,'freshProofSourceAndBuild':True,'proof':proof,
                  'actualOutputPacks':[{'name':name,'role':'OUTPUT','origin':'actual-proof-mutable-cache-after-original-terminal'}for name in C.LOCAL_NAMES],
-                 'postUploadArtifact':None,'commands':[proof],
+                 'postUploadArtifact':None,'commands':commands,'commandLayout':layout,
                  'executionContext':{'kind':N.KIND,'contextPin':start_pin,'start':start,'before':stage,'after':stage}}
+        return receipt
+    def test_v2_producer_receipt_requires_original_context_and_every_command_proof(self):
+        receipt=self.v2_receipt();pin=C.pin(self.raw)
         C.validate_receipt(receipt,self.profile,pin)
         for mutate in [lambda r:r['commands'][0]['lastCompleteCensus'].update(complete=False),
                        lambda r:r['commands'][0].update(diagnosticErrors=['capture failed']),
@@ -147,6 +161,42 @@ class NamespaceData(unittest.TestCase):
             with self.assertRaises(ValueError):C.validate_receipt(bad,self.profile,pin)
         old=C.parse_json((HERE/'profile.json').read_bytes())
         with self.assertRaises(ValueError):C.validate_receipt(receipt,old,C.pin((HERE/'profile.json').read_bytes()))
+    def test_exact_complete_command_sequence_and_caps_are_required(self):
+        original=self.v2_receipt();self.assertEqual(len(original['commands']),24)
+        mutations=[lambda r:r.update(commands=[]),lambda r:r['commands'].pop(),lambda r:r['commands'].pop(0),
+                   lambda r:r['commands'].reverse(),lambda r:r['commands'].append(copy.deepcopy(r['commands'][-1])),
+                   lambda r:r['commands'][4].update(limitSeconds=1201),lambda r:r['commands'][4]['argv'].append('--save-exact')]
+        for mutate in mutations:
+            value=copy.deepcopy(original);mutate(value)
+            with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+    def test_failed_setup_stream_or_direct_exit_cannot_hide_behind_empty_closure(self):
+        original=self.v2_receipt()
+        mutations=[lambda r:r['commands'][4].update(exitCode=1),lambda r:r['commands'][4].update(timedOut=True),
+                   lambda r:r['commands'][4].update(waitReaped=False),lambda r:r['commands'][4].update(streamsClosed=False),
+                   lambda r:r['commands'][4]['stdout'].update(eof=False),lambda r:r['commands'][4]['stdout'].update(base64=''),
+                   lambda r:r['commands'][4]['stdout'].update(sha256='0'*64),lambda r:r['commands'][4]['directExit'].update(exitCode=1),
+                   lambda r:r['commands'][4].update(elapsedSeconds=1200),lambda r:r['commands'][4].update(startedMonotonic=float('inf'))]
+        for mutate in mutations:
+            value=copy.deepcopy(original);mutate(value)
+            with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+    def test_packed_proof_and_version_output_cannot_be_substituted(self):
+        value=self.v2_receipt();value['proof']=copy.deepcopy(value['proof']);value['proof']['substituted']=True
+        with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+        value=self.v2_receipt();body=b'v22.0.0\n';value['commands'][0]['stdout']={**C.pin(body),'base64':base64.b64encode(body).decode(),'eof':True}
+        with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+    def test_dumpability_restoration_follows_verified_privilege_drop_in_source(self):
+        source=(HERE/'namespace_init.py').read_text()
+        self.assertLess(source.index('os.setuid(request'),source.index('libc.prctl(4,1'))
+        self.assertLess(source.index('N.validate_snapshot(initial'),source.index('libc.prctl(4,1'))
+        self.assertLess(source.index('libc.prctl(4,1'),source.index('subprocess.Popen'))
+        value=self.v2_receipt();value['executionContext']['start']['initDumpable']=0
+        with self.assertRaises(ValueError):C.validate_receipt(value,self.profile,C.pin(self.raw))
+    def test_context_writer_meets_its_private_file_mode_contract(self):
+        tree=ast.parse((HERE/'namespace_init.py').read_bytes())
+        writer=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='write')
+        source=ast.get_source_segment((HERE/'namespace_init.py').read_text(),writer)
+        self.assertIn('os.fchmod(stream.fileno(),0o600)',source)
+        self.assertLess(source.index('os.fchmod'),source.index('stream.write'))
 
 
 if __name__=='__main__':unittest.main()

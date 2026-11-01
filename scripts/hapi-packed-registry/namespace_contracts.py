@@ -83,7 +83,8 @@ def current_context(path, profile):
     C.need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not stat.S_IMODE(info.st_mode)&0o077
            and info.st_size <= 128*1024, 'Ordinary private init context required')
     raw = path.read_bytes(); value = C.parse_json(raw); C.need(value['kind'] == KIND and value['profile'] == C.pin((path.parent/'profile.json').read_bytes()), 'Exact v2 init context required')
-    C.need(C.parse_json((path.parent/'profile.json').read_bytes()) == profile and value['uid'] > 0 and value['gid'] >= 0, 'Current complete profile/identity required')
+    C.need(C.parse_json((path.parent/'profile.json').read_bytes()) == profile and value['uid'] > 0 and value['gid'] >= 0
+           and value['initDumpable'] == 1, 'Current complete profile/identity/proc visibility required')
     actual = snapshot(); validate_snapshot(actual,value['host'],value['uid'],value['gid'])
     C.need(actual['pidNamespace'] == value['init']['pidNamespace'] and actual['mountNamespace'] == value['init']['mountNamespace']
            and actual['init']['birth'] == value['init']['init']['birth'], 'Original init/namespace changed')

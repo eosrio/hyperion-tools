@@ -138,28 +138,28 @@
     "kind": "current103-packed-registry-private-pidns-v2",
     "sourceFiles": {
       "namespace_contracts.py": {
-        "bytes": 8970,
-        "sha256": "4a58fa34c235d465bacf45a1690f6b576bb8d5b925a8a80f3f41b7db0afd9bd5"
+        "bytes": 9028,
+        "sha256": "342744462ff796e80dc37579612f7d1f33bd47d6d65a2de9bd0337f9737c34da"
       },
       "namespace_init.py": {
-        "bytes": 6130,
-        "sha256": "ce7493f40dc257bfbe8725199117b5a5830140852065e2c7da00d449076cc25e"
+        "bytes": 6477,
+        "sha256": "1f9a9fc7bee207e33164b8417793c702d4ca35613db31baf29b43b8f724d7d42"
       },
       "namespace_launch.py": {
         "bytes": 3453,
         "sha256": "8876559b88444d6041a7432e7ef65ce05fdbd14a8bcbaae1b8848fb3f527ae4a"
       },
       "pidns_runner.py": {
-        "bytes": 7378,
-        "sha256": "85e209c523eb0cb4bae360f9129d4e16b3fe8b09b47665ca220865954a170d46"
+        "bytes": 7392,
+        "sha256": "ce7c7ba53920f7362a97a43ba4ad9d644d2480f6952d76b772f3234f62d14f5f"
       },
       "producer.py": {
-        "bytes": 26677,
-        "sha256": "bd3ac96e66e1d0c60ef23f05f503f561b3d549f851db2c4ebc161fba704158fa"
+        "bytes": 26812,
+        "sha256": "c87b93e2d00774f7a18157f59f39591548befc935ef102d18b883e435e1d8b05"
       },
       "contracts.py": {
-        "bytes": 33450,
-        "sha256": "a7ddc6ee52d0d86f558a185cc0d85cb8140bb1a84ce747cb4abc5841edd983f0"
+        "bytes": 39435,
+        "sha256": "c137e561171f93477491f83b5c65f806ac7433ddf5b9a2593a93ace9e6a73c98"
       },
       "cache-bridge.mjs": {
         "bytes": 9574,

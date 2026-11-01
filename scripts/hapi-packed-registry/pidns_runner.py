@@ -28,7 +28,7 @@ def run(argv,cwd,env,folder,label,seconds,observer=None,*,profile,context_path,r
     started=time.monotonic();deadline=started+seconds
     N.source_pins(profile,Path(__file__).resolve().parent)
     context,before_context=N.current_context(context_path,profile);before=N.census()
-    intent={'argv':argv,'cwd':str(cwd),'limitSeconds':seconds,'startedMonotonic':started,
+    intent={'label':label,'argv':argv,'cwd':str(cwd),'limitSeconds':seconds,'startedMonotonic':started,
             'resourcesBefore':resources(),'namespaceBefore':before_context,'closurePolicy':N.KIND}
     fresh(folder/(label+'.intent.json'),intent)
     fresh(folder/(label+'.start.json'),{'event':'start','at':time.monotonic(),'namespace':before_context,'census':list(before.values()),'complete':True})
