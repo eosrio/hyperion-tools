@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {assessCoverage, inspectProfile, workloadVerdict} from './evidence.mjs';
+import {cases, selectCase} from './cases.mjs';
 
 const prefixes = ['file:///product/build/', 'file:///product/node_modules/@eosrio/hyperion-sdk/'];
 const target = '/product/tests/unit/wire-managed-state-v2-native.mjs';
@@ -101,4 +102,25 @@ test('workflow pins original runtime/source and retains failure artifacts', () =
     assert(workflow.includes('21ef67d84ad94fb35a0c1bba600a42df5318c404'));
     assert(workflow.includes('if: always()')); assert(workflow.includes('persist-credentials: false'));
     assert(!workflow.includes('continue-on-error')); assert(!workflow.includes('pull_request_target'));
+});
+
+
+test('only the two fixed failed-environment cases are selectable', () => {
+    assert.deepEqual(Object.keys(cases), ['node24-21ef', 'node26-404d']);
+    assert.deepEqual(selectCase('node24-21ef'), {source: '21ef67d84ad94fb35a0c1bba600a42df5318c404',
+        tree: '95a331dbe4ba2b9438db7afabef35f57c35fe032', node: 'v24.22.1', npm: '11.19.1',
+        issue: 'https://github.com/eosrio/hyperion-tools/issues/83', failedRun: '41256269394', failedJob: '124699981577', report: 'report.json'});
+    assert.deepEqual(selectCase('node26-404d'), {source: '404d36f58aaaf83b5b25c8e5a62d38ed582f5d57',
+        tree: 'df4e4527bc6a3a34c5f046b5f6f5f192c382b66e', node: 'v26.13.0', npm: '11.20.0',
+        issue: 'https://github.com/eosrio/hyperion-tools/issues/86', failedRun: '41262118567', failedJob: '124717329561', report: 'report-node26-404d.json'});
+    for (const id of ['__proto__', 'constructor', '', 'node26', undefined]) assert.throws(() => selectCase(id), /Unknown fixed/);
+    assert(Object.isFrozen(cases) && Object.values(cases).every(Object.isFrozen));
+});
+
+test('Node 26 workflow selects the exact new case and retains failures', () => {
+    const workflow = readFileSync(new URL('../../.github/workflows/wire-managed-linux-node26-profile.yml', import.meta.url), 'utf8');
+    assert(workflow.includes('404d36f58aaaf83b5b25c8e5a62d38ed582f5d57'));
+    assert(workflow.includes('node-version: 26.13.0')); assert(workflow.includes('run.mjs node26-404d '));
+    assert(workflow.includes('wire-managed-linux-profile-node26-404d-'));
+    assert(workflow.includes('if: always()') && !workflow.includes('continue-on-error'));
 });

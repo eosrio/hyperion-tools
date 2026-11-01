@@ -92,3 +92,17 @@ node --test scripts/wire-managed-linux-profile/offline.test.mjs
 
 Offline tests use synthetic profile/identity/verdict objects only. They neither import the
 product, launch workload children, install/build dependencies nor contact a host or service.
+
+
+## Fixed Node 26 failed-environment case (#86)
+
+The `node26-404d` case targets HAPI commit `404d36f58aaaf83b5b25c8e5a62d38ed582f5d57`
+and tree `df4e4527bc6a3a34c5f046b5f6f5f192c382b66e`, Node 26.13.0 and npm 11.20.0,
+matching failed workflow `41262118567`, job `124717329561`. Its separate workflow, output
+directory, artifact and `report-node26-404d.json` distinguish this case. The original
+`node24-21ef` case remains explicitly dispatchable with its original report filename.
+Pull requests touching the shared harness run the Node 26 case only; the original workflow
+remains available through manual dispatch. Both use the same unchanged workload, prerequisites,
+preload canary, worker, coverage and artifact gates. The driver accepts only these fixed case
+IDs; it refuses arbitrary source refs and runtime selections. These source changes alone
+establish no runtime regression, improvement or physical replay result.

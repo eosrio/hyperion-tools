@@ -7,15 +7,16 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
 import {assessCoverage, workloadVerdict} from './evidence.mjs';
+import {selectCase} from './cases.mjs';
 
-const SOURCE = '21ef67d84ad94fb35a0c1bba600a42df5318c404';
-const TREE = '95a331dbe4ba2b9438db7afabef35f57c35fe032';
+assert(process.argv.length === 5, 'Usage: node run.mjs CASE_ID PRODUCT_ROOT NEW_OUTPUT_DIRECTORY');
+const caseId = process.argv[2], selected = selectCase(caseId);
+const SOURCE = selected.source, TREE = selected.tree;
 const PROFILE = 'stateful-owner-v2-dd85ee5-18d235e-fields-engineering';
 const here = dirname(fileURLToPath(import.meta.url));
-const product = resolve(process.argv[2] ?? ''), out = resolve(process.argv[3] ?? '');
-assert(process.argv.length === 4, 'Usage: node run.mjs PRODUCT_ROOT NEW_OUTPUT_DIRECTORY');
+const product = resolve(process.argv[3]), out = resolve(process.argv[4]);
 assert.equal(process.platform, 'linux', 'Real workload is Linux CI only');
-assert.equal(process.version, 'v24.22.1', 'Reproduce exact failed-job Node version');
+assert.equal(process.version, selected.node, 'Reproduce exact failed-job Node version');
 assert.equal(process.env.CI, 'true', 'Real workload is explicitly CI scoped');
 assert(!process.env.NODE_OPTIONS && !process.env.NODE_TEST_CONTEXT, 'Refuse inherited Node instrumentation or nested runner');
 assert(!existsSync(out), 'Output must be a new owned directory');
@@ -24,11 +25,11 @@ mkdirSync(out, {recursive: true});
 const json = (name, value) => writeFileSync(join(out, name), JSON.stringify(value, null, 2) + '\n');
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const readOptional = path => {try {return readFileSync(path, 'utf8');} catch (error) {return {unavailable: error.code};}};
-const report = {schema: 'hyperion-wire-managed-linux-profile/v1', source: SOURCE, sourceTree: TREE,
-    issue: 'https://github.com/eosrio/hyperion-tools/issues/83', originalFailedRun: '41256269394', originalFailedJob: '124699981577',
+const report = {schema: 'hyperion-wire-managed-linux-profile/v1', caseId, source: SOURCE, sourceTree: TREE,
+    issue: selected.issue, originalFailedRun: selected.failedRun, originalFailedJob: selected.failedJob,
     originalDeadlineMs: 180000, sourceProfile: PROFILE, startedAt: new Date().toISOString(),
     workload: {verdict: 'NOT_RUN'}, coverage: {verdict: 'NOT_RUN'}, collection: {verdict: 'INCOMPLETE'}, phases: []};
-const save = () => json('report.json', report);
+const save = () => json(selected.report, report);
 save();
 const baseEnv = {...process.env, HYPERION_NATIVE_SOURCE_PROFILE: PROFILE};
 async function command(name, argv, {cwd = product, env = baseEnv} = {}) {
@@ -115,7 +116,7 @@ try {
         .map(file => [file, {sha256: hash(join(product, file))}])); save();
     const npmCli = realpathSync(join(dirname(process.execPath), 'npm'));
     report.npmCli = {path: npmCli, sha256: hash(npmCli)};
-    await requireCommand('npm-version', [process.execPath, npmCli, '--version']); assert.equal(textOf('npm-version'), '11.19.1');
+    await requireCommand('npm-version', [process.execPath, npmCli, '--version']); assert.equal(textOf('npm-version'), selected.npm);
     // Reproduce the failed job's install sequence. No lock rewriting or separate adapter install.
     await requireCommand('npm-ci', [process.execPath, npmCli, 'ci', '--allow-git=all', '--ignore-scripts=false']);
     await requireCommand('bun-version', ['bun', '--version']); assert.equal(textOf('bun-version'), '1.4.4');
