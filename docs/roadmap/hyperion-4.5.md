@@ -15,6 +15,12 @@ History API/MongoDB adapter, SDK, Wire package, stream client and catalog toolin
 Node 22 evidence at its original versions; current runtime and release acceptance must use the
 selected 24/26 baseline. This does not activate a production runtime upgrade.
 
+The [release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) records the
+selected upgrade sources, Elasticsearch lanes and mandatory runtime, state, parity, Wire,
+stream and explorer gates. Its [dated pin inventory](../qualification/hyperion-4.5-matrix-research.md#2026-10-26-development-pin-refresh)
+separates development dependencies from supported release combinations; no row is qualified
+by the plan alone.
+
 ## Release backend decision — 2026-10-29
 
 The operator selected **MongoDB for state queries and Elasticsearch for history** for the 4.5
