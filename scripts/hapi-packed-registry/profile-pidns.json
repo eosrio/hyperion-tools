@@ -154,16 +154,16 @@
         "sha256": "ce7c7ba53920f7362a97a43ba4ad9d644d2480f6952d76b772f3234f62d14f5f"
       },
       "producer.py": {
-        "bytes": 26812,
-        "sha256": "c87b93e2d00774f7a18157f59f39591548befc935ef102d18b883e435e1d8b05"
+        "bytes": 27057,
+        "sha256": "61a0d6b71e041f84c05fce39307e765b814aca7577fe4ece3fb7f33ec92096ce"
       },
       "contracts.py": {
         "bytes": 39756,
         "sha256": "4332b284c33fa13d034d2bb0dcc650a4a7b62dbf364d1de86ec5cc4d20ddd0d8"
       },
       "cache-bridge.mjs": {
-        "bytes": 10059,
-        "sha256": "f07aef6debf06aaf24d295afb53e7ecd10ec25285ed36a456bd453c2ee3c7e85"
+        "bytes": 10077,
+        "sha256": "b342f3dc44be9eb02c756518605c5f3ac928aeb7f7bc129ff281f77614de27b6"
       }
     },
     "maxProcesses": 4096,

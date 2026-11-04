@@ -144,6 +144,26 @@ class NamespaceData(unittest.TestCase):
             tree=ast.parse((HERE/name).read_bytes(),filename=name)
             self.assertFalse(any(isinstance(n,ast.Attribute)and n.attr in ('kill','terminate','send_signal')for n in ast.walk(tree)))
         self.assertNotIn('namespace_init',globals());self.assertNotIn('namespace_launch',globals())
+    def test_seed_evidence_is_retained_before_admission_and_offline_proof(self):
+        source=(HERE/'producer.py').read_text();tree=ast.parse(source)
+        produce=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='produce')
+        lines=ast.get_source_segment(source,produce)
+        catalog=lines.index("fresh(output/'seed-catalog.json',catalog_bytes)")
+        inventory=lines.index("save(output/'seed-inventory.json',C.cache_inventory(seed))")
+        self.assertLess(catalog,inventory)
+        self.assertLess(inventory,lines.index("C.validate_cache_tree(seed,catalog['entries'],lock,profile)"))
+        self.assertLess(inventory,lines.index("'unchanged-offline-packed'"))
+        workflows=HERE.parents[1]/'.github/workflows'
+        for name in ('hapi-current103-packed-registry.yml','hapi-current103-packed-registry-pidns.yml'):
+            text=(workflows/name).read_text();success,failure=text.split('if: failure()',1)
+            for evidence in ('seed-catalog.json','seed-inventory.json'):
+                self.assertIn(evidence,success)
+                self.assertTrue(evidence in failure or '/*.json' in failure)
+    def test_bridge_warmer_explicitly_requests_full_metadata(self):
+        source=(HERE/'cache-bridge.mjs').read_text()
+        warm=source[source.index(' const options={cache,registry:'):source.index(' for(const p of packages)')]
+        self.assertIn('fullMetadata:true',warm)
+        self.assertIn('await pacote.packument(name,options)',warm)
     def test_v1_is_manual_only_and_v2_is_the_only_automatic_producer(self):
         workflows=HERE.parents[1]/'.github/workflows'
         old=(workflows/'hapi-current103-packed-registry.yml').read_text();new=(workflows/'hapi-current103-packed-registry-pidns.yml').read_text()

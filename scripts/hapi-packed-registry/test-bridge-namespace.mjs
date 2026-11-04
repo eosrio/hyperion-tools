@@ -4,6 +4,13 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 const source=readFileSync(new URL('./cache-bridge.mjs',import.meta.url),'utf8');
+test('metadata warming requests the full format used by the installer',async()=>{
+ const warm=source.slice(source.indexOf(' const options={cache,registry:'),source.indexOf(' for(const p of packages)'));
+ assert.ok(warm.includes('await pacote.packument(name,options)'));
+ let observed;
+ await vm.runInNewContext('(async()=>{'+warm+'})()', {cache:'/model',profile:{registry:'https://registry.npmjs.org'},names:new Set(['@types/node']),pacote:{packument:async(name,options)=>{observed={name,...options};}}});
+ assert.equal(observed.name,'@types/node');assert.equal(observed.fullMetadata,true);
+});
 const selected=source.slice(source.indexOf("if(selection==='pidns-v2'){"),source.indexOf('assert.equal(sha('));
 assert.ok(selected.startsWith("if(selection==='pidns-v2'){")&&selected.endsWith('}\n'));
 async function guard(change=()=>{}){
