@@ -26,7 +26,17 @@ Wire support and the applicable integration, recovery and upgrade gates remain r
 Earlier delivery snapshots below retain their original outcomes. Their conditional WormDB
 release gate is superseded by this decision; other release gates remain.
 
-## Current delivery checkpoint — 2026-10-31
+## Current delivery checkpoint — 2026-11-04
+
+The public [Wire testnet Explorer](https://testnet.wire.eosrio.io/) is an **engineering preview**, not a 4.5 release acceptance. At 13:56:28 UTC on 4 November its root and health endpoints returned 200 and reported all four services OK; the same health sample reported **93.88% missing blocks** in its indexed range and a **17,693-block head offset**. These are point-in-time observations, not current measurements or evidence of complete history. The active API identified source `a1560a3b11ac4f761a769a1ea98160032c8e1e0d` and still reported package version `4.0.7`; that version was not bumped and is not a GA claim. The immediate operational priority is a reviewed, backfill-safe rollout that reduces public head lag while preserving historical data.
+
+[HAPI #426](https://github.com/eosrio/hyperion-history-api/pull/426) (`a628d51`) makes missing indexed block traces explicitly retryable; [HAPI #428](https://github.com/eosrio/hyperion-history-api/pull/428) (`dc460a5`) isolates reader input backpressure; and [Wire #32](https://github.com/eosrio/hyperion-wire-plugin/pull/32) (`e691f44`) reuses bounded compiled ABI artifacts. These source merges do not themselves establish a deployed or qualified combined build.
+
+Wire112 reached both healthy projections at block 1480, drained the broker and completed native final observations, but **FAILED** when the unchanged 900-second worker deadline expired before final invalid-query checks. Its independent audit hashed 35,488 payloads / 260,738,893 bytes; report SHA-256 `7e2911cff0ef12f6f5f735ef208862369f0b85aa582d7448ed5fff3885c5dd1e`, archive SHA-256 `04c62fea5be295ba2d502ab1847bd93ea67c910d3573fb7a2fed52cd6cf7dcad`. Both later read-only full guards passed, with scoped applications, containers and volumes empty; those guards do not change the original failure. Full Wire replay/recovery, historical serving and testnet sync remain open.
+
+AtomicAssets/AtomicMarket native MongoDB differential, managed HAPI publication/cache acceptance and full pinned 2.7.0 parity remain open. The SQL reference and simulated-reader or source controls are not native MongoDB or managed HTTP qualification. Keep earlier failed cases as dated evidence; do not promote cleanup or later guards into replay success. See [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24) for the current cross-repository evidence and remaining gates.
+
+## Previous delivery checkpoint — 2026-10-31
 
 The [31 October progress report](hyperion-4.5-progress-20261031.md) separates merged components
 from remaining release acceptance. The current priorities are the full Wire/MongoDB replay and
@@ -89,7 +99,7 @@ Existing history compatibility and reliability checks run from the beginning. Th
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
 instead of waiting for a speculative complete SDK.
 
-### Current delivery checkpoint: 2026-10-27
+### Earlier delivery checkpoint: 2026-10-27
 
 This is a progress snapshot of the linked work, not completion of M1–M4.
 
