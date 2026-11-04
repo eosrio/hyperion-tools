@@ -348,8 +348,15 @@ def validate_terminal(row, seconds=60):
     for name in ('stdout','stderr'):
         value = row[name]; body = base64.b64decode(value['base64'], validate=True)
         need(len(body) <= MAX_STREAM and pin(body) == {k:value[k]for k in ('bytes','sha256')} and value.get('eof') is True, 'Original bounded stream bytes/EOF differ')
-    tap = base64.b64decode(row['stdout']['base64']).decode().splitlines()
-    need(all(line in tap for line in ['# tests 56','# pass 56','# fail 0','# cancelled 0','# skipped 0']), 'Unchanged original56 packed controls required')
+    lines = base64.b64decode(row['stdout']['base64']).decode().splitlines()
+    # Node's unchanged default reporter can emit TAP or spec summaries. Admit
+    # exactly one complete summary; duplicate/conflicting reporters fail closed.
+    counts = []
+    for line in lines:
+        match = re.fullmatch(r'(?:# |\u2139 )(tests|pass|fail|cancelled|skipped) ([0-9]+)', line)
+        if match:
+            counts.append((match[1], int(match[2])))
+    need(counts == [('tests',56),('pass',56),('fail',0),('cancelled',0),('skipped',0)], 'Unchanged original56 packed controls required')
 
 
 def command_plan(layout, profile):

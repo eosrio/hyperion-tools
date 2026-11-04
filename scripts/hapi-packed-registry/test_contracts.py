@@ -218,6 +218,18 @@ class Contracts(unittest.TestCase):
                 with self.assertRaises(ValueError):C.validate_terminal(row)
         row=terminal();row['stdout']['eof']=False
         with self.assertRaises(ValueError):C.validate_terminal(row)
+    def test_actual_node26_spec_summary_and_conflicting_or_incomplete_counts(self):
+        # Original failed producer41781939936: consumer itself exited0 in5.544s.
+        raw=(HERE/'fixtures/node26-packed-41781939936.stdout').read_bytes()
+        self.assertEqual(C.pin(raw)['sha256'],'e1c86ce692da93cb336b8f479edfba0c7678ab5af88e910a3543c8dd7d23116f')
+        def row(body):
+            value=terminal();value['stdout']={**C.pin(body),'base64':base64.b64encode(body).decode(),'eof':True};return value
+        C.validate_terminal(row(raw))
+        for bad in (raw.replace('ℹ pass 56'.encode(), 'ℹ pass 55'.encode()),
+                    raw.replace('ℹ fail 0'.encode(), 'ℹ fail 1'.encode()),
+                    raw.replace('ℹ skipped 0'.encode(),b''),
+                    raw+b'# pass 56\n',raw+b'\xe2\x84\xb9 tests 56\n'):
+            with self.assertRaises(ValueError):C.validate_terminal(row(bad))
     def test_uncensored56_control_stream_and_data_only_receipt(self):
         proof=terminal();row={'schemaVersion':1,'kind':PROFILE['kind'],'profile':C.pin(PROFILE_BYTES),'product':PROFILE['product'],'consumer':PROFILE['consumer'],
             'producer':{'repository':'eosrio/hyperion-tools','workflowPath':PROFILE['workflow'],'job':PROFILE['job'],'workflowRevision':'a'*40,'workflowTree':'b'*40,'runId':1,'runAttempt':1},

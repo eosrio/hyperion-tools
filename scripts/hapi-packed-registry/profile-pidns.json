@@ -158,8 +158,8 @@
         "sha256": "61a0d6b71e041f84c05fce39307e765b814aca7577fe4ece3fb7f33ec92096ce"
       },
       "contracts.py": {
-        "bytes": 39756,
-        "sha256": "4332b284c33fa13d034d2bb0dcc650a4a7b62dbf364d1de86ec5cc4d20ddd0d8"
+        "bytes": 40106,
+        "sha256": "e89d4cae160eb480e23e2ff0816146a6739fe0b0af1906c12914ba3ac6f07e8c"
       },
       "cache-bridge.mjs": {
         "bytes": 10077,
