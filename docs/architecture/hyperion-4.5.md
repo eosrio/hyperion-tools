@@ -1,6 +1,6 @@
 # Hyperion 4.5 architecture definition
 
-Status: Working architecture draft, based on operator-approved decisions through 2026-10-20 UTC.
+Status: Working architecture draft, based on operator-approved decisions through 2026-10-29 UTC.
 
 Start here. This document defines the system boundaries, release obligations, and operator workflows
 that implementation agents follow. The [detailed decision record](hyperion-4.5-decisions.md) and
@@ -28,9 +28,11 @@ The release must deliver:
 - Working Wire protocol-extension support, qualified against the new testnet to be launched
   with Wire's contracts. The launch's node, contract, and extension revisions must be pinned.
 
-MongoDB and WormDB are permanent state-backend alternatives. A MongoDB-only 4.5 launch is permitted
-if the WormDB effort is too high; this does not waive the other requirements. Any backend offered as
-supported must satisfy the applicable API, capability, finality, and recovery contracts.
+The 4.5 launch uses MongoDB for state queries and Elasticsearch for history, confirmed by the
+operator on 2026-10-29. WormDB implementation and qualification are follow-up work and do not
+block this release. MongoDB and WormDB remain permanent state-backend alternatives in the
+architecture, with backend-neutral definitions and queries. Any backend offered as supported
+must satisfy the applicable API, capability, finality, and recovery contracts; see [ADR 0007](../adr/0007-allow-mongodb-only-45-release.md).
 
 These are architecture requirements, not claims that implementation or qualification is complete.
 
@@ -136,6 +138,13 @@ Dependency activation does not automatically expose another plugin's public APIs
 - Give live indexing priority under contention. Preserve infrastructure backpressure: pause the
   shared reader when Elasticsearch exhausts its queue budget and resume after it drains.
   Contract-specific failures must remain isolated from that shared pipeline.
+- Qualification of experimental prospective count-and-byte admission requires an explicitly
+  configured aggregate byte budget per chain, with no derived default. Existing installations
+  retain their current behavior until operators explicitly enable the experimental path.
+  The numeric budget, operator-facing units, configuration syntax and activation plan remain open.
+  Implementation and qualification belong to [History API #277](https://github.com/eosrio/hyperion-history-api/issues/277)
+  under [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24), preserving
+  the accepted [infrastructure backpressure and contract isolation](../adr/0022-retain-infrastructure-backpressure.md).
 
 ## Releases, trust, and operator changes
 

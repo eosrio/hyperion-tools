@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "productHead": "21ef67d84ad94fb35a0c1bba600a42df5318c404",
+  "productTree": "95a331dbe4ba2b9438db7afabef35f57c35fe032",
+  "sourceFiles": 1041,
+  "sourceInventorySha256": "38774ca1c5974997b4d047afa72c262d1372f871b26760d526ec49bab355096b",
+  "manifestLocks": {
+    "package-lock.json": {
+      "bytes": 127158,
+      "sha256": "af4af3a7849c7eda9376986416d197893ee243b2120d597bec164a8854b1d228"
+    },
+    "package.json": {
+      "bytes": 2694,
+      "sha256": "20ed11b019b637f41b423483eb09e467bfde71375a2fa775f4a4e92dca1d26cb"
+    },
+    "packages/backend-mongodb/package-lock.json": {
+      "bytes": 22117,
+      "sha256": "92402cabd6fa10736db93d96d27af76f5e2f8566640ff5e3c94c6ceb2b2107a4"
+    },
+    "packages/backend-mongodb/package.json": {
+      "bytes": 1319,
+      "sha256": "cb040bf6f4ac6388e1bc82da911ba935e4cae5c8d6ed2aed83e8793aeb7899e9"
+    }
+  },
+  "dependencySources": {
+    "rootSdk": {
+      "packagePath": "node_modules/@eosrio/hyperion-sdk",
+      "name": "@eosrio/hyperion-sdk",
+      "version": "0.0.0-dev.1",
+      "resolved": "git+ssh://git@github.com/eosrio/hyperion-sdk.git#dd85ee590dcd1e359509c6c41ee99b541706b1f6",
+      "integrity": "sha512-W9bOPK227wUMw1mVmH2932AKwh/xmEpWgsHPLOnFuzM8Fs9UqtKL2QT9ERKMmcumGzHfsJltc7xKJJd7YaLMXw=="
+    },
+    "adapterSdk": {
+      "packagePath": "packages/backend-mongodb/node_modules/@eosrio/hyperion-sdk",
+      "name": "@eosrio/hyperion-sdk",
+      "version": "0.0.0-dev.1",
+      "resolved": "git+ssh://git@github.com/eosrio/hyperion-sdk.git#dd85ee590dcd1e359509c6c41ee99b541706b1f6",
+      "integrity": "sha512-W9bOPK227wUMw1mVmH2932AKwh/xmEpWgsHPLOnFuzM8Fs9UqtKL2QT9ERKMmcumGzHfsJltc7xKJJd7YaLMXw=="
+    },
+    "wire": {
+      "packagePath": "node_modules/@eosrio/hyperion-wire-plugin",
+      "name": "@eosrio/hyperion-wire-plugin",
+      "version": "0.0.0-dev.1",
+      "resolved": "git+ssh://git@github.com/eosrio/hyperion-wire-plugin.git#18d235e34a9b7ab8c3e9f9a322874444d90eed8a",
+      "integrity": "sha512-YFZciIslQPd1ZlBLbvJFOrdYeTBwMFLdWvqqDUp6yvo5u42j90nZ655EnfXw4kKnmukhDH4zIGgXN4wjeGidHw=="
+    },
+    "nodeAbieos": {
+      "packagePath": "node_modules/@eosrio/node-abieos",
+      "name": "@eosrio/node-abieos",
+      "version": "4.2.0-f7d5b45",
+      "resolved": "https://registry.npmjs.org/@eosrio/node-abieos/-/node-abieos-4.2.0-f7d5b45.tgz",
+      "integrity": "sha512-eZKWBHS9Jgx4IAmBM6sDFEGGP2i5jqM3TvwWgr1xTkUCNpMmtDDlm8VK5P5L/XobkktnNajA+EEYyiyZpwSD+w=="
+    }
+  }
+}

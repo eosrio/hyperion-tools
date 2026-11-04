@@ -210,7 +210,7 @@ The order is provisional; dependencies discovered in discussion may change it.
 | D11a | Backpressure during infrastructure outages or shared capacity exhaustion | Accepted — retain shared-reader pause/resume; contract failures remain isolated |
 | D11b | Resource priority when live and historical work coexist | Accepted — live indexing takes priority by default; budgets and scheduling mechanisms open |
 | D12 | Conformance tests, acceptance evidence, and delivery sequence | Open |
-| D12a | Backend availability in the 4.5 release | Accepted — MongoDB-only launch permitted if WormDB effort is too high |
+| D12a | Backend availability in the 4.5 release | Accepted — MongoDB for state and Elasticsearch for history; WormDB qualification is follow-up |
 | D13 | Dynamic contract indexing and protocol extension interfaces | Accepted — separate protocol and contract interfaces |
 | D13a | Authoring model for dynamic contract-indexing definitions | Accepted — declarative first, portable across backends, code hooks |
 | D13b | Backend capability checks when activating a definition | Accepted — validate requirements before activation |
@@ -324,7 +324,7 @@ endpoints force operators to retain their separate stack, preventing the intende
 
 Hyperion 4.5 must deliver full API parity for both AtomicAssets and AtomicMarket. An implementation
 with partial endpoint/behavior coverage does not satisfy this release requirement. D12a permits
-a MongoDB-only launch if WormDB qualification requires too much effort; it does not reduce the
+the MongoDB state launch confirmed on 2026-10-29; it does not reduce the
 required API coverage. Any backend offered as supported for this surface must satisfy the same
 client-visible compatibility contract.
 
@@ -906,26 +906,20 @@ Rationale recorded in [ADR 0035](../adr/0035-prioritize-live-indexing-over-bulk-
 
 ## D12a — Backend availability in the 4.5 release
 
-Status: Accepted.
+Status: Accepted; launch choice confirmed by the operator on 2026-10-29.
 
-The operator is open to implementing missing capabilities in WormDB as part of this effort. Required
-work may therefore involve `P:\wormdb` as well as its Hyperion integration; existing capabilities are
-not a fixed ceiling on the target architecture.
+Hyperion 4.5 launches with MongoDB as its supported state backend. Elasticsearch continues to
+hold history. WormDB implementation and qualification are follow-up work and do not block 4.5.
+This resolves the earlier conditional MongoDB-only allowance; no further effort threshold or
+qualify-or-defer decision is required for this release.
 
-If implementing and qualifying the necessary WormDB capabilities requires too much effort, Hyperion
-4.5 may launch with MongoDB as its only supported state backend. WormDB readiness must not prevent
-that release once the other agreed 4.5 requirements are met. Permanent backend alternatives and
-portable contract definitions remain the architecture target.
+MongoDB and WormDB remain permanent alternatives in the target architecture. Preserve portable
+definitions and logical queries. A future supported WormDB adapter must satisfy the applicable
+capability, API, finality and recovery contracts.
 
-This is a conditional release decision, not a decision to defer WormDB now. The capability inventory,
-qualification evidence, effort threshold, and decision point remain to be defined. The final API
-surface and plugin-upgrade requirements are separate from backend availability.
-
-In particular, full AtomicAssets and AtomicMarket parity under D02 remains mandatory when 4.5
-launches with MongoDB alone.
-
-Working Wire protocol-extension support under D18 is likewise required; the backend fallback does
-not waive that launch requirement.
+Full AtomicAssets and AtomicMarket parity under D02 and working Wire support under D18 remain
+mandatory. MongoDB selection does not waive those requirements or MongoDB integration/recovery
+qualification.
 
 Rationale recorded in [ADR 0007](../adr/0007-allow-mongodb-only-45-release.md).
 

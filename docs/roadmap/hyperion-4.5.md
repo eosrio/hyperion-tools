@@ -18,8 +18,44 @@ selected 24/26 baseline. This does not activate a production runtime upgrade.
 The [release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) records the
 selected upgrade sources, Elasticsearch lanes and mandatory runtime, state, parity, Wire,
 stream and explorer gates. Its [dated pin inventory](../qualification/hyperion-4.5-matrix-research.md#2026-10-26-development-pin-refresh)
-separates current development dependencies from supported release combinations; no row is qualified
+separates development dependencies from supported release combinations; no row is qualified
 by the plan alone.
+
+## Release backend decision — 2026-10-29
+
+The operator selected **MongoDB for state queries and Elasticsearch for history** for the 4.5
+launch. WormDB implementation and qualification are follow-up work and do not block this release.
+Preserve portable definitions and queries and the long-term backend alternatives; see
+[ADR 0007](../adr/0007-allow-mongodb-only-45-release.md). Full AtomicAssets/AtomicMarket parity,
+Wire support and the applicable integration, recovery and upgrade gates remain required.
+
+Earlier delivery snapshots below retain their original outcomes. Their conditional WormDB
+release gate is superseded by this decision; other release gates remain.
+
+## Current delivery checkpoint — 2026-11-04
+
+The operator's immediate priority is a usable Wire testnet Explorer on 4.5. The public [Explorer](https://testnet.wire.eosrio.io/) is an **engineering preview**, separate from release acceptance. [Explorer #13](https://github.com/eosrio/hyperion-explorer/pull/13) was merged as `6b654ee`; its tested source `650d65be` was deployed at 15:20 UTC on 4 November with all 129 files verified against manifest SHA-256 `d4b9ef502cc7402f08c3b3647177709a706872217f233db9998a92612f28c777`. Desktop, 390-pixel mobile and Retry observations passed. Missing indexed traces show a validated RPC block header and an explicit history-unavailable notice. Public root, metadata and health returned HTTP 200 at 17:04 UTC, with indexed high-water mark 2706519. That observation does not establish current indexing or complete history; state queries remain unavailable.
+
+The old preview indexer **stopped at 15:52:05 UTC** after Elasticsearch bulk and canonical-ABI create timeouts. The API and SSR remained active, with no guest OOM events or indexer restarts. Later read-only checks found long-running write tasks and Java threads waiting in filesystem operations on the guest's ZFS dataset, despite green cluster health and no pool device errors. The underlying cause remains unverified. No ES settings or cancellation were applied. Restarting the old mixed bulk/live reader from its highest indexed block is not established safe for unfinished ranges; its data and service configuration are preserved.
+
+A separate private full-sync stack runs source `3475f1fd309de6cec5f3d0853758f59cc568e8fe` from [HAPI #434](https://github.com/eosrio/hyperion-history-api/pull/434), integrating [#431](https://github.com/eosrio/hyperion-history-api/pull/431) and [#433](https://github.com/eosrio/hyperion-history-api/pull/433). Its isolated profile has six logical CPUs, 16 GiB memory, zero swap and a dedicated 256 GiB Btrfs pool. Actual captured-genesis handoff completed, the canonical frontier began at block 1 without a gap, and private indexed block 333 matched RPC identity. The raw Wire genesis RPC fix passed Linux Node 24/26 controls; its test-fixture follow-up `f352a53b` also passed both CI jobs. This is a fresh installation, not retained-history upgrade evidence. MongoDB state projections are disabled in this initial history stack, and public routing has not moved to it.
+
+**Full-sync throughput is still a blocker.** Two private samples measured approximately 1.14 and 1.17 indexed blocks/second while the chain produced about 2 blocks/second, so the stack was falling behind. A single sequential storage-path experiment used identical ES 9.5.5, resource caps, request durability, immutable-bundle code and 20 synthetic prepare/read operations per side. The loop-backed Btrfs path measured a 372 ms median and 415 ms p95, versus 59 ms and 70 ms on host ext4. Both incomplete-receipt negative controls and final service guards passed. Concurrent load, cold creation and storage layering limit interpretation: this does not isolate filesystem type or predict full-chain throughput. A proposed, physically preallocated 256 GiB ext4-loop candidate is under source review. Its own storage A/B must pass before selecting it for a fresh full-sync throughput comparison; the direct host-ext4 result does not qualify this path. Durability and acknowledgment semantics remain unchanged.
+
+The separate Wire/MongoDB replay under [HAPI #191](https://github.com/eosrio/hyperion-history-api/issues/191) remains open. Wire112 reached both projections at block 1480 and drained the broker, but **FAILED** the unchanged 900-second deadline before final invalid-query checks. Its archive SHA-256 is `04c62fea5be295ba2d502ab1847bd93ea67c910d3573fb7a2fed52cd6cf7dcad`; later guards do not change that verdict. Attempts 113–117 failed during preparation or startup before replay. Wire118 uses a separately bounded source-pin data map, the verified fresh dependency input and the same workload, budgets and deadlines. Its fresh H1 build passed normally in 276.15 seconds under the original 300-second component cap. After service startup, readiness failed on another stale Wire69 expectation despite the selected Wire `e691f447` profile; replay was **NOT RUN**. Failure custody and owned-service cleanup remain pending at this checkpoint. The next correction must test the remaining orchestration against retained actual outputs before another full attempt. A completed replay/recovery verdict is still pending.
+
+Atomic [#74](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/74), [#75](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/75), [#76](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/76) and [#77](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/77) are merged. #77 merged as `f68d0d7c` after all three current CI checks passed and independent review verified that integration preserves the exact tested file tree. The bounded native MongoDB/Fastify evidence belongs to Atomic `3f12d24c` and HAPI `49dfe804`: eight owned-schema snapshots and ten royalty success cases matched retained original PostgreSQL results, while six original HTTP 500 cases remained explicit candidate 503 refusals. This is not managed HAPI serving or full parity. [HAPI #430](https://github.com/eosrio/hyperion-history-api/pull/430) now has an independently reviewed current CI correction at `d7351bcb`; the original native CI failure is retained, 15 focused controls passed, and genuine successor native and finite Linux CI passed on both Node 24 and 26. Broader worker-suite correction and validation remain open.
+
+The parallel critical paths are: (1) bounded Wire/MongoDB replay and recovery, (2) fresh Wire full sync with measured catch-up capacity and correct Explorer serving, and (3) AtomicAssets/AtomicMarket implementation and pinned 2.7.0 parity. Root coordinates reviewed PR integration and the release record. Ready implementation PRs can be reviewed and merged while their explicit release qualification remains open; unfinished qualification alone does not require a draft. Retained-history upgrades, stream-client compatibility under [HAPI #231](https://github.com/eosrio/hyperion-history-api/issues/231), managed state publication/cache and remaining lifecycle/recovery gates still require evidence. Atomic parity blocks 4.5 GA, while the early Wire Explorer has its own narrower acceptance.
+
+## Previous delivery checkpoint — 2026-10-31
+
+The [31 October progress report](hyperion-4.5-progress-20261031.md) separates merged components
+from remaining release acceptance. The current priorities are the full Wire/MongoDB replay and
+testnet sync, the measured Linux CI correction in HAPI #401, and AtomicAssets/AtomicMarket parity.
+SDK #42, HAPI #402 and Atomic #50 now own complete marketplace enumeration through the portable
+query interface. Tools #80 owns current guarded server admission; earlier failed preparation,
+replay and postguard results remain failed. No release gate is complete from these source slices.
 
 ## Repository ownership
 
@@ -33,10 +69,10 @@ work when it becomes independently deliverable. Do not duplicate the release bac
 | eosrio/hyperion-history-api | Existing workers and RabbitMQ integration, API host, Elasticsearch compatibility, operator configuration and extension activation. | Existing; substantial 4.5 changes required. |
 | eosrio/hyperion-stream-client | Client protocol, lifecycle and packaging; qualify actual client/server compatibility with the History API. | Existing; track server integration in History API #231. |
 | eosrio/hyperion-explorer | Companion explorer frontend, dependency/toolchain upgrades, browser UX, and client compatibility with the 4.5 API and stream contracts. | Existing; modernization started locally; publish implementation and qualify against pinned 4.5 components. |
-| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Created; scaffold CI passed. |
+| eosrio/hyperion-sdk | Independently versioned public extension contracts, TypeScript authoring support, conformance fixtures, examples and migration guidance; required language bindings share defined semantics. | Opt-in stateful contract and reference conformance published; actual host and native adapter integration remain in progress. |
 | eosrio/hyperion-plugins | Official catalog metadata and declared compatibility with tested release pins. | Reuse the existing catalog repository. |
-| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Created; scaffold CI passed. |
-| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Created; scaffold CI passed. |
+| eosrio/hyperion-atomicassets-plugin | One operator package for AtomicAssets and AtomicMarket indexing and API parity, with modular internals. | Original PostgreSQL oracle, pure formatters and internal asset reducer published; physical portable lifecycle and full API parity remain open. |
+| eosrio/hyperion-wire-plugin | One operator package for Wire protocol support, including coordinated Node/Rust components. | Provider and codec foundations published; selected testnet and full-worker qualification remain open. |
 | igorls/wormdb | Database engine capabilities and engine-specific correctness/performance fixes. | Existing; file engine work here when demonstrated necessary. |
 | eosrio/hyperion-docs | Operator-facing upgrade, installation, configuration and recovery documentation. | Existing; publish operator guidance as behavior becomes qualified. |
 
@@ -69,15 +105,43 @@ implementation slices as their immediate prerequisites become clear.
 | M1: First portable MongoDB path | One allowed contract is indexed through the shared interfaces using existing workers and queried through Hyperion, with backend-neutral definitions/queries, durable retryable processing and a real MongoDB fixture. | Minimum SDK and adapter contracts; no full SDK freeze required. |
 | M2: Recoverable dynamic projections | The first path survives replay, restart and fork replacement. A declarative mapping changes without restart, with ABI-bound revisions, initialization coverage and validated activation. Contract failures remain isolated. | M1; extend existing reload/sync mechanisms. |
 | M3: Required domain and protocol support | AtomicAssets plus AtomicMarket pass the pinned parity suite. The Wire package works across applicable Node/Rust paths and passes the selected new testnet profile. | SDK capabilities grow through real slices; Wire profile and parity inventory start in parallel with M1. |
-| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises, explorer compatibility and operator workflows pass together for the supported matrix. Backend qualification decision and known limits are published. | All mandatory outcomes; qualified MongoDB is sufficient if WormDB is deferred. |
+| M4: Release qualification and operator distribution | A retained-history upgrade, pinned component distribution, recovery exercises, explorer compatibility and operator workflows pass together for the supported MongoDB-state/Elasticsearch-history matrix. Known limits are published. | All mandatory outcomes; WormDB qualification is follow-up work. |
 
 Existing history compatibility and reliability checks run from the beginning. They are not
 postponed until M4. Wire and AtomicAssets work should expose missing generic capabilities early,
 instead of waiting for a speculative complete SDK.
 
-The [draft release qualification matrix](../qualification/hyperion-4.5-release-matrix.md) for
-[P02](https://github.com/eosrio/hyperion-tools/issues/20) names the first retained-history fixture
-and the source/server scope decisions needed before the supported upgrade set is declared.
+### Earlier delivery checkpoint: 2026-10-27
+
+This is a progress snapshot of the linked work, not completion of M1–M4.
+
+| Workstream | Verified result | Remaining gate |
+|---|---|---|
+| Stateful SDK | [Proposal #33](https://github.com/eosrio/hyperion-sdk/pull/33), [internal values #34](https://github.com/eosrio/hyperion-sdk/pull/34) and [opt-in stateful contract #35](https://github.com/eosrio/hyperion-sdk/pull/35) merged. The connected source/view/candidate/reducer contract and reference adapter conformance pass 118 tests on each native Node 24/26 runtime, packed consumers, independent Standards/Spec review and product CI. | [SDK #32](https://github.com/eosrio/hyperion-sdk/issues/32) and [History API #366](https://github.com/eosrio/hyperion-history-api/issues/366) still require actual host/source authority, durable custody and native backend integration. The reference adapter is not engine qualification; the family requires explicit negotiation and does not activate existing hosts/adapters. |
+| Native stateful MongoDB adapter | [Opt-in driver implementation #374](https://github.com/eosrio/hyperion-history-api/pull/374) passes independent source review, 16 focused driver controls, 40 package regressions and packed consumers per native Node 24/26 runtime. Complete metadata-phase reservations reject unsupported profiles before hooks; existing storage ceilings remain intact. | Physical replica-set atomicity, restart, original undo and coherent-read qualification is being prepared. Controlled driver checks do not establish engine support. Production host/source/serving integration remains [#366](https://github.com/eosrio/hyperion-history-api/issues/366); existing workers are not activated by this new factory. |
+| AtomicAssets and AtomicMarket | [Original PostgreSQL oracle #13](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/13), [pure sale formatter #15](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/15), [internal asset reducer/current-view component #17](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/17) and [internal fixed-price sale lifecycle #18](https://github.com/eosrio/hyperion-atomicassets-plugin/pull/18) merged. The combined plugin passes 118 local tests per native Node 24/26 runtime and packed consumers after independent review. The sale component also matches 14 unmodified original processor cases per runtime. | [Asset lifecycle #10](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/10) remains open for actual portable MongoDB application and coherent serving/recovery. Its safe-image input differs from the original NUL input. The completed [sale component #16](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/16) uses source-derived light-view controls, not a new physical SQL comparison or complete sale API. [Full 2.7.0 parity #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1) and remaining APIs stay open. |
+| Wire worker/MongoDB candidate | Complete source review and CI pass for [History API #361](https://github.com/eosrio/hyperion-history-api/pull/361). The latest plain Node 26 control passed 45 cursor waits, including 1244, then failed target 1340 with completed primary recovery polls at 1316. Original cleanup, host guards and complete custody verification passed; the independently audited prefix includes the actual MongoDB fault and isolation observations. | Keep #361 draft. Final 1480, final ACK/drain, current full replay and the remaining recovery/launch matrix are unqualified. The shared reader remained paused while earlier deserializer work drained; target 1340 was not fed. This does not establish an exclusive cause or optimization. Source ACKs and green component checks do not close [#191](https://github.com/eosrio/hyperion-history-api/issues/191) or [#277](https://github.com/eosrio/hyperion-history-api/issues/277). |
+
+The [current profiling checkpoint](../performance/hyperion-4.5-profiling.md#native-wire-and-domain-foundation-checkpoint-2026-10-27)
+records the three separate failed Wire observations and their evidence boundaries.
+The next Wire diagnostic needs a faithful restartable backlog fixture; a raw block corpus alone
+does not preserve store state, queued bodies and in-flight ownership. The original deadline and
+correctness gates remain intact. Experimental capacity stays off and requires an explicit per-chain
+qualification budget with no derived default.
+
+The next source measurement is [History API #375](https://github.com/eosrio/hyperion-history-api/issues/375):
+fixed-name spans through the existing worker profiler around original action admission,
+revalidation, sealing, durable handoff/disposition and physical ACK invocation. Nested proof spans
+alone do not account for batch service time. This instrumentation selects no optimization.
+
+[History API #373](https://github.com/eosrio/hyperion-history-api/pull/373) adds default-off bounded
+source capture to the draft branch. It grants no ACK/credit authority and explicitly refuses
+restoration; it was not enabled in the installed Node 26 control. A passing capture component is
+not a faithful backlog restart or full replay result.
+
+Retained-history upgrades, Bun runtime support, stream-client integration, final Wire launch pins,
+WormDB qualification, explorer delivery and operator distribution remain separate release gates.
+These component merges do not close them.
 
 ## Parallel workstreams and release gates
 
@@ -85,12 +149,20 @@ and the source/server scope decisions needed before the supported upgrade set is
   [profiling program](../performance/hyperion-4.5-profiling.md) across every shipping component.
   Establish guarded, ABI-correct fixtures and correctness oracles, then collect CPU/native,
   allocation/GC, queue/wait, storage and p50/p95/p99 profiles under live, bulk and mixed workloads.
-  Evaluate Bun 1.4.4 against the Node controls with explicit runtime/transport qualification.
+  Evaluate the current Bun 1.4.4 candidate against the Node controls with explicit runtime/transport qualification.
   Review Elasticsearch release notes and qualify server/client changes without requiring a
   full Hyperion history reindex. Historical reports and faster typechecking are not runtime evidence.
 - **Upgrade and reliability:** preserve usable existing Elasticsearch history and continued history
   indexing without a full reindex; initialize new state separately. Exercise failure/retry,
   reconnect, backpressure and live-priority behavior using the existing worker infrastructure.
+- **Prospective capacity admission:** [History API #277](https://github.com/eosrio/hyperion-history-api/issues/277),
+  coordinated through [release issue #24](https://github.com/eosrio/hyperion-tools/issues/24), must
+  qualify the experimental count-and-byte path with an explicit per-chain aggregate byte budget
+  and no derived default. Existing installations retain current behavior until explicit enablement.
+  Numeric budgets, operator-facing units, configuration syntax and activation remain undecided.
+  Preserve existing queue/resume, prefetch, source-window, ancestry and deadline constraints,
+  [infrastructure backpressure and contract isolation](../adr/0022-retain-infrastructure-backpressure.md),
+  and the original replay/recovery/shutdown gates. This policy decision does not complete those gates.
 - **Projection lifecycle:** add portable reads/writes incrementally, then initialization/resume,
   bounded recovery coverage, ABI deployment and mapping revisions, auto-map of allowed accounts,
   staged live reload and per-projection ordering/declared parallel partitions. Bulk and live paths
@@ -108,10 +180,10 @@ and the source/server scope decisions needed before the supported upgrade set is
   and recovery. Investigation revisions are not accepted launch pins. The new testnet's synced
   SHiP node is available on Hyperion-3; final live qualification still requires the selected
   contract/build/deployment receipts and the integrated Node/Rust recovery exercises.
-- **WormDB:** assess required capabilities early and file demonstrated engine gaps in WormDB.
-  Qualify the unchanged definitions and plugin queries against the same applicable conformance,
-  recovery and parity requirements. If the effort is too high, record an explicit MongoDB-only
-  release decision; permanent backend support remains the architecture direction.
+- **WormDB follow-up:** implementation and qualification do not block 4.5. Preserve portable
+  definitions and plugin queries. A future supported adapter must satisfy the applicable
+  conformance, recovery and parity requirements. MongoDB serves state for this release;
+  Elasticsearch continues to hold history.
 - **Sequence identity and client migration:** [History API #219](https://github.com/eosrio/hyperion-history-api/issues/219)
   implements exact decimal-string uint64 sequence fields on all chains, including Antelope, under
   [ADR 0053](../adr/0053-use-lossless-sequence-strings-on-all-chains.md). Qualify public aliases,
@@ -200,7 +272,7 @@ The [published initial issue batch](hyperion-4.5-initial-issues.md) defines ten 
 6. Serve that contract through the existing Hyperion workers and API.
 7. Prove durable projection rollback and restart recovery.
 8. Define the Wire testnet qualification profile.
-9. Assess WormDB against required backend capabilities.
+9. Assess WormDB against required backend capabilities (follow-up outside the 4.5 release gates).
 10. Establish the pinned AtomicAssets/AtomicMarket parity inventory.
 
 The following already exist and must be reused rather than duplicated:
@@ -231,7 +303,7 @@ registered as native GitHub dependencies.
 | P06 | [eosrio/hyperion-history-api #191](https://github.com/eosrio/hyperion-history-api/issues/191) | M1 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
 | P07 | [eosrio/hyperion-tools #21](https://github.com/eosrio/hyperion-tools/issues/21) | M2 | [P05](https://github.com/eosrio/hyperion-sdk/issues/1) |
 | P08 | [eosrio/hyperion-tools #22](https://github.com/eosrio/hyperion-tools/issues/22) | M3 | None |
-| P09 | [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23) | M4 | None |
+| P09 | [eosrio/hyperion-tools #23](https://github.com/eosrio/hyperion-tools/issues/23) | Follow-up | None |
 | P10 | [eosrio/hyperion-atomicassets-plugin #1](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/1) | M3 | None |
 
 The repository-creation prerequisite for P10 is fulfilled. P01 remains open for adapter source

@@ -1,0 +1,69 @@
+
+> @eosrio/hyperion-backend-mongodb@0.0.0-dev.1 test:package
+> node scripts/check-package.mjs
+
+✔ actual pinned driver must not add maxTimeMS to a non-tailable getMore (155.466812ms)
+✔ actual pinned driver preserves the explicit initial find operation deadline under transaction CSOT (63.907332ms)
+✔ cursor and session cleanup failures cannot replace the original native data error (231.962308ms)
+✔ a session cleanup failure after otherwise successful data remains a retryable failure (71.457607ms)
+✔ new capability requires effective typed nonretrying client options; old factory remains get-only (116.307857ms)
+✔ genuine native cursor exhaustion includes empty coverage, zero row budget, no kind limit (64.062458ms)
+✔ opaque signed native cursor ids are preserved; only exact zero establishes exhaustion (96.192988ms)
+✔ direct counted keyed reads retain the declared zero-key bound while kind enumeration remains available (50.403222ms)
+✔ all rows/fields and exact bigint text survive; foreign kinds are excluded by native scope (88.440983ms)
+✔ an empty live native batch does not claim completion; attempts include the continuation (134.874495ms)
+✔ record overflow fetches at most the documented extra row and never returns partial success (79.709241ms)
+✔ data callback retries share one attempt total; no excessive command is sent (70.245709ms)
+✔ current bookends cannot authorize an older native metadata and data snapshot (99.663009ms)
+✔ each transaction callback retry validates metadata inside that callback snapshot (91.945109ms)
+✔ an ABA snapshot with the same checkpoint cannot adopt a rotated owner/revision (54.37045ms)
+✔ counted keyed data and kind enumeration consume the same explicit total (108.424454ms)
+✔ unknown kinds, foreign tokens and mismatched views refuse before data commands (79.887554ms)
+✔ partial index or changed retry options refuse completed-read acquisition before callback (68.427193ms)
+✔ duplicate, malformed, foreign and noncanonical native rows fail closed (245.523166ms)
+✔ response byte overflow and caught failures cannot complete; cleanup/session lifetime is bounded (70.415016ms)
+✔ native errors, cancellation, owner takeover and fork revision refuse late data (142.640136ms)
+✔ a real raw gap persists through adapter reconstruction and cannot issue a complete-kind read (42.985741ms)
+✔ native rollback invalidates the completed token and a fresh owner sees actual empty state (42.204685ms)
+✔ explicit separate owner factory/namespace neither adopts v1 nor grants public open/read readiness (63.353715ms)
+✔ raw decode failure survives reconstruction/takeover without fabricated source or changed original refs (97.804807ms)
+✔ unknown raw marker acknowledgment reuses the exact raw capture and refuses another target (27.736301ms)
+✔ owner acquisition lost CAS acknowledgment has one exact claim retry; stale expectations cannot steal it (16.613121ms)
+✔ unknown before commit recovers original candidate on cold owner without hook rerun (123.874169ms)
+✔ unknown after commit recovers original candidate on cold owner without hook rerun (68.424871ms)
+✔ failed original pending candidate keeps gap through retry and exact apply-before-clear repair (86.577158ms)
+✔ normal inflight completed reads require actual live-owner guard and never leak reduction capability (51.918919ms)
+✔ owner cancellation while native read is held prevents later effect/transaction starts (22.999556ms)
+✔ rollback uses original undo engine, invalidates old leases/read caps and cannot clear cross-declaration recovery (75.082936ms)
+✔ native raw/view/source mismatch and oversized locators fail before domain effects (14.320355ms)
+✔ lost rollback-admission ACK resumes with fresh owner and original operation revision (46.85578ms)
+✔ closing a held private capability drains the current read and starts no further keyed read (49.196846ms)
+✔ pending-intent CAS miss prevents all domain effects and raw metadata corruption refuses on cold inspection (46.402546ms)
+✔ actual owner execution/custody preserves scope-less KV identities including zero bytes and key-only secondary rows (79.44767ms)
+✔ exact bootstrap acquire retry cannot silently adopt a rollback revision (66.480309ms)
+✔ exact takeover acquire retry cannot silently adopt a rollback revision (64.073554ms)
+✔ explicit opt-in validates native profile/declaration before I/O; old factories gain no support (49.92617ms)
+✔ distinct SDK module handles recapture only for validation; host negotiation/fences remain mandatory (72.769977ms)
+✔ driver A/B/rollback/C preserves ordered replacements, one original image, relationships and ABA fence (141.77537ms)
+✔ canonical JSON storage preserves inert special keys, NUL/literal escapes, null and full delete/put (32.399387ms)
+✔ unknown before commit/reconstructed adapter reuses fixed candidate without hook rerun (28.358133ms)
+✔ unknown after commit/reconstructed adapter reuses fixed candidate without hook rerun (18.764341ms)
+✔ driver transaction retries receive the same plan, conflicting/expired replays do not run hooks (68.971656ms)
+✔ point reads share a native snapshot and check primary linearizable progress before/after it (27.861938ms)
+✔ pending intent blocks serving, different source and gap admission; original unknown candidate alone recovers (48.415088ms)
+✔ rollback admission survives lost acknowledgment, reconstructs exact intent and refuses corrupt undo (59.646061ms)
+✔ retention prunes complete blocks and reports unavailable ancestry; per-block bytes abort before effects (47.858823ms)
+✔ durable intent CAS refusal prevents effects; stale original candidate cannot adopt ordinary progress (29.06269ms)
+✔ read vectors and source handles refuse getters before native I/O; host guard still owns cancellation (23.846626ms)
+✔ native metadata corruption cannot fabricate a different retained branch receipt (16.536968ms)
+✔ metadata envelope admits the last byte and refuses the next before native I/O or hooks (1228.101877ms)
+✔ native recovery reason must fit the explicit UTF-8 key/text profile before capability exposure (5.964803ms)
+ℹ tests 56
+ℹ suites 0
+ℹ pass 56
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2966.515957
+Packed ESM/TypeScript and native-driver controls passed; physical MongoDB qualification remains pending.
