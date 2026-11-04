@@ -337,6 +337,16 @@ def fresh_target(parent, target):
     return True  # Filesystem preflight only; no artifact, execution or host authority.
 
 
+def validate_packed_summary(body):
+    lines = body.decode().splitlines()
+    counts = []
+    for line in lines:
+        match = re.fullmatch(r'(?:# |\u2139 )(tests|pass|fail|cancelled|skipped) ([0-9]+)', line)
+        if match:
+            counts.append((match[1], int(match[2])))
+    need(counts == [('tests',56),('pass',56),('fail',0),('cancelled',0),('skipped',0)], 'Unchanged original56 packed controls required')
+
+
 def validate_terminal(row, seconds=60):
     need(type(row) is dict and row.get('waitReaped') is True and row.get('exitCode') == 0
          and row.get('timedOut') is False and row.get('streamsClosed') is True and row.get('descendantsClosed') is True,
@@ -348,15 +358,7 @@ def validate_terminal(row, seconds=60):
     for name in ('stdout','stderr'):
         value = row[name]; body = base64.b64decode(value['base64'], validate=True)
         need(len(body) <= MAX_STREAM and pin(body) == {k:value[k]for k in ('bytes','sha256')} and value.get('eof') is True, 'Original bounded stream bytes/EOF differ')
-    lines = base64.b64decode(row['stdout']['base64']).decode().splitlines()
-    # Node's unchanged default reporter can emit TAP or spec summaries. Admit
-    # exactly one complete summary; duplicate/conflicting reporters fail closed.
-    counts = []
-    for line in lines:
-        match = re.fullmatch(r'(?:# |\u2139 )(tests|pass|fail|cancelled|skipped) ([0-9]+)', line)
-        if match:
-            counts.append((match[1], int(match[2])))
-    need(counts == [('tests',56),('pass',56),('fail',0),('cancelled',0),('skipped',0)], 'Unchanged original56 packed controls required')
+    validate_packed_summary(base64.b64decode(row['stdout']['base64']))
 
 
 def command_plan(layout, profile):

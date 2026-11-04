@@ -95,6 +95,26 @@ class NamespaceData(unittest.TestCase):
         with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',return_value=stat_body(9,90,'Z')),mock.patch.object(N.os,'readlink',side_effect=FileNotFoundError):
             factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
             rows=N.census();self.assertEqual(rows[9]['state'],'Z');self.assertIsNone(rows[9]['pidNamespace'])
+    def test_esrch_namespace_link_race_requires_confirmed_identity(self):
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',return_value=stat_body(9,90,'Z')),mock.patch.object(N.os,'readlink',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            rows=N.census();self.assertIsNone(rows[9]['pidNamespace'])
+            _,live=N.classify({},rows,set(),3);self.assertEqual(live[0]['birth'],90)
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=[stat_body(9,90,'R'),stat_body(9,90,'R'),stat_body(9,90,'R')]),mock.patch.object(N.os,'readlink',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            rows=N.census();_,live=N.classify({},rows,set(),3);self.assertEqual(live[0]['state'],'R')
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=[stat_body(9,90),FileNotFoundError()]),mock.patch.object(N.os,'readlink',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            self.assertEqual(N.census(),{})
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=[stat_body(9,90),stat_body(9,91)]),mock.patch.object(N.os,'readlink',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            with self.assertRaisesRegex(ValueError,'PID reused'):N.census()
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=[stat_body(9,90),PermissionError()]),mock.patch.object(N.os,'readlink',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            with self.assertRaises(PermissionError):N.census()
+        with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',side_effect=ProcessLookupError(3,'No such process')):
+            factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]
+            with self.assertRaises(ProcessLookupError):N.census()
     def test_unknown_permission_is_not_a_complete_census(self):
         with mock.patch.object(N,'Path')as factory,mock.patch.object(N,'read_text',return_value=stat_body(9,90)),mock.patch.object(N.os,'readlink',side_effect=PermissionError):
             factory.return_value.iterdir.return_value=[PurePosixPath('/proc/9')]

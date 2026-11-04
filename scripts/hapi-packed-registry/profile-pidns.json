@@ -138,8 +138,8 @@
     "kind": "current103-packed-registry-private-pidns-v2",
     "sourceFiles": {
       "namespace_contracts.py": {
-        "bytes": 9701,
-        "sha256": "868fc3732e85064c7d58354efc40c378ea80fdbf237b85e2ef4c13332da4734c"
+        "bytes": 9723,
+        "sha256": "0cbf281243f96c91c68655de45c241772655960b253b53ed3a646555a2529bd7"
       },
       "namespace_init.py": {
         "bytes": 6483,
@@ -158,8 +158,8 @@
         "sha256": "61a0d6b71e041f84c05fce39307e765b814aca7577fe4ece3fb7f33ec92096ce"
       },
       "contracts.py": {
-        "bytes": 40106,
-        "sha256": "e89d4cae160eb480e23e2ff0816146a6739fe0b0af1906c12914ba3ac6f07e8c"
+        "bytes": 40018,
+        "sha256": "292265c9912d49127d008a67333fbaf262b1bdd315fae46b62e804884ce72835"
       },
       "cache-bridge.mjs": {
         "bytes": 10077,

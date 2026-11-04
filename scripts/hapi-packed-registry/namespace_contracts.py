@@ -105,7 +105,7 @@ def census():
         try:row = parse_stat(int(path.name),read_text(path/'stat',4096))
         except FileNotFoundError:continue
         try:row['pidNamespace'] = os.readlink(path/'ns/pid')
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             # A zombie can retain stat while its namespace link has gone. Keep it blocking.
             try:again = parse_stat(int(path.name),read_text(path/'stat',4096))
             except FileNotFoundError:continue
