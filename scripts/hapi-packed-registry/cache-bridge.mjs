@@ -51,7 +51,7 @@ const fetchBody=async(row)=>{assert.ok(Number.isSafeInteger(row.size)&&row.size>
 if(mode==='export'){
  const graph=JSON.parse(await readFile(spec.closure)),packages=Object.values(graph.packages).filter(p=>!profile.localPackages.includes(p.name)),names=new Set(packages.map(p=>p.name));
  const metadataNames=new Set(Object.keys(graph.requests).filter(name=>!profile.localPackages.includes(name))),urls=new Set(packages.map(p=>p.resolved));
- const options={cache,registry:profile.registry,preferOffline:true,updateNotifier:false};
+ const options={cache,registry:profile.registry,preferOffline:true,fullMetadata:true,updateNotifier:false};
  // These fetches are pinned to the already recorded resolver graph, not guessed direct roots.
  const warmed=[];
  for(const name of names){await pacote.packument(name,options);warmed.push({role:'selected-metadata',name});}

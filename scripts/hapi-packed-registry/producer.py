@@ -304,7 +304,11 @@ def produce(repo, output, case='v1'):
     save(closure,{'packages':packages,'requests':{name:sorted(values)for name,values in requests.items()}})
     export_spec = resolver/'export.json'; save(export_spec,{'cacheRoot':str(resolver_cache),'output':str(work/'export'),'closure':str(closure),'consumer':str(consumer),'localPacks':[str(p)for p in tarballs]})
     call([node,HERE/'cache-bridge.mjs','export',export_spec],TOOLS,'export-registry',120)
-    seed = work/'export/cache'; catalog = C.parse_json((work/'export/catalog.json').read_bytes()); cache = C.validate_cache_tree(seed,catalog['entries'],lock,profile)
+    seed = work/'export/cache'; catalog_bytes = (work/'export/catalog.json').read_bytes()
+    # Preserve the actual exported headers and index rows even if admission or the proof fails.
+    fresh(output/'seed-catalog.json',catalog_bytes)
+    save(output/'seed-inventory.json',C.cache_inventory(seed))
+    catalog = C.parse_json(catalog_bytes); cache = C.validate_cache_tree(seed,catalog['entries'],lock,profile)
     archive = output/profile['artifact']['archive']; write_archive(seed,cache['inventory'],archive); archive_pin = C.pin(archive.read_bytes())
     proof_root = work/'proof-product'; call(['git','clone','--no-local','--no-hardlinks','--no-checkout',repo,proof_root],work,'fresh-proof-clone',120)
     call(['git','checkout','--detach',profile['product']['productHead']],proof_root,'fresh-proof-checkout',60)

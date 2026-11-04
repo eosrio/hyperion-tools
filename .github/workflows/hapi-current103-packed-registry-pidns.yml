@@ -56,6 +56,8 @@ jobs:
             ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.receipt.json
             ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.OUTPUT.tar.gz
             ${{ runner.temp }}/hapi-current103-packed-registry-pidns/current103-packed-registry-pidns-v2.context.json
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/seed-catalog.json
+            ${{ runner.temp }}/hapi-current103-packed-registry-pidns/seed-inventory.json
           if-no-files-found: error
           compression-level: 0
           overwrite: false
