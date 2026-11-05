@@ -12,7 +12,14 @@ categories = ["command-line-utilities", "parsing"]
 readme = "../../README.md"
 
 [dependencies]
-hyperion-ship = { workspace = true, features = ["ship"] }
+hyperion-ship = { workspace = true, features = ["ship", "archive"] }
 tokio = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+
+[dev-dependencies]
+hyperion-ship = { workspace = true, features = ["testkit"] }
+serde_json = { workspace = true }
+hex = { workspace = true }
+rs_abieos = { workspace = true }
+sha2 = { workspace = true }

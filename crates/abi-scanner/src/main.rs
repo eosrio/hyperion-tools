@@ -13,7 +13,7 @@ use hyperion_ship::provider::ProtocolProvider;
 use hyperion_ship::{disk, ship};
 
 #[derive(Parser, Debug, Clone)]
-#[command(about = "Scan a SHiP block range for contract ABI versions (setabi), deltas-only.")]
+#[command(about = "Scan SHiP or frozen disk logs for contract ABI history.")]
 struct Args {
     /// Select semantics before reading input. Wire profiles are explicit engineering pins.
     #[arg(long, default_value = "antelope")]
@@ -21,17 +21,26 @@ struct Args {
     /// SHiP websocket endpoint (a fleet-router or a nodeos SHiP node). Omit when using --from-disk.
     #[arg(long)]
     ship: Option<String>,
-    /// Read directly from the nodeos state-history dir (contains chain_state_history.{log,index}).
-    /// Bypasses nodeos/SHiP entirely — read-only, parallel, decodes from the append-only log.
+    /// Read the nodeos state-history dir. Wire requires frozen chain-state and trace logs.
+    /// Bypasses nodeos/SHiP entirely. Antelope supports parallel, resumable scans.
     #[arg(long)]
     from_disk: Option<String>,
+    /// Exact Wire SHiP handshake JSON (required for Wire disk history).
+    #[arg(long)]
+    ship_abi: Option<String>,
+    /// Expected chain identity for a complete Wire disk history.
+    #[arg(long)]
+    chain_id: Option<String>,
+    /// Irreversible block ID at --end, independently obtained from the source node.
+    #[arg(long)]
+    irreversible_block_id: Option<String>,
     /// First block to scan (inclusive)
     #[arg(long)]
     start: u32,
     /// Last block to scan (inclusive)
     #[arg(long)]
     end: u32,
-    /// Output NDJSON file (one abi-index doc per line). Defaults to stdout.
+    /// Output NDJSON. Wire also seals a manifest and block-ID sidecar; Antelope defaults to stdout.
     #[arg(long)]
     out: Option<String>,
     /// SHiP max_messages_in_flight (flow-control window) per connection
@@ -40,7 +49,7 @@ struct Args {
     /// SHiP: parallel connections. Disk: parallel reader threads. (range split into N contiguous chunks)
     #[arg(long, default_value_t = 1)]
     connections: u32,
-    /// Disk reader threads (defaults to --connections if unset)
+    /// Antelope disk reader threads (defaults to --connections if unset). Wire uses one ordered reader.
     #[arg(long)]
     threads: Option<u32>,
     /// Request irreversible blocks only (safe for historical ranges)
@@ -111,9 +120,42 @@ async fn main() -> Result<()> {
         args.start > 0 && args.start <= args.end && args.end < u32::MAX,
         "invalid block range"
     );
-    if args.from_disk.is_some() {
-        args.protocol
-            .require_antelope("abi-scanner direct-from-disk/account-first scan")?;
+    if let (Some(directory), ProtocolProvider::Wire(_)) = (&args.from_disk, &args.protocol) {
+        anyhow::ensure!(
+            args.ship.is_none(),
+            "select only one of --ship and --from-disk"
+        );
+        anyhow::ensure!(
+            args.start == 1,
+            "complete Wire ABI history must start at genesis (block 1)"
+        );
+        anyhow::ensure!(
+            args.checkpoint.is_none(),
+            "Wire history is sealed atomically; use a fresh output rather than a partial checkpoint"
+        );
+        anyhow::ensure!(
+            args.threads.unwrap_or(args.connections) == 1,
+            "Wire disk history currently requires one ordered reader (--threads 1)"
+        );
+        let schema = std::fs::read_to_string(
+            args.ship_abi
+                .as_deref()
+                .context("Wire disk history requires --ship-abi")?,
+        )?;
+        hyperion_ship::wire_history::scan(&hyperion_ship::wire_history::ScanOptions {
+            directory: directory.into(),
+            schema,
+            chain_id: args
+                .chain_id
+                .context("Wire disk history requires --chain-id")?,
+            end: args.end,
+            irreversible_block_id: args
+                .irreversible_block_id
+                .context("Wire disk history requires --irreversible-block-id")?,
+            output: args.out.context("Wire disk history requires --out")?.into(),
+            provider: args.protocol,
+        })?;
+        return Ok(());
     }
     // Resume when the checkpoint already exists: append to the prior output, don't truncate it.
     let resuming = args

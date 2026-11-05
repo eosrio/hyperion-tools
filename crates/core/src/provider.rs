@@ -202,9 +202,21 @@ impl ProtocolProvider {
         }
     }
 
+    /// Decode Wire delta tables with the pinned, source-evidenced framing correction.
+    /// Returns both `deltas` and the codec's explicit `framing` provenance.
+    pub fn decode_delta_payload(&self, abi: &Value, bytes: &[u8]) -> Result<Value> {
+        self.validate()?;
+        let Self::Wire(profile) = self else {
+            bail!(
+                "unsupported_feature: Wire delta framing requires an explicitly selected Wire profile"
+            );
+        };
+        Ok(codec::ship::decode_deltas(abi, bytes, profile)?)
+    }
+
     /// Complete Wire transport records, retaining every nested byte payload.
     pub fn decode_bundle(&self, abi: &Value, bytes: &[u8]) -> Result<Value> {
-        let Self::Wire(profile) = self else {
+        let Self::Wire(_) = self else {
             bail!(
                 "unsupported_feature: complete bundle replay requires an explicitly selected Wire profile"
             );
@@ -227,7 +239,7 @@ impl ProtocolProvider {
             }
         }
         if let Some(raw) = result["deltas"].as_str() {
-            let decoded = codec::ship::decode_deltas(abi, &hex::decode(raw)?, profile)?;
+            let decoded = self.decode_delta_payload(abi, &hex::decode(raw)?)?;
             let mut rows = Vec::new();
             for delta in decoded["deltas"].as_array().context("invalid deltas")? {
                 ensure!(
