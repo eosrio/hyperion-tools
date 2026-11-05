@@ -5,14 +5,14 @@ Extracts every contract ABI version (`setabi`) across a chain's history into a p
 disk** (fastest, no nodeos load) or by streaming **SHiP** from a node /
 [fleet-router](https://github.com/eosrio/fleet-router).
 
-Output is one [Hyperion](https://github.com/eosrio/hyperion-history-api) abi-index doc per line, ready to
+The default Antelope output is one [Hyperion](https://github.com/eosrio/hyperion-history-api) abi-index doc per line, ready to
 `_bulk` into `<chain>-abi-v1`:
 
 ```json
 {"account":"eosio.token","block":49,"abi":"{...abi json...}","abi_hex":"0e656f…","actions":["transfer","issue","…"],"tables":["accounts","stat"]}
 ```
 
-## Two modes
+## Antelope modes
 
 | | how | throughput | nodeos load |
 |---|---|---|---|
@@ -87,6 +87,64 @@ abi-scanner --ship ws://node:8080 --start 2 --end 999999999 --out abi-snapshot.n
 abi-scanner --ship ws://fleet-router:18080 --start 2 --end 999999999 \
   --connections 16 --in-flight 200 --out abi-snapshot.ndjson
 ```
+
+## Wire: complete deployment history from frozen disk logs
+
+Wire disk mode uses an explicitly selected, source-pinned protocol provider and both
+`chain_state_history.{log,index}` and `trace_history.{log,index}`. It reads each canonical
+index slot, rather than abandoned physical fork entries. It does not use Antelope's
+account-first delta shortcut. The pinned Wire codec handles the evidenced resource-index
+table-count defect; unrelated malformed transport data still fails the scan.
+
+Freeze a consistent, read-only view of both logs and indices first. Obtain the chain ID,
+an irreversible block number/ID, and the exact SHiP handshake from that node. The scanner
+requires full state coverage from block 1 and trace coverage from block 1 or 2 through the
+specified boundary. A missing genesis trace is recorded explicitly with the selected native
+profile as the sequence-zero baseline. Partial ranges and snapshot-only initial state cannot
+establish complete action ABI epochs and are refused.
+
+```bash
+abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 \
+  --from-disk /data/frozen-wire-state-history --start 1 --end "$LIB" \
+  --ship-abi wire-ship-schema.json --chain-id "$CHAIN_ID" \
+  --irreversible-block-id "$LIB_ID" --out wire-abis.ndjson
+```
+
+This mode uses one ordered reader. `--threads`/`--connections` must be 1 and `--checkpoint`
+is refused. Antelope throughput measurements and streaming thresholds do not describe this
+Wire mode. It decompresses and decodes each complete trace/delta payload under the pinned
+codec's 16 MiB input limit; exceeding that limit fails explicitly. It does not decode ordinary
+contract action values or write per-block Elasticsearch records.
+
+Successful primary `sysio::setabi` traces produce deployment records with transaction ID,
+action ordinal, global sequence and the target account's ABI revision. Revisions count from
+genesis, including same-value deployments and clears, and are checked against ordinary primary
+action receipts. Notifications do not add deployments. The current native observer's qualified
+scope is executed, unscheduled transactions without failed-deferred traces; other
+forms fail explicitly. In particular, soft-fail/onerror can commit effects and must not be
+silently skipped. Schema-decoded `partial_transaction_v0` header/signature metadata is
+accepted, as evidenced in the real captured Wire trace; it does not replace `action_traces`.
+Block-final
+account deltas independently validate the final value and produce sparse baseline/change/clear
+barriers. Malformed contract ABI bytes are retained with `abiDecodeError`; a contract decoding
+failure does not invalidate otherwise complete source coverage.
+
+`--out wire-abis.ndjson` creates these fresh files:
+
+- `wire-abis.ndjson`: sparse deployment and block-final records. This is a different format
+  from the default Antelope abi-index docs; use the Hyperion Wire catalog consumer.
+- `wire-abis.ndjson.blocks.bin`: canonical 32-byte block IDs in ascending order from block 1.
+- `wire-abis.ndjson.manifest.json`: `hyperion-wire-abi-history-v1`, chain/node/provider/schema
+  identity, source files and ranges, inclusive coverage, irreversible boundary, exact final
+  global sequence, record counts, lengths and SHA-256 checksums of both data files.
+
+All sequences are exact decimal strings. Only the manifest published after successful
+validation authorizes consumption. Read/checksum failures, source gaps, changed source files,
+receipt disagreements and mismatched source identities fail without a completed manifest.
+Interrupted `.partial` files remain diagnostic artifacts; rerun with a new output name.
+Existing completed files are never overwritten. The chain ID and irreversible witness must
+come from the independently verified source; the scanner checks the supplied end ID against
+the indexed logs rather than inferring a chain ID from state-history files.
 
 ## Ingest into Elasticsearch
 

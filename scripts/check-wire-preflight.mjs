@@ -24,11 +24,12 @@ try {
     const path=resolve(bin,name+(process.platform==='win32'?'.exe':''));
     const result=spawnSync(path,['--protocol','wire-sysio-6508c9e8-engineering-v1',...args],{encoding:'utf8'});
     assert.ifError(result.error);assert.notEqual(result.status,0,name);
-    assert.match(result.stderr,/unsupported_feature:/,`${name}: ${result.stderr}`);
+    const reason = name === 'abi-scanner' ? /Wire history is sealed atomically/ : /unsupported_feature:/;
+    assert.match(result.stderr,reason,`${name}: ${result.stderr}`);
     assert.equal(readFileSync(sentinel,'utf8'),'preserve existing output\n',name);
     assert.equal(existsSync(checkpoint),false,name);
   }
-  console.log('Wire preflight: six incompatible paths refused before output/checkpoint mutation');
+  console.log('Wire preflight: incompatible paths and unsealed disk checkpoints refused before output/checkpoint mutation');
 } finally {
   assert.equal(dirname(temp),resolve(tmpdir()));
   assert.ok(temp.includes('hyperion-wire-preflight-'));
