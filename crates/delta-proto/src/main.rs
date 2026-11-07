@@ -26,7 +26,9 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
 use hyperion_ship::delta::read_varuint;
-use hyperion_ship::disk::{decode_payload, is_ship_magic};
+
+mod wire;
+use hyperion_ship::disk::{canonical_offsets, decode_payload, is_ship_magic};
 
 #[derive(Parser, Debug)]
 #[command(about = "Experimental: decode contract_row deltas directly from the state-history log.")]
@@ -38,7 +40,8 @@ struct Args {
     /// nodeos state-history dir (chain_state_history.{log,index})
     #[arg(long)]
     from_disk: String,
-    /// abi-index NDJSON produced by abi-scanner ({account, block, abi_hex, ...})
+    /// abi-index NDJSON produced by abi-scanner ({account, block, abi_hex, ...}). For Wire, the
+    /// Hyperion 4.5 ABI history catalog ({account, blockNum, blockId, abiHex, abi, phase, ...}).
     #[arg(long)]
     abi_index: String,
     #[arg(long)]
@@ -55,6 +58,36 @@ struct Args {
     /// (block_num, code, scope, table, primary_key) key so the API/archive can fetch it back later.
     #[arg(long, default_value_t = false)]
     metadata_only: bool,
+    /// Wire: nodeos blocks dir (blocks.{log,index}), the source of each document's `@timestamp`.
+    #[arg(long)]
+    blocks_dir: Option<String>,
+    /// Wire: direct Elasticsearch `_bulk` sink (e.g. http://127.0.0.1:9200); takes precedence over --out.
+    #[arg(long)]
+    es: Option<String>,
+    /// Wire: chain name for the ES `_index` (`<chain>-delta-<version>-<partition>`).
+    #[arg(long, default_value = "wax")]
+    chain: String,
+    /// Wire: index version for the ES `_index`.
+    #[arg(long, default_value = "v1")]
+    index_version: String,
+    /// Wire: `INDEX_PARTITION_SIZE`; partition = ceil(block_num / partition_size), 6 digits.
+    #[arg(long, default_value_t = 10_000_000)]
+    partition_size: u64,
+    /// Wire: docs per `_bulk` request.
+    #[arg(long, default_value_t = 4000)]
+    es_batch: usize,
+    /// Wire: concurrent `_bulk` poster threads.
+    #[arg(long, default_value_t = 8)]
+    es_workers: usize,
+    /// Wire: chain id (64 lowercase hex) used in record identities and `_id`s.
+    #[arg(long)]
+    chain_id: Option<String>,
+    /// Wire: `protocol.profileId` written into documents (default: the --protocol profile id).
+    #[arg(long)]
+    doc_profile_id: Option<String>,
+    /// Wire: system contract account whose tables Hyperion's table handlers reshape.
+    #[arg(long, default_value = "sysio")]
+    system_contract: String,
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
@@ -178,6 +211,7 @@ struct Stats {
     no_abi: AtomicU64,    // (subset of raw) no ABI version at all for (code, block)
     raw: AtomicU64,       // undecodable -> raw `value` preserved (e.g. table not in the ABI)
     recovered: AtomicU64, // decoded only after retrying against block-1's ABI
+    stale: AtomicU64,     // superseded (forked) log entries skipped
 }
 
 /// Why a row failed to decode at a given block.
@@ -282,24 +316,19 @@ fn worker(
     let mut reg = Registry::new(abi_index);
     let mut buf = String::new(); // reused decode target
 
-    let mut idx = File::open(idx_path)?;
-    idx.seek(SeekFrom::Start((cs - first_block) as u64 * 8))?;
-    let mut ob = [0u8; 8];
-    idx.read_exact(&mut ob)?;
-    let mut pos = u64::from_le_bytes(ob);
-    let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     let log_len = std::fs::metadata(log_path)?.len();
+    let (offsets, stop) = canonical_offsets(idx_path, first_block, cs, ce, log_len)?;
+    let mut pos = offsets[0];
+    let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
     loop {
-        if log.read_exact(&mut hdr).is_err() {
+        let entry_pos = pos;
+        if entry_pos >= stop || log.read_exact(&mut hdr).is_err() {
             break;
         }
         let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
-        if block_num > ce {
-            break;
-        }
         let block_id = hex::encode(&hdr[8..40]);
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         if payload_size > log_len {
@@ -319,6 +348,11 @@ fn worker(
             log.seek_relative(-(suf.len() as i64)).ok();
             entry_end
         };
+        // A fork leaves the superseded entry in the log; only the entry the index points to counts.
+        if block_num < cs || block_num > ce || offsets[(block_num - cs) as usize] != entry_pos {
+            stats.stale.fetch_add(1, Relaxed);
+            continue;
+        }
         stats.blocks.fetch_add(1, Relaxed);
 
         let deltas = match decode_payload(&payload) {
@@ -408,12 +442,6 @@ fn worker(
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    args.protocol
-        .require_antelope("legacy contract_row bulk path")?;
-    eprintln!("[delta-proto] loading ABI index {} ...", args.abi_index);
-    let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
-    eprintln!("[delta-proto] {} contracts in ABI index", abi_index.len());
-
     let log_path = format!("{}/chain_state_history.log", args.from_disk);
     let idx_path = format!("{}/chain_state_history.index", args.from_disk);
     let mut f = File::open(&log_path).with_context(|| format!("open {log_path}"))?;
@@ -430,6 +458,39 @@ fn main() -> Result<()> {
     if start > end {
         bail!("empty range after clamp to [{first_block}..{last_block}]");
     }
+    if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
+        if args.metadata_only {
+            bail!("--metadata-only is not supported for Wire");
+        }
+        return wire::run(wire::Config {
+            log_path,
+            idx_path,
+            first_block,
+            start,
+            end,
+            threads: args.threads,
+            abi_catalog: args.abi_index.clone(),
+            blocks_dir: args.blocks_dir.clone().context("Wire deltas need --blocks-dir for @timestamp")?,
+            out: args.out.clone(),
+            es: args.es.clone(),
+            chain: args.chain.clone(),
+            index_version: args.index_version.clone(),
+            partition_size: args.partition_size,
+            es_batch: args.es_batch,
+            es_workers: args.es_workers,
+            profile: profile.clone(),
+            timestamps: args.protocol.timestamp_profile()?,
+            doc_profile_id: args.doc_profile_id.clone().unwrap_or_else(|| profile.id.clone()),
+            chain_id: args.chain_id.clone().context("Wire deltas need --chain-id")?,
+            system_contract: args.system_contract.clone(),
+        });
+    }
+    args.protocol
+        .require_antelope("legacy contract_row bulk path")?;
+    eprintln!("[delta-proto] loading ABI index {} ...", args.abi_index);
+    let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
+    eprintln!("[delta-proto] {} contracts in ABI index", abi_index.len());
+
     let threads = args.threads.max(1);
     let total = (end - start + 1) as u64;
     let chunk = total.div_ceil(threads as u64) as u32;
@@ -516,6 +577,10 @@ fn main() -> Result<()> {
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
+    let stale = stats.stale.load(Relaxed);
+    if stale > 0 {
+        eprintln!("[delta-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)");
+    }
     // breakdown of the raw (undecodable) rows — table not declared in the ABI, etc.
     let f = failures.lock().unwrap();
     if !f.is_empty() {
