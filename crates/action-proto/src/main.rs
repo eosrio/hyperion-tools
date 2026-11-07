@@ -97,7 +97,9 @@ struct Args {
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
-type AbiIndex = HashMap<u64, Vec<(u32, String)>>;
+/// Each version keeps its hex ABI and, when the catalog provides it, the decoded JSON ABI. Wire ABIs
+/// can carry sections (`enums`, `protobuf_types`) the binary parser rejects; the JSON form still loads.
+type AbiIndex = HashMap<u64, Vec<(u32, String, Option<String>)>>;
 
 fn load_abi_index(path: &str) -> Result<AbiIndex> {
     let names = Abieos::new();
@@ -131,12 +133,13 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
             skipped += 1;
             continue;
         };
+        let json = v.get("abi").filter(|x| x.is_object()).map(|abi| abi.to_string());
         idx.entry(code)
             .or_default()
-            .push((block as u32, hex.to_string()));
+            .push((block as u32, hex.to_string(), json));
     }
     for versions in idx.values_mut() {
-        versions.sort_by_key(|(b, _)| *b);
+        versions.sort_by_key(|(b, _, _)| *b);
     }
     if skipped > 0 {
         eprintln!("[action-proto] skipped {skipped} malformed ABI-index line(s)");
@@ -145,10 +148,24 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
 }
 
 /// Per-worker cache of parsed contract ABIs, backed by the shared (immutable) version index.
-/// (Identical to delta-proto's registry — the level-2 act.data decode is the same lookup.)
+/// Most ABIs load into a fast `rs_abieos` handle. A Wire ABI that uses Wire-only features
+/// (`slug_name`, ABI enums, protobuf types) is decoded by the selected Wire codec instead.
+enum Loaded {
+    Fast(AbiHandle),
+    Wire { abi: Value, actions: HashMap<u64, String> },
+}
+
+static WIRE_PROFILE: std::sync::OnceLock<hyperion_wire_protocol::codec::CodecProfile> = std::sync::OnceLock::new();
+
+/// `sysio::onblock` carries the chain's own block header, which the `sysio` contract ABI describes
+/// with the stale Antelope layout. Like the Wire plugin, decode it with the native onblock ABI.
+/// Copied verbatim from hyperion-wire-plugin `crates/wire-protocol/src/codec/native_action_abi.json`.
+const WIRE_NATIVE_ACTION_ABI: &str = include_str!("wire_native_action_abi.json");
+static WIRE_ONBLOCK: std::sync::OnceLock<(u64, u64, Value)> = std::sync::OnceLock::new();
+
 struct Registry<'a> {
     idx: &'a AbiIndex,
-    handles: HashMap<(u64, u32), Option<AbiHandle>>,
+    handles: HashMap<(u64, u32), Option<Loaded>>,
 }
 
 impl<'a> Registry<'a> {
@@ -159,17 +176,50 @@ impl<'a> Registry<'a> {
         }
     }
 
-    fn active(&mut self, code: u64, block: u32) -> Option<&mut AbiHandle> {
+    fn active(&mut self, code: u64, block: u32) -> Option<&mut Loaded> {
         let Registry { idx, handles } = self;
         let versions = idx.get(&code)?;
-        let pos = versions.partition_point(|(vf, _)| *vf <= block);
+        let pos = versions.partition_point(|(vf, _, _)| *vf <= block);
         if pos == 0 {
             return None;
         }
         let valid_from = versions[pos - 1].0;
         handles
             .entry((code, valid_from))
-            .or_insert_with(|| AbiHandle::from_hex(&versions[pos - 1].1).ok())
+            .or_insert_with(|| {
+                let (_, hex, json) = &versions[pos - 1];
+                // Wire renders values (hex case, Wire-only types, native structs) exactly as the
+                // selected Wire codec does, so a Wire run never takes the rs_abieos fast path.
+                let from_hex = if WIRE_PROFILE.get().is_some() {
+                    Err(rs_abieos::AbieosError::SetAbi("Wire ABIs use the Wire codec".into()))
+                } else {
+                    AbiHandle::from_hex(hex)
+                };
+                if let Ok(handle) = from_hex {
+                    return Some(Loaded::Fast(handle));
+                }
+                if WIRE_PROFILE.get().is_some() {
+                    if let Some(abi) = json.as_deref().and_then(|j| serde_json::from_str::<Value>(j).ok()) {
+                        let names = Abieos::new();
+                        let actions = abi
+                            .get("actions")
+                            .and_then(|a| a.as_array())
+                            .map(|list| {
+                                list.iter()
+                                    .filter_map(|a| {
+                                        let name = names.string_to_name(a.get("name")?.as_str()?).ok()?;
+                                        Some((name, a.get("type")?.as_str()?.to_owned()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        return Some(Loaded::Wire { abi, actions });
+                    }
+                }
+                // Report each unloadable ABI version once.
+                eprintln!("[action-proto] ABI unusable code={code} valid_from={valid_from}: {:?}", from_hex.err());
+                None
+            })
             .as_mut()
     }
 }
@@ -223,16 +273,40 @@ fn decode_action(
     data: &[u8],
     block: u32,
 ) -> std::result::Result<(), Fail> {
-    let Some(handle) = reg.active(code, block) else {
+    if let (Some(profile), Some((sysio, onblock, native))) = (WIRE_PROFILE.get(), WIRE_ONBLOCK.get()) {
+        if code == *sysio && action == *onblock {
+            let value = hyperion_wire_protocol::codec::decode_value(native, "wire_native_onblock_v1", data, profile)
+                .map_err(|e| Fail::Decode(e.message().to_owned()))?;
+            out.clear();
+            out.push_str(&value.to_string());
+            return Ok(());
+        }
+    }
+    let Some(loaded) = reg.active(code, block) else {
         return Err(Fail::NoAbi);
     };
-    let ty = match handle.type_for_action(action) {
-        Some(t) => t.to_owned(),
-        None => return Err(Fail::NoType),
-    };
-    handle
-        .bin_to_json_into(&ty, data, out)
-        .map_err(|e| Fail::Decode(format!("{e:?}")))
+    match loaded {
+        Loaded::Fast(handle) => {
+            let ty = match handle.type_for_action(action) {
+                Some(t) => t.to_owned(),
+                None => return Err(Fail::NoType),
+            };
+            handle
+                .bin_to_json_into(&ty, data, out)
+                .map_err(|e| Fail::Decode(format!("{e:?}")))
+        }
+        Loaded::Wire { abi, actions } => {
+            let Some(ty) = actions.get(&action) else {
+                return Err(Fail::NoType);
+            };
+            let profile = WIRE_PROFILE.get().expect("Wire ABIs load only with a Wire profile");
+            let value = hyperion_wire_protocol::codec::decode_value(abi, ty, data, profile)
+                .map_err(|e| Fail::Decode(e.message().to_owned()))?;
+            out.clear();
+            out.push_str(&value.to_string());
+            Ok(())
+        }
+    }
 }
 
 /// One emitted action document flowing over the channel to the sink (NDJSON writer or ES posters).
@@ -733,6 +807,7 @@ fn worker(
     timestamps: hyperion_ship::provider::TimestampProfile,
 ) -> Result<()> {
     let mut reg = Registry::new(abi_index);
+    let wire = WIRE_PROFILE.get().is_some();
     let mut blocklog = match blocks_dir {
         Some(d) => Some(BlockLog::open(d)?),
         None => None,
@@ -942,14 +1017,22 @@ fn worker(
                 push_json_str(&mut body, &block_id);
                 body.push_str(",\"trx_id\":");
                 push_json_str(&mut body, &trx_id);
-                body.push_str(",\"global_sequence\":");
-                body.push_str(&receipt.global_sequence.to_string());
+                if wire {
+                    body.push_str(",\"global_sequence\":\"");
+                    body.push_str(&receipt.global_sequence.to_string());
+                    body.push('"');
+                } else {
+                    body.push_str(",\"global_sequence\":");
+                    body.push_str(&receipt.global_sequence.to_string());
+                }
                 body.push_str(",\"action_ordinal\":");
                 body.push_str(&act.action_ordinal.to_string());
                 body.push_str(",\"creator_action_ordinal\":");
                 body.push_str(&act.creator_action_ordinal.to_string());
                 body.push(',');
-                if act.context_free {
+                if wire {
+                    body.push_str(if act.context_free { "\"context_free\":1," } else { "\"context_free\":0," });
+                } else if act.context_free {
                     body.push_str("\"context_free\":true,");
                 }
                 if act.elapsed != 0 {
@@ -992,6 +1075,11 @@ fn worker(
                         body.push_str("\"net_usage_words\":");
                         body.push_str(&tx.net_usage_words.to_string());
                         body.push(',');
+                    }
+                    if wire && tx.actions.len() > 1 {
+                        body.push_str("\"inline_count\":");
+                        body.push_str(&(tx.actions.len() - 1).to_string());
+                        body.push_str(",\"inline_filtered\":false,");
                     }
                     usage_included = true;
                 }
@@ -1040,14 +1128,22 @@ fn worker(
                     receipt_json.push_str(&sq.to_string());
                     receipt_json.push_str("\"}");
                 }
-                receipt_json.push_str("]}");
+                if wire {
+                    receipt_json.push_str("],\"code_sequence\":");
+                    receipt_json.push_str(&receipt.code_sequence.to_string());
+                    receipt_json.push_str(",\"abi_sequence\":");
+                    receipt_json.push_str(&receipt.abi_sequence.to_string());
+                    receipt_json.push('}');
+                } else {
+                    receipt_json.push_str("]}");
+                }
 
                 procs.push(Proc {
                     block_num,
                     global_sequence: receipt.global_sequence,
                     action_ordinal: act.action_ordinal as u64,
                     creator_action_ordinal: act.creator_action_ordinal as u64,
-                    act_digest: hex::encode_upper(receipt.act_digest),
+                    act_digest: if wire { hex::encode(receipt.act_digest) } else { hex::encode_upper(receipt.act_digest) },
                     code_sequence: receipt.code_sequence,
                     abi_sequence: receipt.abi_sequence,
                     receipt_json,
@@ -1172,6 +1268,14 @@ fn main() -> Result<()> {
     let timestamps = args.protocol.timestamp_profile()?;
     let system = if args.protocol.id() == "antelope" { "eosio" } else { "sysio" };
     SYSTEM_ACCOUNT.set(system).ok();
+    if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
+        WIRE_PROFILE.set(profile.clone()).ok();
+        let names = Abieos::new();
+        let native: Value = serde_json::from_str(WIRE_NATIVE_ACTION_ABI).context("native Wire action ABI")?;
+        WIRE_ONBLOCK
+            .set((names.string_to_name("sysio")?, names.string_to_name("onblock")?, native))
+            .ok();
+    }
     eprintln!("[action-proto] protocol {} (system account {system})", args.protocol.id());
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
