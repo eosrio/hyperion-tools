@@ -22,11 +22,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "flate2",
  "hex",
  "hyperion-ship",
+ "hyperion-wire-protocol",
  "minreq",
  "rs_abieos",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -688,8 +691,11 @@ dependencies = [
  "clap",
  "hex",
  "hyperion-ship",
+ "hyperion-wire-protocol",
+ "minreq",
  "rs_abieos",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

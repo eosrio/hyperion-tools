@@ -1,0 +1,215 @@
+{
+  "version": "sysio::abi/1.1",
+  "types": [],
+  "structs": [
+    {
+      "name": "block_header",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "block_timestamp_type"
+        },
+        {
+          "name": "producer",
+          "type": "name"
+        },
+        {
+          "name": "previous",
+          "type": "checksum256"
+        },
+        {
+          "name": "transaction_mroot",
+          "type": "checksum256"
+        },
+        {
+          "name": "finality_mroot",
+          "type": "checksum256"
+        },
+        {
+          "name": "qc_claim",
+          "type": "qc_claim_t"
+        },
+        {
+          "name": "new_finalizer_policy_diff",
+          "type": "finalizer_policy_diff?"
+        },
+        {
+          "name": "new_proposer_policy_diff",
+          "type": "proposer_policy_diff?"
+        },
+        {
+          "name": "header_extensions",
+          "type": "extension[]"
+        }
+      ]
+    },
+    {
+      "name": "extension",
+      "fields": [
+        {
+          "name": "type",
+          "type": "uint16"
+        },
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "proposer_policy_diff",
+      "fields": [
+        {
+          "name": "version",
+          "type": "uint32"
+        },
+        {
+          "name": "proposal_time",
+          "type": "block_timestamp_type"
+        },
+        {
+          "name": "remove_indexes",
+          "type": "uint16[]"
+        },
+        {
+          "name": "insert_indexes",
+          "type": "insert_proposer_policy_index_pair[]"
+        }
+      ]
+    },
+    {
+      "name": "insert_proposer_policy_index_pair",
+      "fields": [
+        {
+          "name": "index",
+          "type": "uint16"
+        },
+        {
+          "name": "value",
+          "type": "producer_authority"
+        }
+      ]
+    },
+    {
+      "name": "producer_authority",
+      "fields": [
+        {
+          "type": "name",
+          "name": "producer_name"
+        },
+        {
+          "type": "block_signing_authority",
+          "name": "authority"
+        }
+      ]
+    },
+    {
+      "name": "block_signing_authority_v0",
+      "fields": [
+        {
+          "type": "uint32",
+          "name": "threshold"
+        },
+        {
+          "type": "key_weight[]",
+          "name": "keys"
+        }
+      ]
+    },
+    {
+      "name": "key_weight",
+      "fields": [
+        {
+          "type": "public_key",
+          "name": "key"
+        },
+        {
+          "type": "uint16",
+          "name": "weight"
+        }
+      ]
+    },
+    {
+      "name": "finalizer_policy_diff",
+      "fields": [
+        {
+          "name": "generation",
+          "type": "uint32"
+        },
+        {
+          "name": "threshold",
+          "type": "uint64"
+        },
+        {
+          "name": "remove_indexes",
+          "type": "uint16[]"
+        },
+        {
+          "name": "insert_indexes",
+          "type": "insert_finalizer_policy_index_pair[]"
+        }
+      ]
+    },
+    {
+      "name": "insert_finalizer_policy_index_pair",
+      "fields": [
+        {
+          "name": "index",
+          "type": "uint16"
+        },
+        {
+          "name": "value",
+          "type": "finalizer_authority"
+        }
+      ]
+    },
+    {
+      "name": "finalizer_authority",
+      "fields": [
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "weight",
+          "type": "uint64"
+        },
+        {
+          "name": "public_key",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "qc_claim_t",
+      "fields": [
+        {
+          "name": "block_num",
+          "type": "uint32"
+        },
+        {
+          "name": "is_strong_qc",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "wire_native_onblock_v1",
+      "base": "",
+      "fields": [
+        {
+          "name": "header",
+          "type": "block_header"
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "name": "block_signing_authority",
+      "types": [
+        "block_signing_authority_v0"
+      ]
+    }
+  ]
+}

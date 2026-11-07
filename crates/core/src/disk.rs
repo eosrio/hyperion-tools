@@ -61,6 +61,45 @@ pub fn inflate(data: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Canonical entry positions of blocks `[cs..=ce]` from a state-history `.index`, plus the
+/// position where that range ends: the next block's entry, or `log_len` at the head.
+///
+/// When a fork replaces blocks, nodeos appends the new entries and repoints the index, but the
+/// superseded entries stay in the log file. A sequential walker must start at `offsets[0]`, stop at
+/// the returned end, and skip every entry whose position the index does not hold for its block.
+pub fn canonical_offsets(
+    idx_path: &str,
+    first_block: u32,
+    cs: u32,
+    ce: u32,
+    log_len: u64,
+) -> Result<(Vec<u64>, u64)> {
+    use std::io::{Read, Seek, SeekFrom};
+    if cs < first_block || ce < cs {
+        bail!(
+            "block range [{cs}..{ce}] starts before the log's first block {first_block} or is empty"
+        );
+    }
+    let mut f = File::open(idx_path).with_context(|| format!("open {idx_path}"))?;
+    let entries = f.metadata()?.len() / 8;
+    let (first, count) = ((cs - first_block) as u64, (ce - cs) as u64 + 1);
+    if first + count > entries {
+        bail!("block range [{cs}..{ce}] is past the end of {idx_path}");
+    }
+    let with_next = first + count < entries;
+    f.seek(SeekFrom::Start(first * 8))?;
+    let mut buf = vec![0u8; ((count + u64::from(with_next)) * 8) as usize];
+    f.read_exact(&mut buf)?;
+    let (chunks, _) = buf.as_chunks::<8>();
+    let mut offsets: Vec<u64> = chunks.iter().map(|c| u64::from_le_bytes(*c)).collect();
+    let end = if with_next {
+        offsets.pop().unwrap()
+    } else {
+        log_len
+    };
+    Ok((offsets, end))
+}
+
 /// Decode the zlib payload of a state-history entry into the raw table_delta[] bytes.
 /// Handles both Leap encodings: `[u32=1][u64 decompressed_size][zlib]` and the
 /// default `[u32 (ignored)][zlib]` (see read_unpacked_entry in Leap's log.hpp).

@@ -53,5 +53,6 @@ pub mod shiplog;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 pub mod trace;
+pub mod wire_codec;
 #[cfg(feature = "archive")]
 pub mod wire_history;
