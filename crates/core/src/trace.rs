@@ -348,6 +348,16 @@ fn skip_signature(c: &mut Cur) -> Option<()> {
             c.skip_bytes()?; // auth_data
             c.skip_bytes()?; // client_json
         }
+        // Wire adds EM (65-byte compact secp256k1), ED (64-byte signature + 32-byte public key)
+        // and BLS (shared-pointer presence byte + 192 bytes). Antelope never emits these tags.
+        3 => c.skip(65)?,
+        4 => c.skip(96)?,
+        5 => {
+            if c.u8()? != 1 {
+                return None;
+            }
+            c.skip(192)?;
+        }
         _ => return None,
     }
     Some(())

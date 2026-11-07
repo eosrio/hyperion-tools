@@ -288,6 +288,18 @@ struct Stats {
     no_abi: AtomicU64,    // (subset of raw) no ABI version for (code, block)
     recovered: AtomicU64, // decoded only after retrying against block-1's ABI
     docs: AtomicU64,      // grouped docs emitted
+    unreadable: AtomicU64, // trace entries that failed to inflate or parse (their actions are lost)
+    unreadable_blocks: std::sync::Mutex<Vec<u32>>, // the first few, for the summary
+}
+
+impl Stats {
+    fn unreadable(&self, block_num: u32) {
+        self.unreadable.fetch_add(1, Relaxed);
+        let mut list = self.unreadable_blocks.lock().unwrap();
+        if list.len() < 20 {
+            list.push(block_num);
+        }
+    }
 }
 
 /// Why an act.data failed to decode at a given block.
@@ -917,12 +929,17 @@ fn worker(
 
         let inflated = match decode_payload(&payload) {
             Ok(d) if !d.is_empty() => d,
-            _ => continue,
+            Ok(_) => continue, // an entry with no traces
+            Err(_) => {
+                stats.unreadable(block_num);
+                continue;
+            }
         };
         // L1 (hand-walk): parse the block's transaction_trace[] binary directly — no full-JSON
         // materialization, no serde re-parse; act.data stays a raw byte range.
         let l1_t = if profile { Some(Instant::now()) } else { None };
         let Some(txs) = trace::parse_block(&inflated) else {
+            stats.unreadable(block_num);
             continue;
         };
         // Only blocks with a transaction other than the implicit onblock can carry signatures.
@@ -1491,6 +1508,13 @@ fn main() -> Result<()> {
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
+    let unreadable = stats.unreadable.load(Relaxed);
+    if unreadable > 0 {
+        eprintln!(
+            "[action-proto] WARNING: {unreadable} trace entries could not be read, so their actions are missing. First blocks: {:?}",
+            stats.unreadable_blocks.lock().unwrap()
+        );
+    }
     if es_cfg.is_some() {
         let posted = es_stats.docs.load(Relaxed);
         let bytes = es_stats.bytes.load(Relaxed);
