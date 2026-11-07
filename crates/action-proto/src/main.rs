@@ -35,7 +35,7 @@ use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
-use hyperion_ship::blocks::{BlockLog, slot_to_iso};
+use hyperion_ship::blocks::BlockLog;
 use hyperion_ship::disk::{decode_payload, is_ship_magic};
 use hyperion_ship::trace;
 
@@ -113,10 +113,14 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
             skipped += 1;
             continue;
         };
+        // A Wire catalog records each deployment twice; the block-final row is the ABI in force.
+        if v.get("phase").and_then(|x| x.as_str()).is_some_and(|phase| phase != "block-final") {
+            continue;
+        }
         let (Some(acct), Some(block), Some(hex)) = (
             v.get("account").and_then(|x| x.as_str()),
-            v.get("block").and_then(|x| x.as_u64()),
-            v.get("abi_hex").and_then(|x| x.as_str()),
+            v.get("block").or_else(|| v.get("blockNum")).and_then(|x| x.as_u64()),
+            v.get("abi_hex").or_else(|| v.get("abiHex")).and_then(|x| x.as_str()),
         ) else {
             continue;
         };
@@ -296,6 +300,13 @@ fn str_of(v: &Value) -> String {
         .unwrap_or_else(|| v.to_string())
 }
 
+static SYSTEM_ACCOUNT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// The selected protocol's system account; `eosio` until `main` selects a provider.
+fn system_account() -> &'static str {
+    SYSTEM_ACCOUNT.get().copied().unwrap_or("eosio")
+}
+
 /// Apply the matching `@`-field handler(s) for this action, mutating `doc` in place.
 fn process_action_data(
     doc: &mut Map<String, Value>,
@@ -306,7 +317,7 @@ fn process_action_data(
     if name == "transfer" {
         h_transfer(doc, memo_in_field);
     }
-    if account != "eosio" {
+    if account != system_account() {
         return;
     }
     match name {
@@ -612,7 +623,7 @@ fn push_json_str(out: &mut String, s: &str) {
 /// otherwise the raw decoded JSON is spliced verbatim.)
 fn is_at_handled(account: &str, name: &str) -> bool {
     name == "transfer"
-        || (account == "eosio"
+        || (account == system_account()
             && matches!(
                 name,
                 "newaccount"
@@ -719,6 +730,7 @@ fn worker(
     stats: &Stats,
     failures: &Failures,
     sink: Option<&Sender<DocMsg>>,
+    timestamps: hyperion_ship::provider::TimestampProfile,
 ) -> Result<()> {
     let mut reg = Registry::new(abi_index);
     let mut blocklog = match blocks_dir {
@@ -770,7 +782,7 @@ fn worker(
         // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
         let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num))
         {
-            Some((prod, slot)) => (Some(trace::name_to_string(prod)), Some(slot_to_iso(slot))),
+            Some((prod, slot)) => (Some(trace::name_to_string(prod)), Some(timestamps.slot_to_iso(slot))),
             None => (None, None),
         };
 
@@ -1156,7 +1168,11 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    args.protocol.require_antelope("legacy action fast path")?;
+    args.protocol.validate()?;
+    let timestamps = args.protocol.timestamp_profile()?;
+    let system = if args.protocol.id() == "antelope" { "eosio" } else { "sysio" };
+    SYSTEM_ACCOUNT.set(system).ok();
+    eprintln!("[action-proto] protocol {} (system account {system})", args.protocol.id());
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
     eprintln!("[action-proto] {} contracts in ABI index", abi_index.len());
@@ -1269,6 +1285,7 @@ fn main() -> Result<()> {
                     &st,
                     &fl,
                     txc.as_ref(),
+                    timestamps,
                 ) {
                     eprintln!("[action-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
                 }
