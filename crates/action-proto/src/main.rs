@@ -36,7 +36,7 @@ use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
 use hyperion_ship::blocks::BlockLog;
-use hyperion_ship::disk::{decode_payload, is_ship_magic};
+use hyperion_ship::disk::{canonical_offsets, decode_payload, is_ship_magic};
 use hyperion_ship::trace;
 
 #[derive(Parser, Debug)]
@@ -289,6 +289,7 @@ struct Stats {
     recovered: AtomicU64, // decoded only after retrying against block-1's ABI
     docs: AtomicU64,      // grouped docs emitted
     unreadable: AtomicU64, // trace entries that failed to inflate or parse (their actions are lost)
+    stale: AtomicU64,      // superseded (forked) log entries skipped
     unreadable_blocks: std::sync::Mutex<Vec<u32>>, // the first few, for the summary
 }
 
@@ -882,24 +883,19 @@ fn worker(
     let (mut d_l1, mut d_act, mut d_l2) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
     let mut data_buf = String::new();
 
-    let mut idx = File::open(idx_path)?;
-    idx.seek(SeekFrom::Start((cs - first_block) as u64 * 8))?;
-    let mut ob = [0u8; 8];
-    idx.read_exact(&mut ob)?;
-    let mut pos = u64::from_le_bytes(ob);
-    let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     let log_len = std::fs::metadata(log_path)?.len();
+    let (offsets, stop) = canonical_offsets(idx_path, first_block, cs, ce, log_len)?;
+    let mut pos = offsets[0];
+    let mut log = BufReader::with_capacity(8 << 20, File::open(log_path)?);
     log.seek(SeekFrom::Start(pos))?;
 
     let mut hdr = [0u8; 48];
     loop {
-        if log.read_exact(&mut hdr).is_err() {
+        let entry_pos = pos;
+        if entry_pos >= stop || log.read_exact(&mut hdr).is_err() {
             break;
         }
         let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
-        if block_num > ce {
-            break;
-        }
         let block_id = hex::encode(&hdr[8..40]);
         let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
         if payload_size > log_len {
@@ -918,6 +914,11 @@ fn worker(
             log.seek_relative(-(suf.len() as i64)).ok();
             entry_end
         };
+        // A fork leaves the superseded entry in the log; only the entry the index points to counts.
+        if block_num < cs || block_num > ce || offsets[(block_num - cs) as usize] != entry_pos {
+            stats.stale.fetch_add(1, Relaxed);
+            continue;
+        }
         stats.blocks.fetch_add(1, Relaxed);
 
         // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
@@ -1380,6 +1381,17 @@ fn main() -> Result<()> {
     let last_block = first_block + n_idx.saturating_sub(1);
     let start = args.start.max(first_block);
     let end = args.end.min(last_block);
+    // Every document needs its block header; never run past the end of the block log.
+    let end = match args.blocks_dir.as_deref() {
+        Some(dir) => {
+            let block_log_last = BlockLog::open(dir)?.last_block();
+            if end > block_log_last {
+                eprintln!("[action-proto] block log ends at {block_log_last}; clamping the range so every document has its block header");
+            }
+            end.min(block_log_last)
+        }
+        None => end,
+    };
     if start > end {
         bail!("empty range after clamp to [{first_block}..{last_block}]");
     }
@@ -1508,6 +1520,10 @@ fn main() -> Result<()> {
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
+    let stale = stats.stale.load(Relaxed);
+    if stale > 0 {
+        eprintln!("[action-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)");
+    }
     let unreadable = stats.unreadable.load(Relaxed);
     if unreadable > 0 {
         eprintln!(

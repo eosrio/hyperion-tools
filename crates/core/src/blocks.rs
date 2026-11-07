@@ -58,8 +58,6 @@ impl BlockLog {
         self.first_block + self.n_blocks.saturating_sub(1)
     }
 
-    /// `(producer_name_u64, slot)` from the `block_header` prefix of `block_num`, or `None` if
-    /// the block is outside the log's range or the read fails.
     /// The complete serialized `signed_block` for `block_num`: from its index offset to the next
     /// block's offset (or the end of the log), less the 8-byte position trailer.
     pub fn block_bytes(&mut self, block_num: u32) -> Option<Vec<u8>> {
@@ -84,6 +82,8 @@ impl BlockLog {
         Some(bytes)
     }
 
+    /// `(producer_name_u64, slot)` from the `block_header` prefix of `block_num`, or `None` if
+    /// the block is outside the log's range or the read fails.
     pub fn header(&mut self, block_num: u32) -> Option<(u64, u32)> {
         if block_num < self.first_block || block_num > self.last_block() {
             return None;
