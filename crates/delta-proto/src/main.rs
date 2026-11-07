@@ -442,6 +442,27 @@ fn worker(
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    // A Wire run needs its own inputs; refuse an incomplete or unsupported selection before any
+    // input or output is opened.
+    if matches!(
+        args.protocol,
+        hyperion_ship::provider::ProtocolProvider::Wire(_)
+    ) {
+        if args.metadata_only {
+            bail!("unsupported_feature: --metadata-only is not supported for Wire deltas");
+        }
+        if args.blocks_dir.is_none() {
+            bail!(
+                "Wire deltas need --blocks-dir (the block log supplies each document's @timestamp)"
+            );
+        }
+        match args.chain_id.as_deref() {
+            Some(id)
+                if id.len() == 64 && id.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) => {
+            }
+            _ => bail!("Wire deltas need --chain-id as 64 lowercase hex characters"),
+        }
+    }
     let log_path = format!("{}/chain_state_history.log", args.from_disk);
     let idx_path = format!("{}/chain_state_history.index", args.from_disk);
     let mut f = File::open(&log_path).with_context(|| format!("open {log_path}"))?;
@@ -459,9 +480,6 @@ fn main() -> Result<()> {
         bail!("empty range after clamp to [{first_block}..{last_block}]");
     }
     if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
-        if args.metadata_only {
-            bail!("--metadata-only is not supported for Wire");
-        }
         return wire::run(wire::Config {
             log_path,
             idx_path,
