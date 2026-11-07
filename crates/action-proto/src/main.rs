@@ -163,6 +163,60 @@ static WIRE_PROFILE: std::sync::OnceLock<hyperion_wire_protocol::codec::CodecPro
 const WIRE_NATIVE_ACTION_ABI: &str = include_str!("wire_native_action_abi.json");
 static WIRE_ONBLOCK: std::sync::OnceLock<(u64, u64, Value)> = std::sync::OnceLock::new();
 
+/// Wire's SHiP ABI as served by the node handshake; used to decode `signed_block` from the block log.
+const WIRE_SHIP_ABI: &str = include_str!("wire_ship_abi.json");
+static WIRE_SHIP: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+
+/// Transaction id -> signatures for one Wire block, from its `signed_block` in the block log.
+/// A transaction id is the sha256 of the serialized (decompressed) transaction.
+fn wire_block_signatures(block: &[u8]) -> HashMap<[u8; 32], Vec<String>> {
+    use sha2::{Digest, Sha256};
+    let mut out = HashMap::new();
+    let (Some(profile), Some(ship)) = (WIRE_PROFILE.get(), WIRE_SHIP.get()) else {
+        return out;
+    };
+    let decoded = match hyperion_wire_protocol::codec::decode_value(ship, "signed_block", block, profile) {
+        Ok(v) => v,
+        Err(e) => {
+            static REPORTED: std::sync::Once = std::sync::Once::new();
+            REPORTED.call_once(|| eprintln!("[action-proto] signed_block decode failed ({} bytes, first {}): {}", block.len(), hex::encode(&block[..block.len().min(24)]), e.message()));
+            return out;
+        }
+    };
+
+    for receipt in decoded.get("transactions").and_then(|t| t.as_array()).into_iter().flatten() {
+        // Wire's receipt carries the packed transaction directly; an Antelope-style variant renders
+        // as [type, value], where only packed transactions carry signatures.
+        let packed = match receipt.get("trx") {
+            Some(Value::Object(_)) => receipt.get("trx"),
+            Some(Value::Array(v)) if v.first().and_then(|t| t.as_str()) == Some("packed_transaction") => v.get(1),
+            _ => None,
+        };
+        let Some(packed) = packed else { continue };
+        let Some(raw) = packed.get("packed_trx").and_then(|x| x.as_str()).and_then(|h| hex::decode(h).ok()) else {
+            continue;
+        };
+        let serialized = match packed.get("compression").and_then(|c| c.as_u64()) {
+            Some(0) | None => raw,
+            Some(_) => {
+                let mut inflated = Vec::new();
+                if std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&raw[..]), &mut inflated).is_err() {
+                    continue;
+                }
+                inflated
+            }
+        };
+        let id: [u8; 32] = Sha256::digest(&serialized).into();
+        let signatures = packed
+            .get("signatures")
+            .and_then(|s| s.as_array())
+            .map(|list| list.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default();
+        out.insert(id, signatures);
+    }
+    out
+}
+
 struct Registry<'a> {
     idx: &'a AbiIndex,
     handles: HashMap<(u64, u32), Option<Loaded>>,
@@ -871,6 +925,15 @@ fn worker(
         let Some(txs) = trace::parse_block(&inflated) else {
             continue;
         };
+        // Only blocks with a transaction other than the implicit onblock can carry signatures.
+        let onblock = WIRE_ONBLOCK.get().map(|(code, name, _)| (*code, *name));
+        let signed = wire
+            && txs.iter().any(|tx| tx.actions.iter().any(|a| Some((a.account, a.name)) != onblock));
+        let signatures = if signed {
+            blocklog.as_mut().and_then(|bl| bl.block_bytes(block_num)).map(|b| wire_block_signatures(&b)).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
         if let Some(t) = l1_t {
             d_l1 += t.elapsed();
         }
@@ -1076,6 +1139,11 @@ fn worker(
                         body.push_str(&tx.net_usage_words.to_string());
                         body.push(',');
                     }
+                    if let Some(list) = signatures.get(&tx.id).filter(|l| !l.is_empty()) {
+                        body.push_str("\"signatures\":");
+                        body.push_str(&serde_json::to_string(list).unwrap_or_else(|_| "[]".into()));
+                        body.push(',');
+                    }
                     if wire && tx.actions.len() > 1 {
                         body.push_str("\"inline_count\":");
                         body.push_str(&(tx.actions.len() - 1).to_string());
@@ -1270,6 +1338,7 @@ fn main() -> Result<()> {
     SYSTEM_ACCOUNT.set(system).ok();
     if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
         WIRE_PROFILE.set(profile.clone()).ok();
+        WIRE_SHIP.set(serde_json::from_str(WIRE_SHIP_ABI).context("Wire SHiP ABI")?).ok();
         let names = Abieos::new();
         let native: Value = serde_json::from_str(WIRE_NATIVE_ACTION_ABI).context("native Wire action ABI")?;
         WIRE_ONBLOCK
