@@ -38,6 +38,7 @@ use serde_json::{Map, Value};
 use hyperion_ship::blocks::BlockLog;
 use hyperion_ship::disk::{canonical_offsets, decode_payload, is_ship_magic};
 use hyperion_ship::trace;
+use hyperion_ship::wire_codec::WireDecoder;
 
 #[derive(Parser, Debug)]
 #[command(about = "Experimental: decode action_traces directly from the trace_history log.")]
@@ -116,13 +117,20 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
             continue;
         };
         // A Wire catalog records each deployment twice; the block-final row is the ABI in force.
-        if v.get("phase").and_then(|x| x.as_str()).is_some_and(|phase| phase != "block-final") {
+        if v.get("phase")
+            .and_then(|x| x.as_str())
+            .is_some_and(|phase| phase != "block-final")
+        {
             continue;
         }
         let (Some(acct), Some(block), Some(hex)) = (
             v.get("account").and_then(|x| x.as_str()),
-            v.get("block").or_else(|| v.get("blockNum")).and_then(|x| x.as_u64()),
-            v.get("abi_hex").or_else(|| v.get("abiHex")).and_then(|x| x.as_str()),
+            v.get("block")
+                .or_else(|| v.get("blockNum"))
+                .and_then(|x| x.as_u64()),
+            v.get("abi_hex")
+                .or_else(|| v.get("abiHex"))
+                .and_then(|x| x.as_str()),
         ) else {
             continue;
         };
@@ -133,7 +141,10 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
             skipped += 1;
             continue;
         };
-        let json = v.get("abi").filter(|x| x.is_object()).map(|abi| abi.to_string());
+        let json = v
+            .get("abi")
+            .filter(|x| x.is_object())
+            .map(|abi| abi.to_string());
         idx.entry(code)
             .or_default()
             .push((block as u32, hex.to_string(), json));
@@ -152,10 +163,22 @@ fn load_abi_index(path: &str) -> Result<AbiIndex> {
 /// (`slug_name`, ABI enums, protobuf types) is decoded by the selected Wire codec instead.
 enum Loaded {
     Fast(AbiHandle),
-    Wire { abi: Value, actions: HashMap<u64, String> },
+    Wire {
+        abi: Value,
+        actions: HashMap<u64, String>,
+        decoder: WireDecoder,
+    },
 }
 
-static WIRE_PROFILE: std::sync::OnceLock<hyperion_wire_protocol::codec::CodecProfile> = std::sync::OnceLock::new();
+static WIRE_PROFILE: std::sync::OnceLock<hyperion_wire_protocol::codec::CodecProfile> =
+    std::sync::OnceLock::new();
+
+// Per-thread decoders for the two fixed ABIs (the native onblock ABI and Wire's SHiP ABI).
+thread_local! {
+    static STATIC_ABIS: std::cell::RefCell<WireDecoder> = std::cell::RefCell::new(WireDecoder::default());
+}
+const NATIVE_ABI_KEY: (u64, u64) = (0, 1);
+const SHIP_ABI_KEY: (u64, u64) = (0, 2);
 
 /// `sysio::onblock` carries the chain's own block header, which the `sysio` contract ABI describes
 /// with the stale Antelope layout. Like the Wire plugin, decode it with the native onblock ABI.
@@ -175,32 +198,59 @@ fn wire_block_signatures(block: &[u8]) -> HashMap<[u8; 32], Vec<String>> {
     let (Some(profile), Some(ship)) = (WIRE_PROFILE.get(), WIRE_SHIP.get()) else {
         return out;
     };
-    let decoded = match hyperion_wire_protocol::codec::decode_value(ship, "signed_block", block, profile) {
+    let decoded = match STATIC_ABIS
+        .with_borrow_mut(|d| d.decode(SHIP_ABI_KEY, ship, "signed_block", block, profile))
+    {
         Ok(v) => v,
         Err(e) => {
             static REPORTED: std::sync::Once = std::sync::Once::new();
-            REPORTED.call_once(|| eprintln!("[action-proto] signed_block decode failed ({} bytes, first {}): {}", block.len(), hex::encode(&block[..block.len().min(24)]), e.message()));
+            REPORTED.call_once(|| {
+                eprintln!(
+                    "[action-proto] signed_block decode failed ({} bytes, first {}): {}",
+                    block.len(),
+                    hex::encode(&block[..block.len().min(24)]),
+                    e.message()
+                )
+            });
             return out;
         }
     };
 
-    for receipt in decoded.get("transactions").and_then(|t| t.as_array()).into_iter().flatten() {
+    for receipt in decoded
+        .get("transactions")
+        .and_then(|t| t.as_array())
+        .into_iter()
+        .flatten()
+    {
         // Wire's receipt carries the packed transaction directly; an Antelope-style variant renders
         // as [type, value], where only packed transactions carry signatures.
         let packed = match receipt.get("trx") {
             Some(Value::Object(_)) => receipt.get("trx"),
-            Some(Value::Array(v)) if v.first().and_then(|t| t.as_str()) == Some("packed_transaction") => v.get(1),
+            Some(Value::Array(v))
+                if v.first().and_then(|t| t.as_str()) == Some("packed_transaction") =>
+            {
+                v.get(1)
+            }
             _ => None,
         };
         let Some(packed) = packed else { continue };
-        let Some(raw) = packed.get("packed_trx").and_then(|x| x.as_str()).and_then(|h| hex::decode(h).ok()) else {
+        let Some(raw) = packed
+            .get("packed_trx")
+            .and_then(|x| x.as_str())
+            .and_then(|h| hex::decode(h).ok())
+        else {
             continue;
         };
         let serialized = match packed.get("compression").and_then(|c| c.as_u64()) {
             Some(0) | None => raw,
             Some(_) => {
                 let mut inflated = Vec::new();
-                if std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&raw[..]), &mut inflated).is_err() {
+                if std::io::Read::read_to_end(
+                    &mut flate2::read::ZlibDecoder::new(&raw[..]),
+                    &mut inflated,
+                )
+                .is_err()
+                {
                     continue;
                 }
                 inflated
@@ -210,7 +260,11 @@ fn wire_block_signatures(block: &[u8]) -> HashMap<[u8; 32], Vec<String>> {
         let signatures = packed
             .get("signatures")
             .and_then(|s| s.as_array())
-            .map(|list| list.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
         out.insert(id, signatures);
     }
@@ -245,33 +299,45 @@ impl<'a> Registry<'a> {
                 // Wire renders values (hex case, Wire-only types, native structs) exactly as the
                 // selected Wire codec does, so a Wire run never takes the rs_abieos fast path.
                 let from_hex = if WIRE_PROFILE.get().is_some() {
-                    Err(rs_abieos::AbieosError::SetAbi("Wire ABIs use the Wire codec".into()))
+                    Err(rs_abieos::AbieosError::SetAbi(
+                        "Wire ABIs use the Wire codec".into(),
+                    ))
                 } else {
                     AbiHandle::from_hex(hex)
                 };
                 if let Ok(handle) = from_hex {
                     return Some(Loaded::Fast(handle));
                 }
-                if WIRE_PROFILE.get().is_some() {
-                    if let Some(abi) = json.as_deref().and_then(|j| serde_json::from_str::<Value>(j).ok()) {
-                        let names = Abieos::new();
-                        let actions = abi
-                            .get("actions")
-                            .and_then(|a| a.as_array())
-                            .map(|list| {
-                                list.iter()
-                                    .filter_map(|a| {
-                                        let name = names.string_to_name(a.get("name")?.as_str()?).ok()?;
-                                        Some((name, a.get("type")?.as_str()?.to_owned()))
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        return Some(Loaded::Wire { abi, actions });
-                    }
+                if WIRE_PROFILE.get().is_some()
+                    && let Some(abi) = json
+                        .as_deref()
+                        .and_then(|j| serde_json::from_str::<Value>(j).ok())
+                {
+                    let names = Abieos::new();
+                    let actions = abi
+                        .get("actions")
+                        .and_then(|a| a.as_array())
+                        .map(|list| {
+                            list.iter()
+                                .filter_map(|a| {
+                                    let name =
+                                        names.string_to_name(a.get("name")?.as_str()?).ok()?;
+                                    Some((name, a.get("type")?.as_str()?.to_owned()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    return Some(Loaded::Wire {
+                        abi,
+                        actions,
+                        decoder: WireDecoder::default(),
+                    });
                 }
                 // Report each unloadable ABI version once.
-                eprintln!("[action-proto] ABI unusable code={code} valid_from={valid_from}: {:?}", from_hex.err());
+                eprintln!(
+                    "[action-proto] ABI unusable code={code} valid_from={valid_from}: {:?}",
+                    from_hex.err()
+                );
                 None
             })
             .as_mut()
@@ -281,13 +347,13 @@ impl<'a> Registry<'a> {
 #[derive(Default)]
 struct Stats {
     blocks: AtomicU64,
-    txs: AtomicU64,       // transaction_trace seen
-    actions: AtomicU64,   // action_trace processed (except==null, has receipt)
-    decoded: AtomicU64,   // act.data -> JSON ok
-    raw: AtomicU64,       // act.data undecodable -> raw hex preserved (ds_error)
-    no_abi: AtomicU64,    // (subset of raw) no ABI version for (code, block)
-    recovered: AtomicU64, // decoded only after retrying against block-1's ABI
-    docs: AtomicU64,      // grouped docs emitted
+    txs: AtomicU64,                                // transaction_trace seen
+    actions: AtomicU64,    // action_trace processed (except==null, has receipt)
+    decoded: AtomicU64,    // act.data -> JSON ok
+    raw: AtomicU64,        // act.data undecodable -> raw hex preserved (ds_error)
+    no_abi: AtomicU64,     // (subset of raw) no ABI version for (code, block)
+    recovered: AtomicU64,  // decoded only after retrying against block-1's ABI
+    docs: AtomicU64,       // grouped docs emitted
     unreadable: AtomicU64, // trace entries that failed to inflate or parse (their actions are lost)
     stale: AtomicU64,      // superseded (forked) log entries skipped
     unreadable_blocks: std::sync::Mutex<Vec<u32>>, // the first few, for the summary
@@ -340,14 +406,25 @@ fn decode_action(
     data: &[u8],
     block: u32,
 ) -> std::result::Result<(), Fail> {
-    if let (Some(profile), Some((sysio, onblock, native))) = (WIRE_PROFILE.get(), WIRE_ONBLOCK.get()) {
-        if code == *sysio && action == *onblock {
-            let value = hyperion_wire_protocol::codec::decode_value(native, "wire_native_onblock_v1", data, profile)
-                .map_err(|e| Fail::Decode(e.message().to_owned()))?;
-            out.clear();
-            out.push_str(&value.to_string());
-            return Ok(());
-        }
+    if let (Some(profile), Some((sysio, onblock, native))) =
+        (WIRE_PROFILE.get(), WIRE_ONBLOCK.get())
+        && code == *sysio
+        && action == *onblock
+    {
+        let value = STATIC_ABIS
+            .with_borrow_mut(|d| {
+                d.decode(
+                    NATIVE_ABI_KEY,
+                    native,
+                    "wire_native_onblock_v1",
+                    data,
+                    profile,
+                )
+            })
+            .map_err(|e| Fail::Decode(e.message().to_owned()))?;
+        out.clear();
+        out.push_str(&value.to_string());
+        return Ok(());
     }
     let Some(loaded) = reg.active(code, block) else {
         return Err(Fail::NoAbi);
@@ -362,12 +439,20 @@ fn decode_action(
                 .bin_to_json_into(&ty, data, out)
                 .map_err(|e| Fail::Decode(format!("{e:?}")))
         }
-        Loaded::Wire { abi, actions } => {
+        Loaded::Wire {
+            abi,
+            actions,
+            decoder,
+        } => {
             let Some(ty) = actions.get(&action) else {
                 return Err(Fail::NoType);
             };
-            let profile = WIRE_PROFILE.get().expect("Wire ABIs load only with a Wire profile");
-            let value = hyperion_wire_protocol::codec::decode_value(abi, ty, data, profile)
+            let profile = WIRE_PROFILE
+                .get()
+                .expect("Wire ABIs load only with a Wire profile");
+            // One decoder per loaded ABI version, so a constant key identifies it.
+            let value = decoder
+                .decode((0, 0), abi, ty, data, profile)
                 .map_err(|e| Fail::Decode(e.message().to_owned()))?;
             out.clear();
             out.push_str(&value.to_string());
@@ -924,7 +1009,10 @@ fn worker(
         // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
         let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num))
         {
-            Some((prod, slot)) => (Some(trace::name_to_string(prod)), Some(timestamps.slot_to_iso(slot))),
+            Some((prod, slot)) => (
+                Some(trace::name_to_string(prod)),
+                Some(timestamps.slot_to_iso(slot)),
+            ),
             None => (None, None),
         };
 
@@ -946,9 +1034,17 @@ fn worker(
         // Only blocks with a transaction other than the implicit onblock can carry signatures.
         let onblock = WIRE_ONBLOCK.get().map(|(code, name, _)| (*code, *name));
         let signed = wire
-            && txs.iter().any(|tx| tx.actions.iter().any(|a| Some((a.account, a.name)) != onblock));
+            && txs.iter().any(|tx| {
+                tx.actions
+                    .iter()
+                    .any(|a| Some((a.account, a.name)) != onblock)
+            });
         let signatures = if signed {
-            blocklog.as_mut().and_then(|bl| bl.block_bytes(block_num)).map(|b| wire_block_signatures(&b)).unwrap_or_default()
+            blocklog
+                .as_mut()
+                .and_then(|bl| bl.block_bytes(block_num))
+                .map(|b| wire_block_signatures(&b))
+                .unwrap_or_default()
         } else {
             HashMap::new()
         };
@@ -1112,7 +1208,11 @@ fn worker(
                 body.push_str(&act.creator_action_ordinal.to_string());
                 body.push(',');
                 if wire {
-                    body.push_str(if act.context_free { "\"context_free\":1," } else { "\"context_free\":0," });
+                    body.push_str(if act.context_free {
+                        "\"context_free\":1,"
+                    } else {
+                        "\"context_free\":0,"
+                    });
                 } else if act.context_free {
                     body.push_str("\"context_free\":true,");
                 }
@@ -1229,7 +1329,11 @@ fn worker(
                     global_sequence: receipt.global_sequence,
                     action_ordinal: act.action_ordinal as u64,
                     creator_action_ordinal: act.creator_action_ordinal as u64,
-                    act_digest: if wire { hex::encode(receipt.act_digest) } else { hex::encode_upper(receipt.act_digest) },
+                    act_digest: if wire {
+                        hex::encode(receipt.act_digest)
+                    } else {
+                        hex::encode_upper(receipt.act_digest)
+                    },
                     code_sequence: receipt.code_sequence,
                     abi_sequence: receipt.abi_sequence,
                     receipt_json,
@@ -1252,6 +1356,9 @@ fn worker(
     }
     Ok(())
 }
+
+/// How long an ES poster waits for its batch to fill before posting what it has.
+const BULK_LINGER: Duration = Duration::from_millis(50);
 
 /// Shared counters for the direct-ES `_bulk` sink (Arc'd across all poster threads).
 #[derive(Default)]
@@ -1296,8 +1403,10 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
                 Ok(msg) => batch.push(msg),
                 Err(_) => return, // all senders dropped and channel drained
             }
+            // Linger briefly so each request carries a full batch instead of whatever is queued.
+            let deadline = Instant::now() + BULK_LINGER;
             while batch.len() < cfg.batch {
-                match guard.try_recv() {
+                match guard.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                     Ok(msg) => batch.push(msg),
                     Err(_) => break,
                 }
@@ -1352,18 +1461,32 @@ fn main() -> Result<()> {
     let args = Args::parse();
     args.protocol.validate()?;
     let timestamps = args.protocol.timestamp_profile()?;
-    let system = if args.protocol.id() == "antelope" { "eosio" } else { "sysio" };
+    let system = if args.protocol.id() == "antelope" {
+        "eosio"
+    } else {
+        "sysio"
+    };
     SYSTEM_ACCOUNT.set(system).ok();
     if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
         WIRE_PROFILE.set(profile.clone()).ok();
-        WIRE_SHIP.set(serde_json::from_str(WIRE_SHIP_ABI).context("Wire SHiP ABI")?).ok();
+        WIRE_SHIP
+            .set(serde_json::from_str(WIRE_SHIP_ABI).context("Wire SHiP ABI")?)
+            .ok();
         let names = Abieos::new();
-        let native: Value = serde_json::from_str(WIRE_NATIVE_ACTION_ABI).context("native Wire action ABI")?;
+        let native: Value =
+            serde_json::from_str(WIRE_NATIVE_ACTION_ABI).context("native Wire action ABI")?;
         WIRE_ONBLOCK
-            .set((names.string_to_name("sysio")?, names.string_to_name("onblock")?, native))
+            .set((
+                names.string_to_name("sysio")?,
+                names.string_to_name("onblock")?,
+                native,
+            ))
             .ok();
     }
-    eprintln!("[action-proto] protocol {} (system account {system})", args.protocol.id());
+    eprintln!(
+        "[action-proto] protocol {} (system account {system})",
+        args.protocol.id()
+    );
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
     eprintln!("[action-proto] {} contracts in ABI index", abi_index.len());
@@ -1386,7 +1509,9 @@ fn main() -> Result<()> {
         Some(dir) => {
             let block_log_last = BlockLog::open(dir)?.last_block();
             if end > block_log_last {
-                eprintln!("[action-proto] block log ends at {block_log_last}; clamping the range so every document has its block header");
+                eprintln!(
+                    "[action-proto] block log ends at {block_log_last}; clamping the range so every document has its block header"
+                );
             }
             end.min(block_log_last)
         }
@@ -1522,7 +1647,9 @@ fn main() -> Result<()> {
     );
     let stale = stats.stale.load(Relaxed);
     if stale > 0 {
-        eprintln!("[action-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)");
+        eprintln!(
+            "[action-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)"
+        );
     }
     let unreadable = stats.unreadable.load(Relaxed);
     if unreadable > 0 {

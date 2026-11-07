@@ -470,7 +470,10 @@ fn main() -> Result<()> {
             end,
             threads: args.threads,
             abi_catalog: args.abi_index.clone(),
-            blocks_dir: args.blocks_dir.clone().context("Wire deltas need --blocks-dir for @timestamp")?,
+            blocks_dir: args
+                .blocks_dir
+                .clone()
+                .context("Wire deltas need --blocks-dir for @timestamp")?,
             out: args.out.clone(),
             es: args.es.clone(),
             chain: args.chain.clone(),
@@ -480,8 +483,14 @@ fn main() -> Result<()> {
             es_workers: args.es_workers,
             profile: profile.clone(),
             timestamps: args.protocol.timestamp_profile()?,
-            doc_profile_id: args.doc_profile_id.clone().unwrap_or_else(|| profile.id.clone()),
-            chain_id: args.chain_id.clone().context("Wire deltas need --chain-id")?,
+            doc_profile_id: args
+                .doc_profile_id
+                .clone()
+                .unwrap_or_else(|| profile.id.clone()),
+            chain_id: args
+                .chain_id
+                .clone()
+                .context("Wire deltas need --chain-id")?,
             system_contract: args.system_contract.clone(),
         });
     }
@@ -579,7 +588,9 @@ fn main() -> Result<()> {
     );
     let stale = stats.stale.load(Relaxed);
     if stale > 0 {
-        eprintln!("[delta-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)");
+        eprintln!(
+            "[delta-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)"
+        );
     }
     // breakdown of the raw (undecodable) rows — table not declared in the ABI, etc.
     let f = failures.lock().unwrap();
