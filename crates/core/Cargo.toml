@@ -16,7 +16,10 @@ name = "hyperion_ship"
 rs_abieos = { workspace = true }
 flate2 = { workspace = true }
 hex = { workspace = true }
-serde_json = { workspace = true }
+# `preserve_order`: JSON objects keep the key order the code writes. Wire ABI history rows are
+# content-addressed (readers key each observation by its line's SHA-256), so their bytes must
+# not depend on which other crates share the build and could switch this feature on.
+serde_json = { workspace = true, features = ["preserve_order"] }
 anyhow = { workspace = true }
 hyperion-wire-protocol = { workspace = true }
 # The live SHiP-websocket source (the `ship` module) is the only part that needs the async stack.

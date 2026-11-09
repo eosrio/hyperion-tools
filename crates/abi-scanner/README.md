@@ -93,15 +93,17 @@ abi-scanner --ship ws://fleet-router:18080 --start 2 --end 999999999 \
 Wire disk mode uses an explicitly selected, source-pinned protocol provider and both
 `chain_state_history.{log,index}` and `trace_history.{log,index}`. It reads each canonical
 index slot, rather than abandoned physical fork entries. It does not use Antelope's
-account-first delta shortcut. The pinned Wire codec handles the evidenced resource-index
-table-count defect; unrelated malformed transport data still fails the scan.
+account-first delta shortcut. Payloads are read under the pinned Wire codec's rules, including
+its correction of the evidenced resource-index table-count defect; unrelated malformed transport
+data still fails the scan.
 
 Freeze a consistent, read-only view of both logs and indices first. Obtain the chain ID,
-an irreversible block number/ID, and the exact SHiP handshake from that node. The scanner
-requires full state coverage from block 1 and trace coverage from block 1 or 2 through the
-specified boundary. A missing genesis trace is recorded explicitly with the selected native
-profile as the sequence-zero baseline. Partial ranges and snapshot-only initial state cannot
-establish complete action ABI epochs and are refused.
+an irreversible block number/ID, and the exact SHiP handshake from that node. A scan from
+genesis requires full state coverage from block 1 and trace coverage from block 1 or 2 through
+the specified boundary. A missing genesis trace is recorded explicitly with the selected native
+profile as the sequence-zero baseline. Other partial ranges and snapshot-only initial state
+cannot establish complete action ABI epochs and are refused; a sealed catalog is extended
+instead (below).
 
 ```bash
 abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 \
@@ -110,11 +112,18 @@ abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 \
   --irreversible-block-id "$LIB_ID" --out wire-abis.ndjson
 ```
 
-This mode uses one ordered reader. `--threads`/`--connections` must be 1 and `--checkpoint`
-is refused. Antelope throughput measurements and streaming thresholds do not describe this
-Wire mode. It decompresses and decodes each complete trace/delta payload under the pinned
-codec's 16 MiB input limit; exceeding that limit fails explicitly. It does not decode ordinary
-contract action values or write per-block Elasticsearch records.
+`--threads` reader threads (default: every available core) each take a run of 2,048 blocks,
+inflate its chain-state and trace payloads and walk their bytes in place, keeping only what can
+change the history. One fold applies those facts in block order, so the output does not depend
+on the thread count. A walk accepts and refuses the same bytes as the pinned codec, including its
+16 MiB input and per-array limits, but renders no JSON. It therefore does not apply the codec's
+JSON traversal bounds: a valid block with tens of thousands of actions is read rather than
+refused. The SHiP handshake must define every walked type exactly as the walk reads it.
+`--checkpoint` is refused, because a catalog is sealed atomically: extend it instead of resuming.
+This mode does not decode ordinary contract action values or write per-block Elasticsearch
+records. On a frozen copy of the Wire testnet logs (3.6 million blocks, 44 GB) a scan from
+genesis takes about 21 seconds on 32 threads. The previous scanner rendered every payload as JSON
+and took about 51 minutes for byte-identical output.
 
 Successful primary `sysio::setabi` traces produce deployment records with transaction ID,
 action ordinal, global sequence and the target account's ABI revision. Revisions count from
@@ -145,6 +154,31 @@ Interrupted `.partial` files remain diagnostic artifacts; rerun with a new outpu
 Existing completed files are never overwritten. The chain ID and irreversible witness must
 come from the independently verified source; the scanner checks the supplied end ID against
 the indexed logs rather than inferring a chain ID from state-history files.
+
+### Extending a sealed catalog
+
+Extend a sealed catalog to a later irreversible block instead of scanning again from genesis:
+
+```bash
+abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1   --from-disk /data/frozen-wire-state-history --start "$((BASE_END + 1))" --end "$LIB"   --ship-abi wire-ship-schema.json --chain-id "$CHAIN_ID"   --irreversible-block-id "$LIB_ID" --out "wire-abis-$LIB.ndjson"   --base-manifest wire-abis.ndjson.manifest.json --base-manifest-sha256 "$BASE_SHA256"
+```
+
+The base manifest is pinned by its SHA-256, as its readers pin it, and its chain, node
+revision, provider profile and SHiP schema must match the run. Each base member is read once:
+the bytes checked against the manifest are the bytes copied. Its records rebuild every account's
+ABI state at the base's end. The logs must still hold the base's last block ID; if they do not,
+the chain forked past it and the extension is refused. The logs need state coverage from the
+base's last block and trace coverage from the next one.
+
+Only the blocks after the base are read. The output starts with the base's records and block
+IDs, byte for byte, followed by the new ones: the same files a scan from genesis writes. The
+manifest matches too, apart from an added `base` entry with the base manifest's SHA-256, end
+block and last block ID. Its `sources` list only the logs this run read. On the Wire testnet,
+extending a catalog by 111,537 blocks takes under a second.
+
+An account that has only ever held an empty ABI has no records, so a base cannot prove its
+state. If such an account is removed after the base, the extension is refused and a scan from
+genesis is needed.
 
 ## Ingest into Elasticsearch
 
