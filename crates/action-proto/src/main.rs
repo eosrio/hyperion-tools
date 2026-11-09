@@ -17,28 +17,40 @@
 //!      `bin_to_json_into`. On failure retry at block-1 (same-block setabi boundary); if still
 //!      undecodable, preserve the raw hex (`ds_error`) — every action still emits a doc.
 //!
-//! PHASE A scope: emits every field EXCEPT the block-header fields `@timestamp` and `producer`
-//! (those live only in the signed_block, not in any trace — Phase B reads the block log), and
-//! defers the computed `@transfer`/`@newaccount`/... handlers to a later slice. Uses a static
-//! chunk split (delta-proto style); work-stealing + checkpoint can be added when needed.
+//! The block-header fields `@timestamp` and `producer` live only in the signed_block, so they come
+//! from the block log (`--blocks-dir`). Uses a static chunk split (delta-proto style).
+//!
+//! WIRE (Hyperion 4.5): every block-log entry is walked once (`wire_block`). Its header must hash
+//! to the id the trace log names, and each header must name the previous block's id, so a run
+//! checks that the logs agree over its whole range. Actions are grouped by input origin as the 4.5
+//! indexer groups them (`occurrence`). `--chain-id` adds schema-3 occurrence metadata to every
+//! action document, which the 4.5 API proves from the node's logs; `--blocks` also writes the
+//! `<chain>-block-<version>` documents.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use rs_abieos::{AbiHandle, Abieos};
 use serde_json::{Map, Value};
 
 use hyperion_ship::blocks::BlockLog;
 use hyperion_ship::disk::{canonical_offsets, decode_payload, is_ship_magic};
+use hyperion_ship::provider::TimestampProfile;
 use hyperion_ship::trace;
 use hyperion_ship::wire_codec::WireDecoder;
+
+mod occurrence;
+mod wire_block;
+
+/// `protocol.id` of Hyperion's Wire documents: the provider package.
+const WIRE_PROTOCOL_ID: &str = "@eosrio/hyperion-wire-plugin";
 
 #[derive(Parser, Debug)]
 #[command(about = "Experimental: decode action_traces directly from the trace_history log.")]
@@ -95,6 +107,20 @@ struct Args {
     /// concurrent `_bulk` poster threads pulling from the doc channel.
     #[arg(long, default_value_t = 8)]
     es_workers: usize,
+    /// Wire: chain id (64 lowercase hex). Every action document then carries schema-3 occurrence
+    /// metadata (`protocol`), which the 4.5 API proves from the node's logs. Needs --blocks-dir.
+    #[arg(long)]
+    chain_id: Option<String>,
+    /// Wire: also write a `<chain>-block-<version>` document (`_id` = block number) for every block
+    /// of the range, including blocks before the trace log's first entry. Needs --blocks-dir.
+    #[arg(long, default_value_t = false)]
+    blocks: bool,
+    /// NDJSON output for block documents, when --out writes NDJSON instead of --es.
+    #[arg(long)]
+    blocks_out: Option<String>,
+    /// Wire: `protocol.profileId` written into block documents (default: the --protocol profile id).
+    #[arg(long)]
+    doc_profile_id: Option<String>,
 }
 
 /// account (u64 name) -> versions sorted by the block the ABI took effect (valid_from).
@@ -354,6 +380,7 @@ struct Stats {
     no_abi: AtomicU64,     // (subset of raw) no ABI version for (code, block)
     recovered: AtomicU64,  // decoded only after retrying against block-1's ABI
     docs: AtomicU64,       // grouped docs emitted
+    block_docs: AtomicU64, // block documents emitted
     unreadable: AtomicU64, // trace entries that failed to inflate or parse (their actions are lost)
     stale: AtomicU64,      // superseded (forked) log entries skipped
     unreadable_blocks: std::sync::Mutex<Vec<u32>>, // the first few, for the summary
@@ -461,12 +488,20 @@ fn decode_action(
     }
 }
 
-/// One emitted action document flowing over the channel to the sink (NDJSON writer or ES posters).
-/// Carries `block_num` + `global_sequence` alongside the serialized `doc` so the ES posters can
-/// build the `_bulk` meta line (`_index` partition + `_id`) WITHOUT re-parsing the doc JSON.
+/// Where a document goes and its `_id` there.
+enum DocKind {
+    /// `<chain>-action-<version>-<partition>`; `_id` is the document's global sequence.
+    Action(u64),
+    /// `<chain>-block-<version>`; `_id` is the block number.
+    Block,
+}
+
+/// One emitted document flowing over the channel to the sink (NDJSON writers or ES posters).
+/// Carries `block_num` + its kind alongside the serialized `doc` so the ES posters can build the
+/// `_bulk` meta line (`_index` + `_id`) WITHOUT re-parsing the doc JSON.
 struct DocMsg {
     block_num: u32,
-    global_sequence: u64,
+    kind: DocKind,
     doc: String,
 }
 
@@ -478,11 +513,186 @@ struct Proc {
     global_sequence: u64,
     action_ordinal: u64,
     creator_action_ordinal: u64,
+    /// Wire: the input action ordinal this occurrence belongs to.
+    input_ordinal: u64,
     act_digest: String,
     code_sequence: u32,
     abi_sequence: u32,
     receipt_json: String,
     body: String,
+    /// Schema-3 occurrence metadata, built for each input action when --chain-id is set.
+    protocol: Option<String>,
+}
+
+/// What the Wire block walk writes, beyond the action documents.
+struct WireDocs {
+    /// With a chain id, action documents carry schema-3 occurrence metadata.
+    chain_id: Option<String>,
+    /// Write block documents.
+    blocks: bool,
+    /// `protocol.profileId` of block documents.
+    profile_id: String,
+}
+
+/// A contiguous run of walked blocks, for checking that runs chain into each other.
+#[derive(Clone, Copy, Debug)]
+struct Segment {
+    first: u32,
+    first_previous: [u8; 32],
+    last: u32,
+    last_id: [u8; 32],
+}
+
+/// Extend `segment` with the next walked block, whose header must name the previous block's id.
+fn chain_block(
+    segment: &mut Option<Segment>,
+    block_num: u32,
+    block: &wire_block::Block,
+) -> Result<()> {
+    match segment {
+        None => {
+            *segment = Some(Segment {
+                first: block_num,
+                first_previous: block.previous,
+                last: block_num,
+                last_id: block.id,
+            })
+        }
+        Some(run) => {
+            if block_num != run.last + 1 || block.previous != run.last_id {
+                bail!(
+                    "block {block_num} does not follow block {}: its header names {} as its parent, but block {} is {}",
+                    run.last,
+                    hex::encode(block.previous),
+                    run.last,
+                    hex::encode(run.last_id)
+                );
+            }
+            run.last = block_num;
+            run.last_id = block.id;
+        }
+    }
+    Ok(())
+}
+
+/// Hyperion 4.5's Wire block document: header fields, total CPU, the receipt count and each
+/// receipt's per-input-action CPU vector. Wire receipts carry no status or NET, so a 4.5 Wire
+/// block document has no `net_usage`, `schedule_version` or `new_producers`.
+fn block_doc(
+    block_num: u32,
+    block: &wire_block::Block,
+    timestamps: TimestampProfile,
+    profile_id: &str,
+) -> String {
+    let mut s = String::with_capacity(360 + 24 * block.receipts.len());
+    s.push_str("{\"@timestamp\":");
+    push_json_str(&mut s, &timestamps.slot_to_iso(block.slot));
+    s.push_str(",\"block_num\":");
+    s.push_str(&block_num.to_string());
+    s.push_str(",\"block_id\":\"");
+    s.push_str(&hex::encode(block.id));
+    s.push_str("\",\"prev_id\":\"");
+    s.push_str(&hex::encode(block.previous));
+    s.push_str("\",\"producer\":");
+    push_json_str(&mut s, &trace::name_to_string(block.producer));
+    let cpu: u64 = block
+        .receipts
+        .iter()
+        .flat_map(|r| &r.cpu_usage_us)
+        .map(|&c| u64::from(c))
+        .sum();
+    s.push_str(",\"cpu_usage\":");
+    s.push_str(&cpu.to_string());
+    s.push_str(",\"trx_count\":");
+    s.push_str(&block.receipts.len().to_string());
+    s.push_str(",\"protocol\":{\"id\":");
+    push_json_str(&mut s, WIRE_PROTOCOL_ID);
+    s.push_str(",\"profileId\":");
+    push_json_str(&mut s, profile_id);
+    s.push_str(",\"receipts\":[");
+    for (i, receipt) in block.receipts.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str("{\"cpu_usage_us\":[");
+        for (j, cpu) in receipt.cpu_usage_us.iter().enumerate() {
+            if j > 0 {
+                s.push(',');
+            }
+            s.push_str(&cpu.to_string());
+        }
+        s.push_str("]}");
+    }
+    s.push_str("]}}");
+    s
+}
+
+/// Walk block `block_num` from the block log. Its header is checked against `expected_id` when
+/// the trace log names one.
+fn walk_block(
+    log: &mut BlockLog,
+    block_num: u32,
+    expected_id: Option<&[u8]>,
+) -> Result<(wire_block::Block, Vec<u8>)> {
+    let bytes = log
+        .block_bytes(block_num)
+        .with_context(|| format!("block {block_num} cannot be read from the block log"))?;
+    let block = wire_block::parse(&bytes, block_num)
+        .map_err(|e| anyhow!("block {block_num} in the block log: {e}"))?;
+    if let Some(expected) = expected_id
+        && block.id[..] != *expected
+    {
+        bail!(
+            "block {block_num}: the block log's header hashes to {}, but the trace log names {}",
+            hex::encode(block.id),
+            hex::encode(expected)
+        );
+    }
+    Ok((block, bytes))
+}
+
+/// Block documents for blocks the trace log does not reach (its first entry is usually block 2).
+/// Their ids rest on their headers; the first traced block's header then names the last of them.
+fn walk_untraced_blocks(
+    dir: &str,
+    from: u32,
+    to: u32,
+    docs: &WireDocs,
+    timestamps: TimestampProfile,
+    sink: Option<&SyncSender<DocMsg>>,
+    stats: &Stats,
+) -> Result<Option<Segment>> {
+    let mut log = BlockLog::open(dir)?;
+    let mut segment = None;
+    for block_num in from..=to {
+        let (block, _) = walk_block(&mut log, block_num, None)?;
+        if block_num == 1 && block.previous != [0; 32] {
+            bail!("block 1 must name the zero block as its parent");
+        }
+        chain_block(&mut segment, block_num, &block)?;
+        if docs.blocks {
+            send_block_doc(block_num, &block, timestamps, &docs.profile_id, sink, stats);
+        }
+    }
+    Ok(segment)
+}
+
+fn send_block_doc(
+    block_num: u32,
+    block: &wire_block::Block,
+    timestamps: TimestampProfile,
+    profile_id: &str,
+    sink: Option<&SyncSender<DocMsg>>,
+    stats: &Stats,
+) {
+    stats.block_docs.fetch_add(1, Relaxed);
+    if let Some(tx) = sink {
+        let _ = tx.send(DocMsg {
+            block_num,
+            kind: DocKind::Block,
+            doc: block_doc(block_num, block, timestamps, profile_id),
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -526,12 +736,10 @@ fn str_of(v: &Value) -> String {
         .unwrap_or_else(|| v.to_string())
 }
 
-static SYSTEM_ACCOUNT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-
-/// The selected protocol's system account; `eosio` until `main` selects a provider.
-fn system_account() -> &'static str {
-    SYSTEM_ACCOUNT.get().copied().unwrap_or("eosio")
-}
+/// Hyperion's system-contract handlers are declared for the literal `eosio` contract and dispatched
+/// by `act.account`. On Wire, whose system contract is `sysio`, they never apply: Hyperion 4.5
+/// stores no `@newaccount` or `@updateauth` there, and neither does this tool.
+const HANDLER_CONTRACT: &str = "eosio";
 
 /// Apply the matching `@`-field handler(s) for this action, mutating `doc` in place.
 fn process_action_data(
@@ -543,7 +751,7 @@ fn process_action_data(
     if name == "transfer" {
         h_transfer(doc, memo_in_field);
     }
-    if account != system_account() {
+    if account != HANDLER_CONTRACT {
         return;
     }
     match name {
@@ -849,7 +1057,7 @@ fn push_json_str(out: &mut String, s: &str) {
 /// otherwise the raw decoded JSON is spliced verbatim.)
 fn is_at_handled(account: &str, name: &str) -> bool {
     name == "transfer"
-        || (account == system_account()
+        || (account == HANDLER_CONTRACT
             && matches!(
                 name,
                 "newaccount"
@@ -868,14 +1076,60 @@ fn is_at_handled(account: &str, name: &str) -> bool {
 /// doc as a JSON string. `act_digest`/`code_sequence`/`abi_sequence` are hoisted onto the doc and
 /// the group's receipts go in `receipts[]`. Per-field `cleanActionTrace` pruning already happened
 /// while building `Proc.body`.
-fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<DocMsg>>, stats: &Stats) {
+///
+/// Wire (`certified`) follows the 4.5 `certified-extension` mode: one document per input action,
+/// which is the member whose ordinal is the input. It keeps its own counters, takes the first
+/// member's `act_digest`, and lists every member's receipt in order. 4.5 falls back to the first
+/// member when the input action was filtered out; this tool processes every committed action, so
+/// a missing input action is refused instead.
+fn finalize_and_emit(
+    procs: Vec<Proc>,
+    certified: bool,
+    sink: Option<&SyncSender<DocMsg>>,
+    stats: &Stats,
+) -> Result<()> {
     if procs.is_empty() {
-        return;
+        return Ok(());
+    }
+    if certified {
+        let mut order: Vec<u64> = Vec::new();
+        let mut groups: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (i, p) in procs.iter().enumerate() {
+            groups
+                .entry(p.input_ordinal)
+                .or_insert_with(|| {
+                    order.push(p.input_ordinal);
+                    Vec::new()
+                })
+                .push(i);
+        }
+        for input in order {
+            let members = &groups[&input];
+            let Some(representative) = members
+                .iter()
+                .copied()
+                .find(|&i| procs[i].action_ordinal == input)
+            else {
+                bail!("input action {input} of a grouped occurrence was not processed");
+            };
+            let receipts: Vec<&str> = members
+                .iter()
+                .map(|&i| procs[i].receipt_json.as_str())
+                .collect();
+            emit_doc(
+                &procs[representative],
+                &procs[members[0]].act_digest,
+                &receipts,
+                sink,
+                stats,
+            );
+        }
+        return Ok(());
     }
     if procs.len() == 1 {
         let p = &procs[0];
-        emit_doc(p, &[p.receipt_json.as_str()], sink, stats);
-        return;
+        emit_doc(p, &p.act_digest, &[p.receipt_json.as_str()], sink, stats);
+        return Ok(());
     }
     // action_ordinal -> act_digest, to tell notifications (same digest as creator) from inline.
     let digest_by_ordinal: HashMap<u64, String> = procs
@@ -909,20 +1163,29 @@ fn finalize_and_emit(procs: Vec<Proc>, sink: Option<&Sender<DocMsg>>, stats: &St
         if !emitted.insert(key) {
             continue;
         }
-        emit_doc(p, &group_receipts[key], sink, stats);
+        emit_doc(p, &p.act_digest, &group_receipts[key], sink, stats);
     }
+    Ok(())
 }
 
-/// Assemble one grouped action doc: `{ <body> "act_digest":.., "code_sequence":.., "abi_sequence":.., "receipts":[..] }`.
-fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<DocMsg>>, stats: &Stats) {
+/// Assemble one grouped action doc:
+/// `{ <body> "act_digest":.., "code_sequence":.., "abi_sequence":.., "receipts":[..], "protocol":.. }`.
+fn emit_doc(
+    p: &Proc,
+    act_digest: &str,
+    receipts: &[&str],
+    sink: Option<&SyncSender<DocMsg>>,
+    stats: &Stats,
+) {
     stats.docs.fetch_add(1, Relaxed);
     let Some(tx) = sink else { return };
     let rlen: usize = receipts.iter().map(|r| r.len() + 1).sum();
-    let mut s = String::with_capacity(p.body.len() + p.act_digest.len() + rlen + 96);
+    let plen = p.protocol.as_ref().map_or(0, |m| m.len() + 12);
+    let mut s = String::with_capacity(p.body.len() + act_digest.len() + rlen + plen + 96);
     s.push('{');
     s.push_str(&p.body); // ends with a trailing comma
     s.push_str("\"act_digest\":");
-    push_json_str(&mut s, &p.act_digest);
+    push_json_str(&mut s, act_digest);
     s.push_str(",\"code_sequence\":");
     s.push_str(&p.code_sequence.to_string());
     s.push_str(",\"abi_sequence\":");
@@ -934,10 +1197,15 @@ fn emit_doc(p: &Proc, receipts: &[&str], sink: Option<&Sender<DocMsg>>, stats: &
         }
         s.push_str(r);
     }
-    s.push_str("]}");
+    s.push(']');
+    if let Some(metadata) = &p.protocol {
+        s.push_str(",\"protocol\":");
+        s.push_str(metadata);
+    }
+    s.push('}');
     let _ = tx.send(DocMsg {
         block_num: p.block_num,
-        global_sequence: p.global_sequence,
+        kind: DocKind::Action(p.global_sequence),
         doc: s,
     });
 }
@@ -955,15 +1223,17 @@ fn worker(
     metadata_only: bool,
     stats: &Stats,
     failures: &Failures,
-    sink: Option<&Sender<DocMsg>>,
-    timestamps: hyperion_ship::provider::TimestampProfile,
-) -> Result<()> {
+    sink: Option<&SyncSender<DocMsg>>,
+    timestamps: TimestampProfile,
+    docs: &WireDocs,
+) -> Result<Option<Segment>> {
     let mut reg = Registry::new(abi_index);
     let wire = WIRE_PROFILE.get().is_some();
     let mut blocklog = match blocks_dir {
         Some(d) => Some(BlockLog::open(d)?),
         None => None,
     };
+    let mut segment: Option<Segment> = None;
     let profile = std::env::var("ACTION_PROFILE").is_ok();
     let (mut d_l1, mut d_act, mut d_l2) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
     let mut data_buf = String::new();
@@ -1006,19 +1276,58 @@ fn worker(
         }
         stats.blocks.fetch_add(1, Relaxed);
 
-        // block-header fields (Phase B): @timestamp + producer from the block log, if provided.
-        let (block_producer, block_ts) = match blocklog.as_mut().and_then(|bl| bl.header(block_num))
-        {
-            Some((prod, slot)) => (
-                Some(trace::name_to_string(prod)),
-                Some(timestamps.slot_to_iso(slot)),
+        // Wire: one walk of the block-log entry, checked against the id the trace log names and
+        // chained to the previous block, gives the header fields, the block document and the
+        // transaction ids. Antelope reads only the header prefix.
+        let walked = match (wire, blocklog.as_mut()) {
+            (true, Some(bl)) => {
+                let (block, bytes) = walk_block(bl, block_num, Some(&hdr[8..40]))?;
+                chain_block(&mut segment, block_num, &block)?;
+                if docs.blocks {
+                    send_block_doc(block_num, &block, timestamps, &docs.profile_id, sink, stats);
+                }
+                Some((block, bytes))
+            }
+            _ => None,
+        };
+        let (block_producer, block_ts) = match &walked {
+            Some((block, _)) => (
+                Some(trace::name_to_string(block.producer)),
+                Some(timestamps.slot_to_iso(block.slot)),
             ),
-            None => (None, None),
+            None => match blocklog.as_mut().and_then(|bl| bl.header(block_num)) {
+                Some((prod, slot)) => (
+                    Some(trace::name_to_string(prod)),
+                    Some(timestamps.slot_to_iso(slot)),
+                ),
+                None => (None, None),
+            },
+        };
+        // Schema-3 metadata up to `input`: one disk selection per block.
+        let metadata_prefix = match (&docs.chain_id, &walked) {
+            (Some(chain_id), Some((block, _))) => Some(occurrence::block_prefix(
+                chain_id,
+                block_num,
+                &block_id,
+                &hex::encode(block.previous),
+            )),
+            _ => None,
         };
 
         let inflated = match decode_payload(&payload) {
             Ok(d) if !d.is_empty() => d,
-            Ok(_) => continue, // an entry with no traces
+            Ok(_) => {
+                // An entry with no traces, which a block with transactions cannot have.
+                if let Some((block, _)) = &walked
+                    && !block.receipts.is_empty()
+                {
+                    bail!(
+                        "block {block_num} has {} transaction receipts but no traces",
+                        block.receipts.len()
+                    );
+                }
+                continue;
+            }
             Err(_) => {
                 stats.unreadable(block_num);
                 continue;
@@ -1031,22 +1340,23 @@ fn worker(
             stats.unreadable(block_num);
             continue;
         };
-        // Only blocks with a transaction other than the implicit onblock can carry signatures.
-        let onblock = WIRE_ONBLOCK.get().map(|(code, name, _)| (*code, *name));
-        let signed = wire
-            && txs.iter().any(|tx| {
-                tx.actions
+        // Every transaction the block includes has a trace in it; beyond those, the trace log
+        // holds only the implicit onblock. Only blocks with receipts carry signatures.
+        let signatures = match &walked {
+            Some((block, bytes)) if !block.receipts.is_empty() => {
+                if let Some(receipt) = block
+                    .receipts
                     .iter()
-                    .any(|a| Some((a.account, a.name)) != onblock)
-            });
-        let signatures = if signed {
-            blocklog
-                .as_mut()
-                .and_then(|bl| bl.block_bytes(block_num))
-                .map(|b| wire_block_signatures(&b))
-                .unwrap_or_default()
-        } else {
-            HashMap::new()
+                    .find(|r| !txs.iter().any(|tx| tx.id == r.trx_id))
+                {
+                    bail!(
+                        "block {block_num} includes transaction {} but its traces do not",
+                        hex::encode(receipt.trx_id)
+                    );
+                }
+                wire_block_signatures(bytes)
+            }
+            _ => HashMap::new(),
         };
         if let Some(t) = l1_t {
             d_l1 += t.elapsed();
@@ -1055,9 +1365,27 @@ fn worker(
         for tx in &txs {
             stats.txs.fetch_add(1, Relaxed);
             let trx_id = hex::encode(tx.id);
+            // Wire: every action is committed with a receipt, and each one's input origin is
+            // checked against its complete ancestry before anything of the transaction is written.
+            let origins = if wire {
+                if let Some(act) = tx.actions.iter().find(|a| {
+                    a.except || a.receipt.as_ref().is_none_or(|r| r.receiver != a.receiver)
+                }) {
+                    bail!(
+                        "block {block_num} transaction {trx_id}: action {} has no committed receipt for its receiver",
+                        act.action_ordinal
+                    );
+                }
+                Some(
+                    occurrence::input_origins(&tx.actions, &inflated)
+                        .map_err(|e| anyhow!("block {block_num} transaction {trx_id}: {e}"))?,
+                )
+            } else {
+                None
+            };
             let mut procs: Vec<Proc> = Vec::new();
             let mut usage_included = false;
-            for act in &tx.actions {
+            for (position, act) in tx.actions.iter().enumerate() {
                 // Hyperion only indexes actions with except===null and a receipt.
                 if act.except {
                     continue;
@@ -1065,6 +1393,7 @@ fn worker(
                 let Some(receipt) = &act.receipt else {
                     continue;
                 };
+                let input_ordinal = origins.as_ref().map_or(0, |o| o[position]);
                 let code = act.account;
                 let action_u64 = act.name;
                 let account = trace::name_to_string(code);
@@ -1224,8 +1553,18 @@ fn worker(
                 if let Some(rv) = act.return_value
                     && rv.1 > 0
                 {
+                    // Hyperion renders return values as abieos does (uppercase) on Antelope, and as
+                    // the Wire codec does (lowercase) on Wire.
+                    let bytes = &inflated[rv.0..rv.0 + rv.1];
                     body.push_str("\"return_value\":");
-                    push_json_str(&mut body, &hex::encode_upper(&inflated[rv.0..rv.0 + rv.1]));
+                    push_json_str(
+                        &mut body,
+                        &if wire {
+                            hex::encode(bytes)
+                        } else {
+                            hex::encode_upper(bytes)
+                        },
+                    );
                     body.push(',');
                 }
                 let mut ram_open = false;
@@ -1324,11 +1663,20 @@ fn worker(
                     receipt_json.push_str("]}");
                 }
 
+                // Only an input action becomes a document, so only it needs metadata.
+                let protocol = match &metadata_prefix {
+                    Some(prefix) if input_ordinal == act.action_ordinal => Some(
+                        occurrence::metadata(prefix, &trx_id, act, data_bytes, input_ordinal)
+                            .context("occurrence metadata needs a receipt")?,
+                    ),
+                    _ => None,
+                };
                 procs.push(Proc {
                     block_num,
                     global_sequence: receipt.global_sequence,
                     action_ordinal: act.action_ordinal as u64,
                     creator_action_ordinal: act.creator_action_ordinal as u64,
+                    input_ordinal: u64::from(input_ordinal),
                     act_digest: if wire {
                         hex::encode(receipt.act_digest)
                     } else {
@@ -1338,9 +1686,11 @@ fn worker(
                     abi_sequence: receipt.abi_sequence,
                     receipt_json,
                     body,
+                    protocol,
                 });
             }
-            finalize_and_emit(procs, sink, stats);
+            finalize_and_emit(procs, wire, sink, stats)
+                .with_context(|| format!("block {block_num} transaction {trx_id}"))?;
         }
         if let Some(t) = a_t {
             d_act += t.elapsed();
@@ -1354,8 +1704,25 @@ fn worker(
             d_l2.as_secs_f64()
         );
     }
-    Ok(())
+    // A walked worker must have covered its whole range, one chained run of blocks.
+    if wire && blocklog.is_some() {
+        match segment {
+            Some(run) if run.first == cs && run.last == ce => {}
+            other => bail!(
+                "worker [{cs}..{ce}] walked {}",
+                other.map_or("no blocks".to_string(), |run| format!(
+                    "only [{}..{}]",
+                    run.first, run.last
+                ))
+            ),
+        }
+    }
+    Ok(segment)
 }
+
+/// Documents in flight between the decoders and the sink. Decoding outruns every sink, so the
+/// channel applies backpressure instead of holding the backlog in memory.
+const DOC_BACKLOG: usize = 1 << 15;
 
 /// How long an ES poster waits for its batch to fill before posting what it has.
 const BULK_LINGER: Duration = Duration::from_millis(50);
@@ -1390,8 +1757,10 @@ fn action_index(cfg: &EsCfg, block_num: u32) -> String {
 /// One ES poster thread: pull up to `cfg.batch` docs from the shared channel (locking only while
 /// draining, never while POSTing), accumulate them into an `application/x-ndjson` `_bulk` body
 /// (`{"index":{"_index":..,"_id":..}}\n<doc>\n` per doc), POST to `<es>/_bulk`, and fold the
-/// outcome into the shared `EsStats`. The action `_id` is the doc's `global_sequence`.
+/// outcome into the shared `EsStats`. An action `_id` is the doc's `global_sequence`; a block
+/// `_id` is its block number. The first failed response is printed once.
 fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: &EsStats) {
+    static REPORTED: std::sync::Once = std::sync::Once::new();
     let mut body = String::new();
     loop {
         // Drain a batch under the lock, then release it before the (slow) network round-trip.
@@ -1418,11 +1787,21 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
 
         body.clear();
         for m in &batch {
-            let index = action_index(cfg, m.block_num);
             body.push_str("{\"index\":{\"_index\":\"");
-            body.push_str(&index);
-            body.push_str("\",\"_id\":\"");
-            body.push_str(&m.global_sequence.to_string());
+            match m.kind {
+                DocKind::Action(global_sequence) => {
+                    body.push_str(&action_index(cfg, m.block_num));
+                    body.push_str("\",\"_id\":\"");
+                    body.push_str(&global_sequence.to_string());
+                }
+                DocKind::Block => {
+                    body.push_str(&cfg.chain);
+                    body.push_str("-block-");
+                    body.push_str(&cfg.version);
+                    body.push_str("\",\"_id\":\"");
+                    body.push_str(&m.block_num.to_string());
+                }
+            }
             body.push_str("\"}}\n");
             body.push_str(&m.doc);
             body.push('\n');
@@ -1430,26 +1809,31 @@ fn es_poster(rx: &std::sync::Mutex<mpsc::Receiver<DocMsg>>, cfg: &EsCfg, stats: 
         let n = batch.len() as u64;
         let nbytes = body.len() as u64;
 
-        match minreq::post(cfg.url.as_str())
+        let failure = match minreq::post(cfg.url.as_str())
             .with_header("Content-Type", "application/x-ndjson")
             .with_body(body.as_str())
             .send()
         {
-            Ok(resp) => {
-                // Cheap error check: the bulk response sets `"errors":true` iff any item failed.
-                let failed = resp
-                    .as_str()
-                    .map(|s| s.contains("\"errors\":true"))
-                    .unwrap_or(true)
-                    || resp.status_code < 200
-                    || resp.status_code >= 300;
-                if failed {
-                    stats.errors.fetch_add(1, Relaxed);
+            // Cheap error check: the bulk response sets `"errors":true` iff any item failed.
+            Ok(resp) => match resp.as_str() {
+                Ok(text)
+                    if (200..300).contains(&resp.status_code)
+                        && !text.contains("\"errors\":true") =>
+                {
+                    None
                 }
-            }
-            Err(_) => {
-                stats.errors.fetch_add(1, Relaxed);
-            }
+                Ok(text) => Some(format!(
+                    "HTTP {}: {}",
+                    resp.status_code,
+                    text.chars().take(2000).collect::<String>()
+                )),
+                Err(e) => Some(format!("HTTP {}: unreadable body: {e}", resp.status_code)),
+            },
+            Err(e) => Some(format!("transport: {e}")),
+        };
+        if let Some(reason) = failure {
+            stats.errors.fetch_add(1, Relaxed);
+            REPORTED.call_once(|| eprintln!("[action-proto] first failed _bulk request: {reason}"));
         }
         stats.docs.fetch_add(n, Relaxed);
         stats.bytes.fetch_add(nbytes, Relaxed);
@@ -1461,12 +1845,6 @@ fn main() -> Result<()> {
     let args = Args::parse();
     args.protocol.validate()?;
     let timestamps = args.protocol.timestamp_profile()?;
-    let system = if args.protocol.id() == "antelope" {
-        "eosio"
-    } else {
-        "sysio"
-    };
-    SYSTEM_ACCOUNT.set(system).ok();
     if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
         WIRE_PROFILE.set(profile.clone()).ok();
         WIRE_SHIP
@@ -1483,10 +1861,40 @@ fn main() -> Result<()> {
             ))
             .ok();
     }
-    eprintln!(
-        "[action-proto] protocol {} (system account {system})",
-        args.protocol.id()
-    );
+    eprintln!("[action-proto] protocol {}", args.protocol.id());
+    let wire_profile_id = match &args.protocol {
+        hyperion_ship::provider::ProtocolProvider::Wire(profile) => Some(profile.id.clone()),
+        _ => None,
+    };
+    if args.chain_id.is_some() || args.blocks {
+        if wire_profile_id.is_none() {
+            bail!(
+                "--chain-id and --blocks write Hyperion 4.5 Wire documents; select a Wire --protocol"
+            );
+        }
+        if args.blocks_dir.is_none() {
+            bail!(
+                "--chain-id and --blocks need --blocks-dir: every block's id and parent come from its header"
+            );
+        }
+    }
+    if let Some(id) = &args.chain_id
+        && (id.len() != 64 || !id.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')))
+    {
+        bail!("--chain-id must be 64 lowercase hex characters");
+    }
+    if args.blocks && args.es.is_none() && args.out.is_some() && args.blocks_out.is_none() {
+        bail!("--blocks with --out needs --blocks-out for the block documents");
+    }
+    let docs = WireDocs {
+        chain_id: args.chain_id.clone(),
+        blocks: args.blocks,
+        profile_id: args
+            .doc_profile_id
+            .clone()
+            .or(wire_profile_id)
+            .unwrap_or_default(),
+    };
     eprintln!("[action-proto] loading ABI index {} ...", args.abi_index);
     let abi_index = Arc::new(load_abi_index(&args.abi_index)?);
     eprintln!("[action-proto] {} contracts in ABI index", abi_index.len());
@@ -1502,24 +1910,34 @@ fn main() -> Result<()> {
     let first_block = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
     let n_idx = (std::fs::metadata(&idx_path)?.len() / 8) as u32;
     let last_block = first_block + n_idx.saturating_sub(1);
-    let start = args.start.max(first_block);
-    let end = args.end.min(last_block);
-    // Every document needs its block header; never run past the end of the block log.
-    let end = match args.blocks_dir.as_deref() {
+    // Every document needs its block header; never run outside the block log.
+    let (requested_start, end) = match args.blocks_dir.as_deref() {
         Some(dir) => {
-            let block_log_last = BlockLog::open(dir)?.last_block();
-            if end > block_log_last {
+            let blocks = BlockLog::open(dir)?;
+            if args.start < blocks.first_block() || args.end.min(last_block) > blocks.last_block() {
                 eprintln!(
-                    "[action-proto] block log ends at {block_log_last}; clamping the range so every document has its block header"
+                    "[action-proto] block log holds [{}..{}]; clamping the range so every document has its block header",
+                    blocks.first_block(),
+                    blocks.last_block()
                 );
             }
-            end.min(block_log_last)
+            (
+                args.start.max(blocks.first_block()),
+                args.end.min(last_block).min(blocks.last_block()),
+            )
         }
-        None => end,
+        None => (args.start, args.end.min(last_block)),
     };
+    let start = requested_start.max(first_block);
     if start > end {
         bail!("empty range after clamp to [{first_block}..{last_block}]");
     }
+    // Block documents also cover blocks the trace log does not reach.
+    let untraced = if args.blocks && requested_start < first_block {
+        Some((requested_start, first_block - 1))
+    } else {
+        None
+    };
     let threads = args.threads.max(1);
     let total = (end - start + 1) as u64;
     let chunk = total.div_ceil(threads as u64) as u32;
@@ -1529,7 +1947,7 @@ fn main() -> Result<()> {
 
     let stats = Arc::new(Stats::default());
     let failures = Arc::new(Failures::default());
-    let (tx, rx) = mpsc::channel::<DocMsg>();
+    let (tx, rx) = mpsc::sync_channel::<DocMsg>(DOC_BACKLOG);
 
     // Output mode: --es (direct ES `_bulk`) takes precedence over --out (NDJSON); with neither set
     // we just drain the channel (pure-decode benchmark). Only build the NDJSON writer when ES is
@@ -1543,18 +1961,18 @@ fn main() -> Result<()> {
     });
     let es_workers = args.es_workers.max(1);
     let es_stats = Arc::new(EsStats::default());
-    let mut out: Option<Box<dyn Write + Send>> = if es_cfg.is_some() {
-        None
-    } else {
-        args.out
-            .as_ref()
-            .map(|p| -> Result<Box<dyn Write + Send>> {
-                Ok(Box::new(BufWriter::new(File::create(p)?)))
-            })
-            .transpose()?
+    let create = |path: &Option<String>| -> Result<Option<Box<dyn Write + Send>>> {
+        match (es_cfg.is_some(), path) {
+            (false, Some(p)) => Ok(Some(Box::new(BufWriter::new(
+                File::create(p).with_context(|| format!("create {p}"))?,
+            )))),
+            _ => Ok(None),
+        }
     };
-    // Workers send docs whenever there is a consumer (ES posters or the NDJSON writer).
-    let emit = es_cfg.is_some() || out.is_some();
+    let mut out = create(&args.out)?;
+    let mut blocks_out = create(&args.blocks_out)?;
+    // Workers send docs whenever there is a consumer (ES posters or an NDJSON writer).
+    let emit = es_cfg.is_some() || out.is_some() || blocks_out.is_some();
     if let Some(c) = &es_cfg {
         eprintln!(
             "[action-proto] direct-ES sink -> {} | index={}-action-{}-<part> partition_size={} batch={} posters={}",
@@ -1563,9 +1981,11 @@ fn main() -> Result<()> {
     }
     let t0 = Instant::now();
 
+    let mut failed = Vec::new();
+    let mut segments = Vec::new();
     std::thread::scope(|s| {
         // Consumer side: either N ES `_bulk` posters sharing the Receiver, or the single NDJSON
-        // writer thread, or a lone drain thread.
+        // writer thread (actions to --out, blocks to --blocks-out), or a lone drain thread.
         let rx_shared = Arc::new(std::sync::Mutex::new(rx));
         let mut consumers = Vec::new();
         if let Some(cfg) = es_cfg.clone() {
@@ -1577,15 +1997,26 @@ fn main() -> Result<()> {
             }
         } else {
             consumers.push(s.spawn(move || {
-                if let Some(w) = out.as_mut() {
-                    for msg in rx_shared.lock().unwrap().iter() {
+                for msg in rx_shared.lock().unwrap().iter() {
+                    let target = match msg.kind {
+                        DocKind::Action(_) => out.as_mut(),
+                        DocKind::Block => blocks_out.as_mut(),
+                    };
+                    if let Some(w) = target {
                         let _ = writeln!(w, "{}", msg.doc);
                     }
+                }
+                for w in [out.as_mut(), blocks_out.as_mut()].into_iter().flatten() {
                     let _ = w.flush();
-                } else {
-                    for _ in rx_shared.lock().unwrap().iter() {}
                 }
             }));
+        }
+        if let (Some((from, to)), Some(dir)) = (untraced, args.blocks_dir.as_deref()) {
+            let txc = if emit { Some(tx.clone()) } else { None };
+            match walk_untraced_blocks(dir, from, to, &docs, timestamps, txc.as_ref(), &stats) {
+                Ok(run) => segments.extend(run),
+                Err(e) => failed.push(format!("blocks [{from}..{to}]: {e:#}")),
+            }
         }
         let mut handles = Vec::new();
         for i in 0..threads {
@@ -1598,34 +2029,59 @@ fn main() -> Result<()> {
             let (ai, st, fl) = (abi_index.clone(), stats.clone(), failures.clone());
             let bd = args.blocks_dir.clone();
             let txc = if emit { Some(tx.clone()) } else { None };
-            handles.push(s.spawn(move || {
-                if let Err(e) = worker(
-                    &lp,
-                    &ip,
-                    first_block,
-                    cs,
-                    ce,
-                    &ai,
-                    bd.as_deref(),
-                    args.index_transfer_memo,
-                    args.metadata_only,
-                    &st,
-                    &fl,
-                    txc.as_ref(),
-                    timestamps,
-                ) {
-                    eprintln!("[action-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
-                }
-            }));
+            let docs = &docs;
+            handles.push((
+                i,
+                cs,
+                ce,
+                s.spawn(move || {
+                    worker(
+                        &lp,
+                        &ip,
+                        first_block,
+                        cs,
+                        ce,
+                        &ai,
+                        bd.as_deref(),
+                        args.index_transfer_memo,
+                        args.metadata_only,
+                        &st,
+                        &fl,
+                        txc.as_ref(),
+                        timestamps,
+                        docs,
+                    )
+                }),
+            ));
         }
         drop(tx);
-        for h in handles {
-            let _ = h.join();
+        for (i, cs, ce, h) in handles {
+            match h.join() {
+                Ok(Ok(run)) => segments.extend(run),
+                Ok(Err(e)) => failed.push(format!("worker {i} [{cs}..{ce}]: {e:#}")),
+                Err(_) => failed.push(format!("worker {i} [{cs}..{ce}] panicked")),
+            }
         }
         for c in consumers {
             let _ = c.join();
         }
     });
+    // The walked runs must chain into one: each run's first header names the previous run's last
+    // block as its parent.
+    segments.sort_by_key(|run| run.first);
+    for pair in segments.windows(2) {
+        let (before, after) = (pair[0], pair[1]);
+        if after.first != before.last + 1 || after.first_previous != before.last_id {
+            failed.push(format!(
+                "block {} does not follow block {}: its header names {} as its parent, but block {} is {}",
+                after.first,
+                before.last,
+                hex::encode(after.first_previous),
+                before.last,
+                hex::encode(before.last_id)
+            ));
+        }
+    }
 
     let secs = t0.elapsed().as_secs_f64();
     let b = stats.blocks.load(Relaxed);
@@ -1645,6 +2101,12 @@ fn main() -> Result<()> {
         stats.recovered.load(Relaxed),
         stats.no_abi.load(Relaxed),
     );
+    if args.blocks {
+        eprintln!(
+            "[action-proto] block docs={}",
+            stats.block_docs.load(Relaxed)
+        );
+    }
     let stale = stats.stale.load(Relaxed);
     if stale > 0 {
         eprintln!(
@@ -1670,9 +2132,9 @@ fn main() -> Result<()> {
             mb / secs.max(1e-9),
         );
         if errors > 0 {
-            eprintln!(
-                "[action-proto] WARNING: {errors} bulk request(s) reported errors — inspect ES response / mapping conflicts."
-            );
+            failed.push(format!(
+                "{errors} bulk request(s) reported errors — inspect ES response / mapping conflicts"
+            ));
         }
     }
     let f = failures.lock().unwrap();
@@ -1689,6 +2151,12 @@ fn main() -> Result<()> {
         for ((reason, code, action), (cnt, sample)) in top.into_iter().take(25) {
             eprintln!("  {cnt:>6}  {reason:<8} {code}/{action}  {sample}");
         }
+    }
+    if !failed.is_empty() {
+        for failure in &failed {
+            eprintln!("[action-proto] FAILED: {failure}");
+        }
+        bail!("{} failure(s); the output is incomplete", failed.len());
     }
     Ok(())
 }
