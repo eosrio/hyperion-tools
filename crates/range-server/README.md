@@ -11,7 +11,7 @@ range-server --protocol wire-sysio-6508c9e8-engineering-v1 \
   --state-history /srv/wire/state-history --blocks-dir /srv/wire/blocks \
   --catalog-dir /srv/wire/catalogs --genesis-catalog-sha256 <genesis manifest sha256> \
   --chain-id <chain id> --doc-profile-id wire-sysio-6508c9e8-native-engineering-v1 \
-  --listen 127.0.0.1:7180 --threads 16 --follow
+  --listen 127.0.0.1:7180 --threads 16 --seal --ship-abi wire-ship-schema.json
 ```
 
 ## What it serves, and what it refuses
@@ -29,6 +29,16 @@ range-server --protocol wire-sysio-6508c9e8-engineering-v1 \
 - **Every served block is a catalog member.** Its trace-log, chain-state and block-log ids must equal the
   catalog's id for it, its header must hash to that id, and it must name the previous block's id. Any
   disagreement fails the range.
+- **Sealing (`--seal`).** The service extends the chain itself, as segments that hold only the
+  blocks they add (`hyperion-abi-history-segment-v1`, see `abi-scanner --segment`):
+  - It seals once `--seal-blocks` irreversible blocks (default 120) follow the chain, or once
+    the oldest unsealed block has waited `--seal-max-wait-ms` (default 60 s).
+  - The end block is the block log's last complete block. The block log holds irreversible
+    blocks only, so the chain can never fork away from it.
+  - Every new block's header must hash to the id the state-history logs give it and name the
+    previous block's id.
+  - The segment is loaded back through the consumer verifier before it is served.
+  - A seal reads only the new blocks.
 - **Follow mode.** The logs' indexes are re-measured on every request, so a running node's growing logs
   are followed; `blocks.log` holds irreversible blocks only, and a half-written last block is never read.
   With `--follow`, extensions added to `--catalog-dir` (by `abi-scanner --base-manifest`) are verified and
@@ -42,7 +52,7 @@ range-server --protocol wire-sysio-6508c9e8-engineering-v1 \
 
 | endpoint | purpose |
 |---|---|
-| `GET /v1/info` | chain id, profile, node revision, SHiP ABI hash, genesis and newest catalog, sealed LIB, LIB, head, log ranges, limits |
+| `GET /v1/info` | chain id, profile, node revision, SHiP ABI hash, genesis and newest catalog, sealed LIB, LIB, head, log ranges, limits, and the sealer's state with `--seal` |
 | `GET /v1/catalog?after=<manifest sha>` | the verified catalog segments after that one (all of them without `after`) |
 | `GET /v1/catalog/<manifest sha>/<name>` | a segment's manifest or member file, verbatim, for consumers that verify it themselves |
 | `POST /v1/ranges` | stream a range (below) |

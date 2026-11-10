@@ -15,6 +15,13 @@ const PROTOCOL: &str = "wire-sysio-6508c9e8-engineering-v1";
 const DOC_PROFILE: &str = "wire-sysio-6508c9e8-native-engineering-v1";
 const NODE_REVISION: &str = "6508c9e8f4044df8d5acb082a7af3be6a80cd9a0";
 
+/// The node's SHiP ABI, as a Wire node's handshake sends it.
+fn ship_abi() -> String {
+    let capture: Value =
+        serde_json::from_str(include_str!("../../core/testdata/wire/ship-capture.json")).unwrap();
+    capture["handshakeUtf8"].as_str().unwrap().to_owned()
+}
+
 fn name(s: &str) -> u64 {
     const CHARMAP: &[u8; 32] = b".12345abcdefghijklmnopqrstuvwxyz";
     let mut value = 0u64;
@@ -137,7 +144,7 @@ fn traces(transactions: &[Transaction]) -> Vec<u8> {
             t.extend_from_slice(&name("alice").to_le_bytes());
             t.extend_from_slice(&7u64.to_le_bytes());
             varuint(&mut t, 1);
-            varuint(&mut t, 2);
+            varuint(&mut t, 0); // abi_sequence: no ABI was ever deployed
             t.extend_from_slice(&name(a.receiver).to_le_bytes());
             t.extend_from_slice(&name("token").to_le_bytes());
             t.extend_from_slice(&name("transfer").to_le_bytes());
@@ -261,7 +268,7 @@ impl Node {
         std::fs::write(d.join("abi.ndjson.blocks.bin"), &members).unwrap();
         let id = |n: u32| hex::encode(ids[n as usize - 1]);
         let mut m = json!({"format":"hyperion-wire-abi-history-v1","chainId":CHAIN_ID,"nodeRevision":NODE_REVISION,
-            "producerProfileId":PROTOCOL,"shipAbiSha256":"22".repeat(32),"startBlock":1,"endBlock":end,
+            "producerProfileId":PROTOCOL,"shipAbiSha256":sha(ship_abi().as_bytes()),"startBlock":1,"endBlock":end,
             "firstBlockId":id(1),"lastBlockId":id(end),"irreversibleBoundary":{"blockNum":end,"blockId":id(end)},
             "complete":true,"lastGlobalSequence":null,
             "deployments":{"name":"abi.ndjson","bytes":0,"sha256":sha(b""),"records":0},
@@ -755,4 +762,70 @@ fn a_block_the_catalog_does_not_name_fails_the_range() {
         "{last}"
     );
     assert!(f.iter().all(|(h, _)| h["frame"] != "manifest"));
+}
+
+#[test]
+fn seal_mode_extends_the_chain_with_verified_segments() {
+    let node = Node::new("seal");
+    let genesis = node.seal("a", 3, &node.ids, None);
+    std::fs::write(node.dir.join("ship.json"), ship_abi()).unwrap();
+    let ship = node.dir.join("ship.json").to_str().unwrap().to_owned();
+    let server = node.start(
+        &genesis,
+        &[
+            "--seal",
+            "--ship-abi",
+            &ship,
+            "--seal-blocks",
+            "2",
+            "--seal-poll-ms",
+            "50",
+        ],
+    );
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let info = loop {
+        let info = http(&server.addr, "GET", "/v1/info", "").json();
+        if info["sealedLib"] == 6 {
+            break info;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the chain was not sealed: {info}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(info["catalog"]["segments"], 2);
+    assert_eq!(info["seal"]["segmentsSealed"], 1);
+    let segment = info["catalog"]["manifestSha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let path = node
+        .dir
+        .join("catalogs/segments/abi-history.0000000004-0000000006.ndjson.manifest.json");
+    let text = std::fs::read(&path).unwrap();
+    assert_eq!(sha(&text), segment);
+    let m: Value = serde_json::from_slice(&text).unwrap();
+    assert_eq!(m["format"], "hyperion-abi-history-segment-v1");
+    assert_eq!(
+        (m["startBlock"].as_u64(), m["endBlock"].as_u64()),
+        (Some(4), Some(6))
+    );
+    assert_eq!(m["base"]["manifestSha256"], genesis);
+    let ids = std::fs::read(
+        node.dir
+            .join("catalogs/segments/abi-history.0000000004-0000000006.ndjson.blocks.bin"),
+    )
+    .unwrap();
+    assert_eq!(ids, node.ids[3..6].concat());
+    // The new blocks are served, sealed by the segment; the service picks the chain up again
+    // after a restart.
+    let f = frames(range(&server.addr, all(1, 6)));
+    assert_eq!(f.last().unwrap().0["catalogSha"], segment);
+    drop(server);
+    let again = node.start(&genesis, &[]);
+    assert_eq!(
+        http(&again.addr, "GET", "/v1/info", "").json()["sealedLib"],
+        6
+    );
 }
