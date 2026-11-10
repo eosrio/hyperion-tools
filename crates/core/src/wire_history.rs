@@ -2,12 +2,27 @@
 //!
 //! A manifest is published only after every source block, output and identity check succeeds.
 //! Its block membership sidecar is 32 bytes per block; no per-block database records are needed.
+//!
+//! Reader threads each take a contiguous chunk of blocks. For every block they inflate the
+//! chain-state and trace entries, walk their bytes ([`crate::wire_walk`]) and keep only what can
+//! change the history: deployments, ABI sequence observations that differ from the previous one
+//! for the account, and account rows that differ from the account's previous row in the chunk or
+//! that a deployment in the same block must match. One fold applies those facts in block order,
+//! with the same checks and the same records as a block-by-block scan.
+//!
+//! A scan can extend a sealed catalog instead of starting at genesis. It verifies the base
+//! catalog's members, rebuilds the state its records describe, checks that the logs still hold
+//! the base's last block, scans only the blocks after it and writes the base members followed by
+//! the new records and block ids.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::mpsc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -17,33 +32,77 @@ use crate::binio::{FcReader, FileCache};
 use crate::catalog::{Catalog, discover, ship_catalog_within};
 use crate::provider::{ProtocolProvider, WIRE_SOURCE_REVISION};
 use crate::shiplog::{LogKind, ShipLog};
+use crate::wire_walk::{self, name_string, name_value};
 
 pub const FORMAT: &str = "hyperion-wire-abi-history-v1";
 const MAX_PAYLOAD: u64 = 16 * 1024 * 1024;
+/// Blocks per work unit: enough to amortize the hand-off, small enough to balance the threads.
+const CHUNK: u32 = 2048;
+const SYSIO: u64 = name_value("sysio");
+const SETABI: u64 = name_value("setabi");
 
 pub struct ScanOptions {
     pub directory: PathBuf,
     pub schema: String,
     pub chain_id: String,
+    /// 1 for a complete scan; the base catalog's end + 1 for an extension.
+    pub start: u32,
     pub end: u32,
     pub irreversible_block_id: String,
     pub output: PathBuf,
     pub provider: ProtocolProvider,
+    /// Reader threads; 0 uses the available parallelism.
+    pub threads: usize,
+    /// Extend this sealed catalog instead of scanning from genesis.
+    pub base: Option<BaseCatalog>,
 }
 
-#[derive(Clone)]
+/// A sealed catalog to extend, pinned by its manifest's SHA-256.
+pub struct BaseCatalog {
+    pub manifest: PathBuf,
+    pub manifest_sha256: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
 struct AccountState {
     present: bool,
-    hex: String,
+    abi: Vec<u8>,
 }
 
-struct Action {
+struct Deployment {
     account: String,
-    sequence: u64,
-    abi_sequence: Option<u64>,
-    ordinal: u32,
+    abi: Vec<u8>,
     transaction: String,
-    deployment: Option<(String, String)>,
+    ordinal: u32,
+    sequence: u64,
+}
+enum Event {
+    Deploy(Deployment),
+    /// A primary receipt's ABI sequence, which must equal the account's deployment count.
+    Revision {
+        account: String,
+        abi_sequence: u64,
+    },
+}
+struct Row {
+    account: String,
+    state: AccountState,
+    ordinal: u32,
+}
+struct BlockFacts {
+    block: u32,
+    events: Vec<Event>,
+    rows: Vec<Row>,
+}
+/// What a reader thread found in blocks `start..start + ids.len()`.
+struct Chunk {
+    start: u32,
+    ids: Vec<[u8; 32]>,
+    /// Only blocks with events or rows the fold must see.
+    blocks: Vec<BlockFacts>,
+    /// The chunk's first committed receipt and its block, and its last receipt.
+    first_sequence: Option<(u64, u32)>,
+    last_sequence: Option<u64>,
 }
 
 fn hash(value: &[u8]) -> String {
@@ -60,25 +119,6 @@ fn hex_id(value: &str) -> Result<[u8; 32]> {
     hex::decode(value)?
         .try_into()
         .map_err(|_| anyhow::anyhow!("invalid id length"))
-}
-fn number(value: &Value, field: &str) -> Result<u64> {
-    if let Some(n) = value.as_u64() {
-        return Ok(n);
-    }
-    let s = value.as_str().with_context(|| format!("missing {field}"))?;
-    let n = s
-        .parse::<u64>()
-        .with_context(|| format!("invalid {field}"))?;
-    ensure!(n.to_string() == s, "noncanonical {field}");
-    Ok(n)
-}
-fn variant(value: &Value) -> Result<(&str, &Value)> {
-    let row = value.as_array().context("expected Wire variant")?;
-    ensure!(row.len() == 2, "invalid Wire variant length");
-    Ok((
-        row[0].as_str().context("invalid Wire variant name")?,
-        &row[1],
-    ))
 }
 fn suffix(path: &Path, tail: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
@@ -123,9 +163,9 @@ fn open_catalog(
     paths: &[crate::catalog::PathPair],
     kind: LogKind,
     cache: &Arc<FileCache>,
-    end: u32,
+    window: (u32, u32),
 ) -> Result<Catalog<ShipLog>> {
-    let (catalog, findings) = ship_catalog_within(paths, kind, cache, Some((1, end + 1)))?;
+    let (catalog, findings) = ship_catalog_within(paths, kind, cache, Some(window))?;
     for finding in findings {
         eprintln!("[wire-disk] {finding}");
     }
@@ -140,179 +180,93 @@ fn payload(catalog: &Catalog<ShipLog>, block: u32, out: &mut Vec<u8>) -> Result<
     Ok(header.id)
 }
 
-fn account_rows(
-    provider: &ProtocolProvider,
-    schema: &Value,
-    bytes: &[u8],
-) -> Result<Vec<(String, AccountState, u32)>> {
-    // Wire emits deltas in a schema-selected order; never assume `account` is the first table.
-    let payload = provider.decode_delta_payload(schema, bytes)?;
-    let deltas = &payload["deltas"];
-    let mut out = Vec::new();
-    let mut ordinal = 0u32;
-    for delta in deltas.as_array().context("invalid Wire deltas")? {
-        let (kind, delta) = variant(delta)?;
-        ensure!(kind == "table_delta_v0", "unsupported Wire table delta");
-        let stream = delta["name"]
-            .as_str()
-            .context("missing Wire delta stream")?;
-        for row in delta["rows"]
-            .as_array()
-            .context("invalid Wire delta rows")?
-        {
-            let current = ordinal;
-            ordinal = ordinal.checked_add(1).context("delta ordinal overflow")?;
-            if stream != "account" {
-                continue;
-            }
-            let present = number(&row["present"], "delta presence")?;
-            ensure!(present <= 1, "invalid delta presence");
-            let raw = hex::decode(row["data"].as_str().context("missing account row bytes")?)?;
-            let decoded = provider.decode_value(schema, "account", &raw)?;
-            let (kind, account) = variant(&decoded)?;
-            ensure!(kind == "account_v0", "unsupported Wire account row");
-            let name = account["name"]
-                .as_str()
-                .context("missing account name")?
-                .to_owned();
-            let raw = account["abi"]
-                .as_str()
-                .context("missing account ABI bytes")?;
-            hex::decode(raw).context("invalid account ABI hex")?;
-            out.push((
-                name,
-                AccountState {
-                    present: present == 1,
-                    hex: if present == 1 {
-                        raw.to_owned()
-                    } else {
-                        String::new()
-                    },
-                },
-                current,
-            ));
-        }
-    }
-    Ok(out)
-}
-
-fn setabi(data: &str) -> Result<(String, String)> {
-    let bytes = hex::decode(data).context("invalid setabi bytes")?;
-    let mut cursor = FcReader::new(&bytes);
+/// The target account (value and rendering) and ABI bytes of `setabi` action data.
+fn setabi(bytes: &[u8]) -> Result<(u64, String, Vec<u8>)> {
+    let mut cursor = FcReader::new(bytes);
     let account = cursor.u64()?;
     let n = cursor.varuint32()? as usize;
-    let abi = hex::encode(cursor.bytes(n)?);
+    let abi = cursor.bytes(n)?.to_vec();
     ensure!(cursor.remaining() == 0, "trailing setabi bytes");
     let name = rs_abieos::Abieos::new()
         .name_to_string(account)
         .map_err(|e| anyhow::anyhow!("invalid setabi account: {e:?}"))?;
-    Ok((name, abi))
+    Ok((account, name, abi))
 }
 
-fn actions(provider: &ProtocolProvider, schema: &Value, bytes: &[u8]) -> Result<Vec<Action>> {
-    let traces = provider.decode_value(schema, "transaction_trace[]", bytes)?;
-    let mut out = Vec::new();
-    for tx in traces.as_array().context("invalid Wire traces")? {
-        let (kind, tx) = variant(tx)?;
-        ensure!(
-            kind == "transaction_trace_v0",
-            "unsupported Wire transaction trace"
-        );
+/// A committed receipt in the order the history applies it.
+struct Committed {
+    account: u64,
+    sequence: u64,
+    abi_sequence: Option<u64>,
+    ordinal: u32,
+    transaction: [u8; 32],
+    deployment: Option<(u64, String, Vec<u8>)>,
+}
+
+/// A block's committed receipts in global sequence order, refusing transaction effects the
+/// history cannot prove complete.
+fn committed(
+    txs: &[wire_walk::Transaction<'_>],
+    actions: &[wire_walk::Action<'_>],
+    out: &mut Vec<Committed>,
+) -> Result<()> {
+    out.clear();
+    for tx in txs {
         // Match the native observer's proven transaction scope. In particular,
         // soft_fail may contain committed onerror effects: silently skipping it
         // would manufacture complete coverage while losing ABI deployments.
         ensure!(
-            number(&tx["status"], "transaction status")? == 0,
+            tx.status == 0,
             "unsupported_feature: Wire disk history requires executed transaction traces (soft_fail/onerror and other statuses require qualification)"
         );
         ensure!(
-            (tx["scheduled"].as_bool() == Some(false) || tx["scheduled"].as_u64() == Some(0))
-                && tx["failed_dtrx_trace"].is_null(),
+            tx.scheduled == 0 && !tx.failed_dtrx_trace,
             "unsupported_feature: deferred Wire transaction trace requires qualification"
         );
-        // `partial_transaction_v0` is transaction header/signature metadata, not
-        // truncated action coverage. It is present in the retained real capture.
-        if !tx["partial"].is_null() {
-            ensure!(
-                variant(&tx["partial"])?.0 == "partial_transaction_v0",
-                "unsupported Wire transaction metadata"
-            );
-        }
+        // A `partial_transaction_v0` (the walk refuses any other arm) is transaction header and
+        // signature metadata, not truncated action coverage.
         ensure!(
-            tx["except"].is_null() && tx["error_code"].is_null(),
+            !tx.except && !tx.error_code,
             "executed transaction has failure metadata"
         );
-        let transaction = tx["id"]
-            .as_str()
-            .context("missing transaction id")?
-            .to_owned();
-        hex_id(&transaction)?;
-        for action in tx["action_traces"]
-            .as_array()
-            .context("invalid Wire action traces")?
-        {
-            let (kind, action) = variant(action)?;
-            ensure!(
-                matches!(kind, "action_trace_v0" | "action_trace_v1"),
-                "unsupported Wire action trace"
-            );
-            if action["receipt"].is_null() {
+        let transaction: [u8; 32] = tx.id.try_into()?;
+        for action in &actions[tx.actions.clone()] {
+            let Some(receipt) = action.receipt else {
                 ensure!(
-                    action["act"]["account"] != "sysio" || action["act"]["name"] != "setabi",
+                    action.account != SYSIO || action.name != SETABI,
                     "setabi action lacks a committed receipt"
                 );
                 continue;
-            }
-            let (kind, receipt) = variant(&action["receipt"])?;
-            ensure!(
-                kind == "action_receipt_v0",
-                "unsupported Wire action receipt"
-            );
-            let sequence = number(&receipt["global_sequence"], "global sequence")?;
-            let account = action["act"]["account"]
-                .as_str()
-                .context("missing action account")?
-                .to_owned();
-            let name = action["act"]["name"]
-                .as_str()
-                .context("missing action name")?
-                .to_owned();
-            let primary = action["receiver"] == action["act"]["account"]
-                && receipt["receiver"] == action["act"]["account"];
+            };
+            let primary = action.receiver == action.account && receipt.receiver == action.account;
             // A notification uses its original action's ABI; only primary receipts check its revision.
             if !primary {
-                out.push(Action {
-                    account,
-                    sequence,
+                out.push(Committed {
+                    account: action.account,
+                    sequence: receipt.global_sequence,
                     abi_sequence: None,
                     ordinal: 0,
-                    transaction: transaction.clone(),
+                    transaction,
                     deployment: None,
                 });
                 continue;
             }
             ensure!(
-                action["except"].is_null() && action["error_code"].is_null(),
+                !action.except && !action.error_code,
                 "receipted action has failure metadata"
             );
-            let ordinal = u32::try_from(number(&action["action_ordinal"], "action ordinal")?)?;
-            ensure!(ordinal > 0, "zero action ordinal");
-            let abi_sequence = number(&receipt["abi_sequence"], "ABI sequence")?;
-            let deployment = if account == "sysio" && name == "setabi" {
-                Some(setabi(
-                    action["act"]["data"]
-                        .as_str()
-                        .context("missing setabi data")?,
-                )?)
+            ensure!(action.ordinal > 0, "zero action ordinal");
+            let deployment = if action.account == SYSIO && action.name == SETABI {
+                Some(setabi(action.data)?)
             } else {
                 None
             };
-            out.push(Action {
-                account,
-                sequence,
-                abi_sequence: Some(abi_sequence),
-                ordinal,
-                transaction: transaction.clone(),
+            out.push(Committed {
+                account: action.account,
+                sequence: receipt.global_sequence,
+                abi_sequence: Some(u64::from(receipt.abi_sequence)),
+                ordinal: action.ordinal,
+                transaction,
                 deployment,
             });
         }
@@ -322,30 +276,541 @@ fn actions(provider: &ProtocolProvider, schema: &Value, bytes: &[u8]) -> Result<
         out.windows(2).all(|w| w[0].sequence < w[1].sequence),
         "duplicate or unordered global action receipts"
     );
-    Ok(out)
+    Ok(())
+}
+
+struct Sources<'a> {
+    states: &'a Catalog<ShipLog>,
+    traces: &'a Catalog<ShipLog>,
+    trace_start: u32,
+}
+
+/// Read blocks `start..=end` and keep what the fold must see.
+fn extract(sources: &Sources<'_>, start: u32, end: u32) -> Result<Chunk> {
+    let mut chunk = Chunk {
+        start,
+        ids: Vec::with_capacity((end - start + 1) as usize),
+        blocks: Vec::new(),
+        first_sequence: None,
+        last_sequence: None,
+    };
+    let (mut state_bytes, mut trace_bytes) = (Vec::new(), Vec::new());
+    let mut receipts = Vec::new();
+    // The account's previous row in this chunk, and its last ABI sequence observation since its
+    // last deployment in this chunk.
+    let mut previous: HashMap<u64, (bool, Vec<u8>)> = HashMap::new();
+    let mut observed: HashMap<u64, u64> = HashMap::new();
+    for block in start..=end {
+        let id = payload(sources.states, block, &mut state_bytes)?;
+        chunk.ids.push(id);
+        let mut events = Vec::new();
+        let mut deployed = HashSet::new();
+        if block >= sources.trace_start {
+            let trace_id = payload(sources.traces, block, &mut trace_bytes)?;
+            ensure!(
+                trace_id == id,
+                "trace/state block identity mismatch at {block}"
+            );
+            let (mut txs, mut actions) = (Vec::new(), Vec::new());
+            wire_walk::transactions(&trace_bytes, &mut txs, &mut actions)
+                .map_err(anyhow::Error::from)
+                .and_then(|()| committed(&txs, &actions, &mut receipts))
+                .with_context(|| format!("Wire trace block {block}"))?;
+            for receipt in receipts.drain(..) {
+                if let Some(prior) = chunk.last_sequence {
+                    ensure!(
+                        receipt.sequence > prior,
+                        "global action sequence regressed at block {block}"
+                    );
+                }
+                chunk
+                    .first_sequence
+                    .get_or_insert((receipt.sequence, block));
+                chunk.last_sequence = Some(receipt.sequence);
+                if let Some((target, account, abi)) = receipt.deployment {
+                    observed.remove(&target);
+                    deployed.insert(target);
+                    events.push(Event::Deploy(Deployment {
+                        account,
+                        abi,
+                        transaction: hex::encode(receipt.transaction),
+                        ordinal: receipt.ordinal,
+                        sequence: receipt.sequence,
+                    }));
+                } else if let Some(abi_sequence) = receipt.abi_sequence {
+                    // Repeating the previous observation for the account checks nothing new.
+                    if observed.insert(receipt.account, abi_sequence) != Some(abi_sequence) {
+                        events.push(Event::Revision {
+                            account: name_string(receipt.account),
+                            abi_sequence,
+                        });
+                    }
+                }
+            }
+        }
+        // Wire emits deltas in a schema-selected order; the walk never assumes `account` is first.
+        let mut rows = Vec::new();
+        wire_walk::account_rows(&state_bytes, &mut rows)
+            .with_context(|| format!("Wire state block {block}"))?;
+        let mut seen = HashSet::new();
+        let mut kept = Vec::new();
+        for row in &rows {
+            ensure!(
+                row.present <= 1,
+                "Wire state block {block}: invalid delta presence"
+            );
+            let account = wire_walk::account(row.data)
+                .with_context(|| format!("Wire state block {block}"))?;
+            ensure!(
+                seen.insert(account.name),
+                "duplicate account final state at block {block}"
+            );
+            let present = row.present == 1;
+            let abi: &[u8] = if present { account.abi } else { &[] };
+            // A row equal to the account's previous one leaves the history unchanged, unless a
+            // deployment in this block must be matched against it.
+            let unchanged = previous
+                .get(&account.name)
+                .is_some_and(|(p, a)| *p == present && a.as_slice() == abi);
+            if unchanged && !deployed.contains(&account.name) {
+                continue;
+            }
+            previous.insert(account.name, (present, abi.to_vec()));
+            kept.push(Row {
+                account: name_string(account.name),
+                state: AccountState {
+                    present,
+                    abi: abi.to_vec(),
+                },
+                ordinal: row.ordinal,
+            });
+        }
+        if !events.is_empty() || !kept.is_empty() {
+            chunk.blocks.push(BlockFacts {
+                block,
+                events,
+                rows: kept,
+            });
+        }
+    }
+    Ok(chunk)
 }
 
 fn abi_fields(record: &mut Value, provider: &ProtocolProvider, state: &AccountState) {
-    if !state.present || state.hex.is_empty() {
+    if !state.present || state.abi.is_empty() {
         return;
     }
-    match hex::decode(&state.hex)
-        .map_err(anyhow::Error::from)
-        .and_then(|bytes| provider.decode_abi(&bytes))
-    {
+    match provider.decode_abi(&state.abi) {
         Ok(abi) => record["abi"] = abi,
         Err(error) => record["abiDecodeError"] = json!(format!("{error:#}")),
     }
 }
-fn emit(out: &mut impl Write, record: &Value, count: &mut u64) -> Result<()> {
-    serde_json::to_writer(&mut *out, record)?;
-    out.write_all(b"\n")?;
-    *count += 1;
+
+/// The running history state, applied in block order.
+struct Fold<'a> {
+    provider: &'a ProtocolProvider,
+    revisions: BTreeMap<String, u64>,
+    current: BTreeMap<String, AccountState>,
+    /// Extension: the base records describe every account with ABI history, but not accounts
+    /// that only ever held an empty ABI, so their deletion cannot be proven.
+    partial_current: bool,
+    last_sequence: Option<u64>,
+    record_count: u64,
+    records: BufWriter<File>,
+    ids: BufWriter<File>,
+}
+impl Fold<'_> {
+    fn emit(&mut self, record: &Value) -> Result<()> {
+        serde_json::to_writer(&mut self.records, record)?;
+        self.records.write_all(b"\n")?;
+        self.record_count += 1;
+        Ok(())
+    }
+    fn apply(&mut self, chunk: Chunk) -> Result<()> {
+        if let (Some((first, block)), Some(prior)) = (chunk.first_sequence, self.last_sequence) {
+            ensure!(
+                first > prior,
+                "global action sequence regressed at block {block}"
+            );
+        }
+        if chunk.last_sequence.is_some() {
+            self.last_sequence = chunk.last_sequence;
+        }
+        for facts in chunk.blocks {
+            let block = facts.block;
+            let block_id = hex::encode(chunk.ids[(block - chunk.start) as usize]);
+            let mut changed = BTreeMap::<String, Vec<u8>>::new();
+            for event in facts.events {
+                match event {
+                    Event::Deploy(d) => {
+                        let revision = self.revisions.entry(d.account.clone()).or_default();
+                        *revision = revision.checked_add(1).context("ABI revision overflow")?;
+                        let abi_sequence = revision.to_string();
+                        let state = AccountState {
+                            present: true,
+                            abi: d.abi,
+                        };
+                        let mut record = json!({"account":d.account,"blockNum":block,"blockId":block_id,"phase":"deployment","present":true,"abiHex":hex::encode(&state.abi),"abiSequence":abi_sequence,
+                            "action":{"transactionId":d.transaction,"actionOrdinal":d.ordinal,"globalSequence":d.sequence.to_string()}});
+                        abi_fields(&mut record, self.provider, &state);
+                        self.emit(&record)?;
+                        changed.insert(d.account, state.abi);
+                    }
+                    Event::Revision {
+                        account,
+                        abi_sequence,
+                    } => ensure!(
+                        abi_sequence == *self.revisions.get(&account).unwrap_or(&0),
+                        "ABI receipt revision disagrees with deployments for {account} at block {block}"
+                    ),
+                }
+            }
+            for Row {
+                account,
+                state,
+                ordinal,
+            } in facts.rows
+            {
+                if let Some(deployment) = changed.remove(&account) {
+                    ensure!(
+                        state.present && state.abi == deployment,
+                        "deployment/final ABI mismatch for {account} at block {block}"
+                    );
+                } else if block != 1 {
+                    ensure!(
+                        self.current.get(&account).is_some_and(|old| *old == state)
+                            || !state.present
+                            || (!self.current.contains_key(&account) && state.abi.is_empty()),
+                        "ABI state changed without a successful setabi for {account} at block {block}"
+                    );
+                }
+                ensure!(
+                    !(self.partial_current
+                        && !state.present
+                        && !self.current.contains_key(&account)),
+                    "the base catalog cannot prove the state {account} removes at block {block}; scan from genesis"
+                );
+                let different = self.current.get(&account).is_none_or(|old| *old != state);
+                if different && (!state.abi.is_empty() || self.current.contains_key(&account)) {
+                    let mut record = json!({"account":account,"blockNum":block,"blockId":block_id,"phase":"block-final","present":state.present,"abiHex":hex::encode(&state.abi),
+                        "abiSequence":self.revisions.get(&account).unwrap_or(&0).to_string(),"deltaOrdinal":ordinal});
+                    abi_fields(&mut record, self.provider, &state);
+                    self.emit(&record)?;
+                }
+                self.current.insert(account, state);
+            }
+            // Re-setting the same ABI can leave no changed account row, but still creates a new epoch.
+            for (account, value) in changed {
+                ensure!(
+                    self.current
+                        .get(&account)
+                        .is_some_and(|old| old.present && old.abi == value),
+                    "setabi lacks its changed final account row for {account} at block {block}"
+                );
+            }
+        }
+        for id in &chunk.ids {
+            self.ids.write_all(id)?;
+        }
+        Ok(())
+    }
+}
+
+/// Read `from..=to` on `threads` threads and fold the chunks in block order.
+fn scan_range(
+    sources: &Sources<'_>,
+    from: u32,
+    to: u32,
+    threads: usize,
+    fold: &mut Fold<'_>,
+) -> Result<()> {
+    let cursor = AtomicU64::new(u64::from(from));
+    let stop = AtomicBool::new(false);
+    let started = Instant::now();
+    let total = u64::from(to - from) + 1;
+    std::thread::scope(|scope| {
+        let (sender, receiver) = mpsc::channel::<Result<Chunk>>();
+        for _ in 0..threads {
+            let sender = sender.clone();
+            let (cursor, stop) = (&cursor, &stop);
+            scope.spawn(move || {
+                while !stop.load(Relaxed) {
+                    let start = cursor.fetch_add(u64::from(CHUNK), Relaxed);
+                    if start > u64::from(to) {
+                        break;
+                    }
+                    let end = (start + u64::from(CHUNK) - 1).min(u64::from(to)) as u32;
+                    let result = extract(sources, start as u32, end);
+                    let failed = result.is_err();
+                    if sender.send(result).is_err() || failed {
+                        stop.store(true, Relaxed);
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        let outcome = (|| -> Result<()> {
+            let mut pending = BTreeMap::new();
+            let mut next = u64::from(from);
+            let mut reported = 0u64;
+            for result in &receiver {
+                let chunk = result?;
+                pending.insert(u64::from(chunk.start), chunk);
+                while let Some(chunk) = pending.remove(&next) {
+                    next += chunk.ids.len() as u64;
+                    fold.apply(chunk)?;
+                    let done = next - u64::from(from);
+                    if done / 250_000 > reported / 250_000 || done == total {
+                        reported = done;
+                        let seconds = started.elapsed().as_secs_f64().max(1e-9);
+                        eprintln!(
+                            "[wire-disk] {}/{to} blocks, {} sparse ABI records, {:.0} blocks/s",
+                            next - 1,
+                            fold.record_count,
+                            done as f64 / seconds
+                        );
+                    }
+                }
+            }
+            ensure!(
+                next > u64::from(to),
+                "reader threads stopped before block {next}"
+            );
+            Ok(())
+        })();
+        if outcome.is_err() {
+            stop.store(true, Relaxed);
+        }
+        drop(receiver);
+        outcome
+    })
+}
+
+/// What a verified base catalog contributes to its extension.
+///
+/// Each base member is read once: the bytes that are hashed are the bytes that are parsed and
+/// copied, so a member replaced while the extension runs cannot reach its output.
+struct Base {
+    end: u32,
+    first_block_id: String,
+    manifest_sha256: String,
+    genesis_trace_absent: bool,
+    last_sequence: Option<u64>,
+    records: u64,
+    /// The verified deployment records, copied verbatim ahead of the new ones.
+    deployments: Vec<u8>,
+    /// The block membership sidecar, verified while it is copied.
+    block_ids: BaseIds,
+    revisions: BTreeMap<String, u64>,
+    current: BTreeMap<String, AccountState>,
+    last_block_id: [u8; 32],
+}
+
+struct BaseIds {
+    file: File,
+    bytes: u64,
+    sha256: String,
+    first: [u8; 32],
+    last: [u8; 32],
+}
+
+/// The bound the catalog's reader puts on the deployments member.
+const MAX_DEPLOYMENT_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Copy the base block membership into the extension's sidecar. The size, digest and boundary
+/// ids are checked on exactly the bytes written.
+fn copy_base_ids(ids: &mut BaseIds, out: &mut impl Write) -> Result<()> {
+    let mut source = (&mut ids.file).take(ids.bytes + 1);
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    let (mut total, mut first, mut last) = (0u64, None, [0u8; 32]);
+    loop {
+        let mut filled = 0;
+        while filled < buffer.len() {
+            match source.read(&mut buffer[filled..])? {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        let chunk = &buffer[..filled];
+        digest.update(chunk);
+        out.write_all(chunk)?;
+        total += filled as u64;
+        if filled >= 32 {
+            first.get_or_insert_with(|| <[u8; 32]>::try_from(&chunk[..32]).expect("32 bytes"));
+            last.copy_from_slice(&chunk[filled - 32..]);
+        }
+        if filled < buffer.len() {
+            break;
+        }
+    }
+    ensure!(
+        total == ids.bytes && hex::encode(digest.finalize()) == ids.sha256,
+        "base block membership differs from its manifest"
+    );
+    ensure!(
+        first == Some(ids.first) && last == ids.last,
+        "base block membership differs from its boundary ids"
+    );
     Ok(())
 }
 
-/// Scan the complete genesis-to-irreversible prefix. Inputs must be a stable frozen view.
-/// Partial artifacts are retained for diagnosis; only a sealed manifest authorizes consumption.
+fn load_base(base: &BaseCatalog, options: &ScanOptions, node_revision: &str) -> Result<Base> {
+    let raw = fs::read(&base.manifest)
+        .with_context(|| format!("read base manifest {}", base.manifest.display()))?;
+    ensure!(raw.len() <= 65536, "base manifest exceeds its bound");
+    ensure!(
+        hash(&raw) == base.manifest_sha256,
+        "base manifest SHA-256 differs from the pinned value"
+    );
+    let m: Value = serde_json::from_slice(&raw).context("invalid base manifest")?;
+    ensure!(
+        m["format"] == FORMAT && m["complete"] == true && m["startBlock"] == 1,
+        "base is not a complete Wire ABI history"
+    );
+    ensure!(
+        m["chainId"] == options.chain_id.as_str()
+            && m["nodeRevision"] == node_revision
+            && m["producerProfileId"] == options.provider.id()
+            && m["shipAbiSha256"] == hash(options.schema.as_bytes()).as_str(),
+        "base catalog belongs to another chain, node revision, profile or SHiP schema"
+    );
+    let end = m["endBlock"]
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .filter(|v| *v >= 1)
+        .context("invalid base end block")?;
+    ensure!(end < options.end, "the base catalog must end before --end");
+    let text = |value: &Value, field: &str| -> Result<String> {
+        Ok(value
+            .as_str()
+            .with_context(|| format!("base manifest lacks {field}"))?
+            .to_owned())
+    };
+    let last_block_id = text(&m["lastBlockId"], "lastBlockId")?;
+    let first_block_id = text(&m["firstBlockId"], "firstBlockId")?;
+    ensure!(
+        m["irreversibleBoundary"]["blockNum"] == end
+            && m["irreversibleBoundary"]["blockId"] == last_block_id.as_str(),
+        "base irreversible boundary differs from its end"
+    );
+    let last = hex_id(&last_block_id)?;
+    hex_id(&first_block_id)?;
+    let last_sequence = match &m["lastGlobalSequence"] {
+        Value::Null => None,
+        value => {
+            let s = value
+                .as_str()
+                .context("invalid base last global sequence")?;
+            let n = s
+                .parse::<u64>()
+                .context("invalid base last global sequence")?;
+            ensure!(n.to_string() == s, "noncanonical base last global sequence");
+            Some(n)
+        }
+    };
+    let genesis_trace_absent = m["nativeBaseline"]["genesisTraceAbsent"]
+        .as_bool()
+        .context("base manifest lacks its native baseline")?;
+    let directory = base
+        .manifest
+        .parent()
+        .context("base manifest has no directory")?;
+    let member = |entry: &Value| -> Result<(String, PathBuf, u64, String)> {
+        let name = text(&entry["name"], "member name")?;
+        ensure!(
+            Path::new(&name).file_name() == Some(std::ffi::OsStr::new(&name))
+                && !name.starts_with('.'),
+            "base member {name} is not a plain file name"
+        );
+        let bytes = entry["bytes"]
+            .as_u64()
+            .with_context(|| format!("base member {name} lacks its size"))?;
+        let sha256 = text(&entry["sha256"], "member sha256")?;
+        let path = directory.join(&name);
+        Ok((name, path, bytes, sha256))
+    };
+    let (name, path, bytes, sha256) = member(&m["deployments"])?;
+    ensure!(
+        bytes <= MAX_DEPLOYMENT_BYTES,
+        "base member {name} exceeds its bound"
+    );
+    let mut deployments = Vec::with_capacity(bytes as usize);
+    File::open(&path)
+        .with_context(|| format!("open base member {name}"))?
+        .take(bytes + 1)
+        .read_to_end(&mut deployments)?;
+    ensure!(
+        deployments.len() as u64 == bytes && hash(&deployments) == sha256,
+        "base member {name} differs from its manifest"
+    );
+    let (name, path, bytes, sha256) = member(&m["blockIds"])?;
+    ensure!(
+        m["blockIds"]["count"] == end && bytes == u64::from(end) * 32,
+        "base block membership does not cover its range"
+    );
+    let block_ids = BaseIds {
+        file: File::open(&path).with_context(|| format!("open base member {name}"))?,
+        bytes,
+        sha256,
+        first: hex_id(&first_block_id)?,
+        last,
+    };
+    // The last record of each account is its state at the base's end. Accounts whose ABI was
+    // always empty have no records; the fold refuses what that leaves unproven.
+    let mut revisions = BTreeMap::new();
+    let mut current = BTreeMap::new();
+    let mut records = 0u64;
+    for line in deployments.split(|b| *b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let row: Value = serde_json::from_slice(line).context("invalid base ABI record")?;
+        let account = text(&row["account"], "record account")?;
+        ensure!(
+            row["blockNum"]
+                .as_u64()
+                .is_some_and(|b| b >= 1 && b <= u64::from(end)),
+            "base record lies outside the base range"
+        );
+        let abi_sequence = text(&row["abiSequence"], "record ABI sequence")?
+            .parse::<u64>()
+            .context("invalid base record ABI sequence")?;
+        let present = row["present"]
+            .as_bool()
+            .context("invalid base record presence")?;
+        let abi = hex::decode(text(&row["abiHex"], "record ABI")?)?;
+        let revision = revisions.entry(account.clone()).or_insert(0);
+        *revision = (*revision).max(abi_sequence);
+        current.insert(account, AccountState { present, abi });
+        records += 1;
+    }
+    ensure!(
+        m["deployments"]["records"] == records,
+        "base record count differs from its manifest"
+    );
+    Ok(Base {
+        end,
+        first_block_id,
+        manifest_sha256: base.manifest_sha256.clone(),
+        genesis_trace_absent,
+        last_sequence,
+        records,
+        deployments,
+        block_ids,
+        revisions,
+        current,
+        last_block_id: last,
+    })
+}
+
+/// Scan the complete genesis-to-irreversible prefix, or extend a sealed base catalog to it.
+/// Inputs must be a stable frozen view. Partial artifacts are retained for diagnosis; only a
+/// sealed manifest authorizes consumption.
 pub fn scan(options: &ScanOptions) -> Result<Value> {
     options.provider.validate()?;
     let ProtocolProvider::Wire(profile) = &options.provider else {
@@ -363,23 +828,66 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
     );
     let schema: Value =
         serde_json::from_str(&options.schema).context("invalid Wire SHiP schema")?;
+    // The codec validates the schema once; the walks read its layouts as fixed definitions.
+    options
+        .provider
+        .decode_value(&schema, "table_delta[]", &[0])
+        .context("invalid Wire SHiP schema")?;
+    wire_walk::check_ship_schema(&schema).map_err(anyhow::Error::msg)?;
+    let mut base = options
+        .base
+        .as_ref()
+        .map(|base| load_base(base, options, &profile.upstream_revision))
+        .transpose()?;
+    // A full scan reads from genesis; an extension needs the base's last block to prove continuity.
+    let from = base.as_ref().map_or(1, |b| b.end + 1);
+    ensure!(
+        options.start == from,
+        "{}",
+        match &base {
+            Some(base) => format!(
+                "extending a catalog that ends at {} must start at {from}",
+                base.end
+            ),
+            None => "complete Wire ABI history must start at genesis (block 1)".into(),
+        }
+    );
+    let window = (base.as_ref().map_or(1, |b| b.end), options.end + 1);
     let cache = FileCache::new(16);
     let discovered = discover(std::slice::from_ref(&options.directory), &[], true)?;
-    let states = open_catalog(
-        &discovered.chain_state,
-        LogKind::ChainState,
-        &cache,
-        options.end,
-    )?;
-    let traces = open_catalog(&discovered.trace, LogKind::Trace, &cache, options.end)?;
-    ensure!(
-        states.range().0 == 1 && states.range().1 > options.end,
-        "state history does not cover genesis through end"
-    );
-    ensure!(
-        matches!(traces.range().0, 1 | 2) && traces.range().1 > options.end,
-        "trace history does not cover block 2 through end"
-    );
+    let states = open_catalog(&discovered.chain_state, LogKind::ChainState, &cache, window)?;
+    let traces = open_catalog(&discovered.trace, LogKind::Trace, &cache, window)?;
+    match &base {
+        None => {
+            ensure!(
+                states.range().0 == 1 && states.range().1 > options.end,
+                "state history does not cover genesis through end"
+            );
+            ensure!(
+                matches!(traces.range().0, 1 | 2) && traces.range().1 > options.end,
+                "trace history does not cover block 2 through end"
+            );
+        }
+        Some(base) => {
+            ensure!(
+                states.range().0 <= base.end && states.range().1 > options.end,
+                "state history does not cover the base's last block through end"
+            );
+            ensure!(
+                traces.range().0 <= from && traces.range().1 > options.end,
+                "trace history does not cover the blocks after the base through end"
+            );
+            let id = states
+                .get(base.end)
+                .context("missing base end state block")?
+                .id(base.end)?;
+            ensure!(
+                id == base.last_block_id,
+                "the logs no longer hold the base catalog's last block {}; the chain forked past it",
+                base.end
+            );
+        }
+    }
     let last = states
         .get(options.end)
         .context("missing last state block")?
@@ -388,7 +896,10 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
         last == irreversible,
         "source end differs from the supplied irreversible boundary"
     );
-    let first = states.get(1).context("missing genesis state")?.id(1)?;
+    let first_block_id = match &base {
+        Some(base) => base.first_block_id.clone(),
+        None => hex::encode(states.get(1).context("missing genesis state")?.id(1)?),
+    };
     let source_paths = states
         .files()
         .iter()
@@ -410,108 +921,38 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
     let records_partial = suffix(&options.output, ".partial");
     let blocks_partial = suffix(&blocks_path, ".partial");
     let manifest_partial = suffix(&manifest_path, ".partial");
-    let mut records = BufWriter::new(fresh(&records_partial)?);
-    let mut ids = BufWriter::new(fresh(&blocks_partial)?);
-    let mut revisions = BTreeMap::<String, u64>::new();
-    let mut current = BTreeMap::<String, AccountState>::new();
-    let mut record_count = 0u64;
-    let mut last_sequence = None;
-    let mut state_bytes = Vec::new();
-    let mut trace_bytes = Vec::new();
-    for block in 1..=options.end {
-        let id = payload(&states, block, &mut state_bytes)?;
-        let block_id = hex::encode(id);
-        let rows = account_rows(&options.provider, &schema, &state_bytes)
-            .with_context(|| format!("Wire state block {block}"))?;
-        let block_actions = if block >= traces.range().0 {
-            let trace_id = payload(&traces, block, &mut trace_bytes)?;
-            ensure!(
-                trace_id == id,
-                "trace/state block identity mismatch at {block}"
-            );
-            actions(&options.provider, &schema, &trace_bytes)
-                .with_context(|| format!("Wire trace block {block}"))?
-        } else {
-            Vec::new()
-        };
-        let mut changed = BTreeMap::<String, String>::new();
-        for action in block_actions {
-            ensure!(
-                last_sequence.is_none_or(|prior| action.sequence > prior),
-                "global action sequence regressed at block {block}"
-            );
-            last_sequence = Some(action.sequence);
-            if let Some((account, abi_hex)) = action.deployment {
-                let revision = revisions.entry(account.clone()).or_default();
-                *revision = revision.checked_add(1).context("ABI revision overflow")?;
-                let state = AccountState {
-                    present: true,
-                    hex: abi_hex.clone(),
-                };
-                let mut record = json!({"account":account,"blockNum":block,"blockId":block_id,"phase":"deployment","present":true,"abiHex":abi_hex,"abiSequence":revision.to_string(),
-                    "action":{"transactionId":action.transaction,"actionOrdinal":action.ordinal,"globalSequence":action.sequence.to_string()}});
-                abi_fields(&mut record, &options.provider, &state);
-                emit(&mut records, &record, &mut record_count)?;
-                changed.insert(account, abi_hex);
-            } else if let Some(abi_sequence) = action.abi_sequence {
-                ensure!(
-                    abi_sequence == *revisions.get(&action.account).unwrap_or(&0),
-                    "ABI receipt revision disagrees with deployments for {} at block {block}",
-                    action.account
-                );
-            }
-        }
-        let mut seen = BTreeSet::new();
-        for (account, state, ordinal) in rows {
-            ensure!(
-                seen.insert(account.clone()),
-                "duplicate account final state at block {block}"
-            );
-            if let Some(deployment) = changed.remove(&account) {
-                ensure!(
-                    state.present && state.hex == deployment,
-                    "deployment/final ABI mismatch for {account} at block {block}"
-                );
-            } else if block != 1 {
-                ensure!(
-                    current
-                        .get(&account)
-                        .is_some_and(|old| old.present == state.present && old.hex == state.hex)
-                        || !state.present
-                        || (!current.contains_key(&account) && state.hex.is_empty()),
-                    "ABI state changed without a successful setabi for {account} at block {block}"
-                );
-            }
-            let different = current
-                .get(&account)
-                .is_none_or(|old| old.present != state.present || old.hex != state.hex);
-            if different && (!state.hex.is_empty() || current.contains_key(&account)) {
-                let mut record = json!({"account":account,"blockNum":block,"blockId":block_id,"phase":"block-final","present":state.present,"abiHex":state.hex,
-                    "abiSequence":revisions.get(&account).unwrap_or(&0).to_string(),"deltaOrdinal":ordinal});
-                abi_fields(&mut record, &options.provider, &state);
-                emit(&mut records, &record, &mut record_count)?;
-            }
-            current.insert(account, state);
-        }
-        // Re-setting the same ABI can leave no changed account row, but still creates a new epoch.
-        for (account, value) in changed {
-            ensure!(
-                current
-                    .get(&account)
-                    .is_some_and(|old| old.present && old.hex == value),
-                "setabi lacks its changed final account row for {account} at block {block}"
-            );
-        }
-        ids.write_all(&id)?;
-        if block % 10_000 == 0 {
-            eprintln!(
-                "[wire-disk] {block}/{} blocks, {record_count} sparse ABI records",
-                options.end
-            );
-        }
+    let mut records = BufWriter::with_capacity(1 << 20, fresh(&records_partial)?);
+    let mut ids = BufWriter::with_capacity(1 << 20, fresh(&blocks_partial)?);
+    if let Some(base) = &mut base {
+        records.write_all(&base.deployments)?;
+        base.deployments = Vec::new();
+        copy_base_ids(&mut base.block_ids, &mut ids)?;
     }
+    let threads = match options.threads {
+        0 => std::thread::available_parallelism().map_or(1, usize::from),
+        n => n,
+    };
+    let mut fold = Fold {
+        provider: &options.provider,
+        revisions: base
+            .as_ref()
+            .map(|b| b.revisions.clone())
+            .unwrap_or_default(),
+        current: base.as_ref().map(|b| b.current.clone()).unwrap_or_default(),
+        partial_current: base.is_some(),
+        last_sequence: base.as_ref().and_then(|b| b.last_sequence),
+        record_count: base.as_ref().map_or(0, |b| b.records),
+        records,
+        ids,
+    };
+    let sources = Sources {
+        states: &states,
+        traces: &traces,
+        trace_start: traces.range().0,
+    };
+    scan_range(&sources, from, options.end, threads, &mut fold)?;
     ensure!(
-        options.end == 1 || last_sequence.is_some(),
+        options.end == 1 || fold.last_sequence.is_some(),
         "history has no committed action receipts"
     );
     for (path, size, modified) in &stamps {
@@ -522,10 +963,17 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
             path.display()
         );
     }
-    records.flush()?;
-    records.get_ref().sync_all()?;
-    ids.flush()?;
-    ids.get_ref().sync_all()?;
+    let Fold {
+        records,
+        ids,
+        record_count,
+        last_sequence,
+        ..
+    } = fold;
+    let records = records.into_inner().map_err(|e| e.into_error())?;
+    records.sync_all()?;
+    let ids = ids.into_inner().map_err(|e| e.into_error())?;
+    ids.sync_all()?;
     drop(records);
     drop(ids);
     let (record_bytes, record_hash) = file_hash(&records_partial)?;
@@ -536,12 +984,19 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
     );
     let sources = states.files().iter().map(|log| ("chain-state",log)).chain(traces.files().iter().map(|log| ("trace",log)))
         .map(|(kind, log)| json!({"kind":kind,"log":log.log_path(),"index":log.index_path(),"begin":log.range().0,"endExclusive":log.range().1,"logBytes":log.size()})).collect::<Vec<_>>();
-    let manifest = json!({"format":FORMAT,"chainId":options.chain_id,"nodeRevision":profile.upstream_revision,"producerProfileId":options.provider.id(),
-        "producerRevision":WIRE_SOURCE_REVISION,"shipAbiSha256":hash(options.schema.as_bytes()),"startBlock":1,"endBlock":options.end,"firstBlockId":hex::encode(first),"lastBlockId":options.irreversible_block_id,
+    let genesis_trace_absent = base
+        .as_ref()
+        .map_or(traces.range().0 == 2, |b| b.genesis_trace_absent);
+    let mut manifest = json!({"format":FORMAT,"chainId":options.chain_id,"nodeRevision":profile.upstream_revision,"producerProfileId":options.provider.id(),
+        "producerRevision":WIRE_SOURCE_REVISION,"shipAbiSha256":hash(options.schema.as_bytes()),"startBlock":1,"endBlock":options.end,"firstBlockId":first_block_id,"lastBlockId":options.irreversible_block_id,
         "irreversibleBoundary":{"blockNum":options.end,"blockId":options.irreversible_block_id},"complete":true,"lastGlobalSequence":last_sequence.map(|v|v.to_string()),
-        "nativeBaseline":{"kind":"wire-native-profile","abiSequence":"0","genesisTraceAbsent":traces.range().0==2},
+        "nativeBaseline":{"kind":"wire-native-profile","abiSequence":"0","genesisTraceAbsent":genesis_trace_absent},
         "deployments":{"name":basename(&options.output)?,"bytes":record_bytes,"sha256":record_hash,"records":record_count},
         "blockIds":{"name":basename(&blocks_path)?,"bytes":id_bytes,"sha256":id_hash,"count":options.end},"sources":sources});
+    if let Some(base) = &base {
+        // The base members are reproduced byte for byte; the sources list only this run's reads.
+        manifest["base"] = json!({"manifestSha256":base.manifest_sha256,"endBlock":base.end,"lastBlockId":hex::encode(base.last_block_id)});
+    }
     let mut manifest_file = fresh(&manifest_partial)?;
     serde_json::to_writer(&mut manifest_file, &manifest)?;
     manifest_file.write_all(b"\n")?;
@@ -583,37 +1038,34 @@ mod tests {
             )
             .unwrap();
         let raw = hex::decode(envelope[1]["deltas"].as_str().unwrap()).unwrap();
-        let traces = provider
-            .decode_value(
-                &schema,
-                "transaction_trace[]",
-                &hex::decode(envelope[1]["traces"].as_str().unwrap()).unwrap(),
-            )
-            .unwrap();
-        assert_eq!(traces[0][1]["partial"][0], "partial_transaction_v0");
-        assert!(
-            !actions(
-                &provider,
-                &schema,
-                &hex::decode(envelope[1]["traces"].as_str().unwrap()).unwrap()
-            )
-            .unwrap()
-            .is_empty()
+        let traces = hex::decode(envelope[1]["traces"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            provider
+                .decode_value(&schema, "transaction_trace[]", &traces)
+                .unwrap()[0][1]["partial"][0],
+            "partial_transaction_v0"
         );
+        let (mut txs, mut actions, mut receipts) = (Vec::new(), Vec::new(), Vec::new());
+        wire_walk::transactions(&traces, &mut txs, &mut actions).unwrap();
+        committed(&txs, &actions, &mut receipts).unwrap();
+        assert!(!receipts.is_empty());
         assert!(
             provider
                 .decode_value(&schema, "table_delta[]", &raw)
                 .is_err()
         );
-        let rows = account_rows(&provider, &schema, &raw).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].0, "sysio");
-        assert!(rows[0].1.present);
-        assert!(rows[0].1.hex.starts_with("0e737973696f3a3a6162692f312e"));
+        let mut rows = Vec::new();
         assert_eq!(
-            provider
-                .decode_abi(&hex::decode(&rows[0].1.hex).unwrap())
-                .unwrap()["version"],
+            wire_walk::account_rows(&raw, &mut rows).unwrap(),
+            wire_walk::DeltaFraming::ResourceIndexCount
+        );
+        assert_eq!(rows.len(), 1);
+        let account = wire_walk::account(rows[0].data).unwrap();
+        assert_eq!(name_string(account.name), "sysio");
+        assert_eq!(rows[0].present, 1);
+        assert!(hex::encode(account.abi).starts_with("0e737973696f3a3a6162692f312e"));
+        assert_eq!(
+            provider.decode_abi(account.abi).unwrap()["version"],
             "sysio::abi/1.0"
         );
     }

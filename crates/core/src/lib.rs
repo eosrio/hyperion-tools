@@ -56,3 +56,4 @@ pub mod trace;
 pub mod wire_codec;
 #[cfg(feature = "archive")]
 pub mod wire_history;
+pub mod wire_walk;
