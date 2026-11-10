@@ -13,6 +13,6 @@ delta-proto --from-disk /data/nodeos/state-history --abi-index abi.ndjson \
   --start 2 --end 999999999 --threads 12 --out deltas.ndjson
 ```
 
-The Wire path (`--protocol wire-…`) cuts a run into 2,048-block chunks that worker threads take one at a
+The Wire path (`--protocol wire-…`) cuts a run into 512-block chunks that worker threads take one at a
 time, reads each chunk as one slab per log, and writes documents in block order. Its per-block producer
 (`wire::DeltaWorker`) is the crate's library, which [`range-server`](../range-server) drives the same way.

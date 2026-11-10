@@ -92,7 +92,7 @@ one JSON header line:
 
 ### Backpressure
 
-Each range is cut into 2,048-block chunks that worker threads take one at a time from a shared cursor; one
+Each range is cut into 512-block chunks that worker threads take one at a time from a shared cursor; one
 fold streams them in block order, and no worker runs more than two chunks past the busy ones. So a
 slow client slows the readers instead of growing memory:
 

@@ -17,7 +17,7 @@
 //! Rows Hyperion would reject (no ABI, unmapped table, undecodable value, failing handler) are
 //! counted and reported, never silently dropped.
 //!
-//! [`DeltaWorker`] produces one block's documents; [`run`] drives it over 2,048-block chunks that
+//! [`DeltaWorker`] produces one block's documents; [`run`] drives it over 512-block chunks that
 //! worker threads take one at a time, each read as one slab per log, and one fold writes the
 //! documents in block order. The range service drives the same worker.
 
@@ -43,8 +43,10 @@ use sha2::{Digest, Sha256};
 /// `protocol.id` of documents written by Hyperion's Wire provider.
 pub const PROTOCOL_ID: &str = "@eosrio/hyperion-wire-plugin";
 
-/// Blocks per work unit, as the Wire ABI history walk uses.
-const CHUNK: u32 = 2048;
+/// Blocks per work unit. Chunks hold their slabs and documents until the ordered fold takes them,
+/// so memory grows with the chunk; 512 blocks keeps reads large and is as fast as 2,048 on Wire
+/// while holding a third of the memory.
+const CHUNK: u32 = 512;
 
 /// What a delta document is made of, beyond its block.
 #[derive(Clone)]

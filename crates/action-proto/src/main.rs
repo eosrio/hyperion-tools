@@ -1,7 +1,7 @@
 //! action-proto: decode action traces straight from `trace_history.{log,index}` into Hyperion
 //! action documents (NDJSON files or Elasticsearch `_bulk`). See the library for the decode.
 //!
-//! The range is cut into 2,048-block chunks that worker threads take one at a time. Each chunk is
+//! The range is cut into 512-block chunks that worker threads take one at a time. Each chunk is
 //! read as one slab per log; one fold hands the chunks' documents to the sink in block order, so
 //! an output file is deterministic and lists blocks in order.
 
@@ -22,8 +22,10 @@ use action_proto::{
 use hyperion_ship::blocks::BlockLog;
 use hyperion_ship::slab::{BlockFile, Chunks, ShipFile, ordered_chunks};
 
-/// Blocks per work unit, as the Wire ABI history walk uses.
-const CHUNK: u32 = 2048;
+/// Blocks per work unit. Chunks hold their slabs and documents until the ordered fold takes them,
+/// so memory grows with the chunk; 512 blocks keeps reads large and is as fast as 2,048 on Wire
+/// while holding a third of the memory.
+const CHUNK: u32 = 512;
 
 #[derive(Parser, Debug)]
 #[command(about = "Experimental: decode action_traces directly from the trace_history log.")]

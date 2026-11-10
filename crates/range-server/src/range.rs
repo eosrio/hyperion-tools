@@ -30,8 +30,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{Sealed, Service};
 
-/// Blocks per work unit.
-pub const CHUNK: u32 = 2048;
+/// Blocks per work unit. Chunks hold their slabs and documents until the ordered fold takes them,
+/// so memory grows with the chunk; 512 blocks keeps reads large and is as fast as 2,048 on Wire
+/// while holding a third of the memory.
+pub const CHUNK: u32 = 512;
 /// Bytes buffered before they are written as one HTTP chunk.
 const FLUSH: usize = 1 << 20;
 
