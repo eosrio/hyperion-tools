@@ -1,0 +1,24 @@
+[package]
+name = "range-server"
+description = "Read-only disk range service next to a Wire node's state-history and block logs: Hyperion's master pulls sealed block ranges of 4.5 block, action and delta documents as framed NDJSON _bulk lines, with a verified range manifest."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyperion-ship = { workspace = true, features = ["archive"] }
+hyperion-wire-protocol = { workspace = true }
+action-proto = { path = "../action-proto" }
+delta-proto = { path = "../delta-proto" }
+tiny_http = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+flate2 = { workspace = true }
