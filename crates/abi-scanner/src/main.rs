@@ -49,9 +49,16 @@ struct Args {
     /// SHiP: parallel connections. Disk: parallel reader threads. (range split into N contiguous chunks)
     #[arg(long, default_value_t = 1)]
     connections: u32,
-    /// Antelope disk reader threads (defaults to --connections if unset). Wire uses one ordered reader.
+    /// Disk reader threads. Antelope defaults to --connections; Wire defaults to every available core.
     #[arg(long)]
     threads: Option<u32>,
+    /// Wire: extend this sealed catalog manifest instead of scanning from genesis. --start must
+    /// then be the base's end block + 1.
+    #[arg(long, requires = "base_manifest_sha256")]
+    base_manifest: Option<String>,
+    /// Wire: the base manifest's SHA-256, as pinned by its consumers.
+    #[arg(long, requires = "base_manifest")]
+    base_manifest_sha256: Option<String>,
     /// Request irreversible blocks only (safe for historical ranges)
     #[arg(long, default_value_t = true)]
     irreversible_only: bool,
@@ -126,16 +133,8 @@ async fn main() -> Result<()> {
             "select only one of --ship and --from-disk"
         );
         anyhow::ensure!(
-            args.start == 1,
-            "complete Wire ABI history must start at genesis (block 1)"
-        );
-        anyhow::ensure!(
             args.checkpoint.is_none(),
-            "Wire history is sealed atomically; use a fresh output rather than a partial checkpoint"
-        );
-        anyhow::ensure!(
-            args.threads.unwrap_or(args.connections) == 1,
-            "Wire disk history currently requires one ordered reader (--threads 1)"
+            "Wire history is sealed atomically; extend a sealed catalog with --base-manifest instead of a partial checkpoint"
         );
         let schema = std::fs::read_to_string(
             args.ship_abi
@@ -148,12 +147,20 @@ async fn main() -> Result<()> {
             chain_id: args
                 .chain_id
                 .context("Wire disk history requires --chain-id")?,
+            start: args.start,
             end: args.end,
             irreversible_block_id: args
                 .irreversible_block_id
                 .context("Wire disk history requires --irreversible-block-id")?,
             output: args.out.context("Wire disk history requires --out")?.into(),
             provider: args.protocol,
+            threads: args.threads.map_or(0, |n| n as usize),
+            base: args
+                .base_manifest
+                .map(|manifest| hyperion_ship::wire_history::BaseCatalog {
+                    manifest: manifest.into(),
+                    manifest_sha256: args.base_manifest_sha256.unwrap_or_default(),
+                }),
         })?;
         return Ok(());
     }

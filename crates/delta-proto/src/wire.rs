@@ -16,19 +16,24 @@
 //!
 //! Rows Hyperion would reject (no ABI, unmapped table, undecodable value, failing handler) are
 //! counted and reported, never silently dropped.
+//!
+//! [`DeltaWorker`] produces one block's documents; [`run`] drives it over 512-block chunks that
+//! worker threads take one at a time, each read as one slab per log, and one fold writes the
+//! documents in block order. The range service drives the same worker.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use hyperion_ship::blocks::BlockLog;
 use hyperion_ship::delta::read_varuint;
-use hyperion_ship::disk::{canonical_offsets, decode_payload};
+use hyperion_ship::disk::decode_payload;
 use hyperion_ship::provider::TimestampProfile;
+use hyperion_ship::slab::{BlockFile, Chunks, ShipFile, ordered_chunks};
 use hyperion_ship::trace::name_to_string;
 use hyperion_ship::wire_codec::WireDecoder;
 use hyperion_wire_protocol::codec::{CodecProfile, decode_value};
@@ -38,10 +43,25 @@ use sha2::{Digest, Sha256};
 /// `protocol.id` of documents written by Hyperion's Wire provider.
 pub const PROTOCOL_ID: &str = "@eosrio/hyperion-wire-plugin";
 
+/// Blocks per work unit. Chunks hold their slabs and documents until the ordered fold takes them,
+/// so memory grows with the chunk; 512 blocks keeps reads large and is as fast as 2,048 on Wire
+/// while holding a third of the memory.
+const CHUNK: u32 = 512;
+
+/// What a delta document is made of, beyond its block.
+#[derive(Clone)]
+pub struct DocConfig {
+    pub profile: CodecProfile,
+    pub timestamps: TimestampProfile,
+    /// `protocol.profileId` written into documents (the indexer's configured provider profile).
+    pub doc_profile_id: String,
+    pub chain_id: String,
+    pub system_contract: String,
+}
+
 pub struct Config {
-    pub log_path: String,
-    pub idx_path: String,
-    pub first_block: u32,
+    /// The state-history directory (`chain_state_history.{log,index}`).
+    pub state_dir: String,
     pub start: u32,
     pub end: u32,
     pub threads: u32,
@@ -54,12 +74,7 @@ pub struct Config {
     pub partition_size: u64,
     pub es_batch: usize,
     pub es_workers: usize,
-    pub profile: CodecProfile,
-    pub timestamps: TimestampProfile,
-    /// `protocol.profileId` written into documents (the indexer's configured provider profile).
-    pub doc_profile_id: String,
-    pub chain_id: String,
-    pub system_contract: String,
+    pub docs: DocConfig,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -75,7 +90,7 @@ struct TableMap {
     secondary: Option<(String, String)>,
 }
 
-struct Deployment {
+pub(crate) struct Deployment {
     /// Unique per catalog entry; keys this ABI in the per-thread decoder.
     key: u64,
     block: u32,
@@ -86,7 +101,24 @@ struct Deployment {
     indexes: HashMap<u64, Vec<TableMap>>,
 }
 
-type Catalog = HashMap<u64, Vec<Deployment>>;
+/// account -> its block-final ABI states, by block.
+pub struct Catalog(HashMap<u64, Vec<Deployment>>);
+
+impl Catalog {
+    /// Accounts with at least one state.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// All block-final states.
+    pub fn states(&self) -> usize {
+        self.0.values().map(Vec::len).sum()
+    }
+}
 
 /// Standard sysio `name` encoding (the inverse of `name_to_string`).
 fn string_to_name(s: &str) -> Option<u64> {
@@ -113,9 +145,16 @@ fn string_to_name(s: &str) -> Option<u64> {
     Some(value)
 }
 
-fn load_catalog(path: &str) -> Result<Catalog> {
-    let f = BufReader::new(File::open(path).with_context(|| format!("open {path}"))?);
-    let mut catalog: Catalog = HashMap::new();
+/// Load a Wire ABI history catalog's deployment records.
+pub fn load_catalog(path: &str) -> Result<Catalog> {
+    catalog_from(BufReader::new(
+        File::open(path).with_context(|| format!("open {path}"))?,
+    ))
+}
+
+/// [`load_catalog`] over any reader, e.g. a verified catalog's records held in memory.
+pub fn catalog_from(f: impl BufRead) -> Result<Catalog> {
+    let mut catalog: HashMap<u64, Vec<Deployment>> = HashMap::new();
     let mut next_key = 0u64;
     for line in f.lines() {
         let line = line?;
@@ -202,12 +241,12 @@ fn load_catalog(path: &str) -> Result<Catalog> {
     for list in catalog.values_mut() {
         list.sort_by_key(|d| d.block);
     }
-    Ok(catalog)
+    Ok(Catalog(catalog))
 }
 
 /// The account's latest block-final ABI at or before `block` (it applies from ordinal 0).
 fn select(catalog: &Catalog, code: u64, block: u32) -> Option<&Deployment> {
-    let list = catalog.get(&code)?;
+    let list = catalog.0.get(&code)?;
     let pos = list.partition_point(|d| d.block <= block);
     if pos == 0 {
         return None;
@@ -680,24 +719,26 @@ fn apply_handlers(
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Default)]
-struct Stats {
-    blocks: AtomicU64,
-    rows: AtomicU64,       // every delta row (each advances the ordinal)
-    kv_present: AtomicU64, // present contract_row_kv / contract_index_kv rows
-    docs: AtomicU64,
-    index_docs: AtomicU64,
-    no_abi: AtomicU64,
-    no_table: AtomicU64,
-    decode_fail: AtomicU64,
-    handler_fail: AtomicU64,
-    bad_row: AtomicU64,
-    unreadable: AtomicU64,
-    no_header: AtomicU64,
-    stale: AtomicU64, // superseded (forked) log entries skipped
+pub struct Stats {
+    pub blocks: AtomicU64,
+    pub rows: AtomicU64,       // every delta row (each advances the ordinal)
+    pub kv_present: AtomicU64, // present contract_row_kv / contract_index_kv rows
+    pub docs: AtomicU64,
+    pub index_docs: AtomicU64,
+    pub no_abi: AtomicU64,
+    pub no_table: AtomicU64,
+    pub decode_fail: AtomicU64,
+    pub handler_fail: AtomicU64,
+    pub bad_row: AtomicU64,
+    pub unreadable: AtomicU64,
+    pub no_header: AtomicU64,
+    pub stale: AtomicU64, // bytes of superseded (forked) log entries skipped
+    /// The first unreadable blocks, for the summary.
+    pub unreadable_blocks: Mutex<Vec<u32>>,
 }
 
 /// (reason, code, table_id) -> (count, first sample).
-type Failures = Mutex<BTreeMap<(&'static str, String, u64), (u64, String)>>;
+pub type Failures = Mutex<BTreeMap<(&'static str, String, u64), (u64, String)>>;
 
 fn fail(failures: &Failures, reason: &'static str, code: u64, table_id: u64, sample: &str) {
     let mut m = failures.lock().unwrap();
@@ -710,80 +751,82 @@ fn fail(failures: &Failures, reason: &'static str, code: u64, table_id: u64, sam
     }
 }
 
-struct Doc {
-    block_num: u32,
-    id: String,
-    body: String,
+pub struct Doc {
+    pub block_num: u32,
+    /// `_id`: the `h45h1:` history document id.
+    pub id: String,
+    pub body: String,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn worker(
-    cfg: &Config,
-    catalog: &Catalog,
-    cs: u32,
-    ce: u32,
-    stats: &Stats,
-    failures: &Failures,
-    unreadable: &Mutex<Vec<u32>>,
-    sink: Option<&mpsc::SyncSender<Doc>>,
-) -> Result<()> {
-    let mut blocklog = BlockLog::open(&cfg.blocks_dir)?;
-    let mut decoder = WireDecoder::default();
-    let log_len = std::fs::metadata(&cfg.log_path)?.len();
-    let (offsets, stop) = canonical_offsets(&cfg.idx_path, cfg.first_block, cs, ce, log_len)?;
-    let mut pos = offsets[0];
-    let mut log = BufReader::with_capacity(8 << 20, File::open(&cfg.log_path)?);
-    log.seek(SeekFrom::Start(pos))?;
+/// Append `doc`'s `_bulk` index line and the document itself, each with its newline.
+pub fn push_bulk(out: &mut String, chain: &str, version: &str, partition_size: u64, doc: &Doc) {
+    let partition = (doc.block_num as u64).div_ceil(partition_size).max(1);
+    out.push_str(&format!(
+        "{{\"index\":{{\"_index\":\"{chain}-delta-{version}-{partition:06}\",\"_id\":\"{}\"}}}}\n",
+        doc.id
+    ));
+    out.push_str(&doc.body);
+    out.push('\n');
+}
 
-    let mut hdr = [0u8; 48];
-    loop {
-        let entry_pos = pos;
-        if entry_pos >= stop || log.read_exact(&mut hdr).is_err() {
-            break;
+/// One worker's state: its decoder, reused across blocks.
+pub struct DeltaWorker<'a> {
+    cfg: &'a DocConfig,
+    catalog: &'a Catalog,
+    stats: &'a Stats,
+    failures: &'a Failures,
+    decoder: WireDecoder,
+}
+
+impl<'a> DeltaWorker<'a> {
+    pub fn new(
+        cfg: &'a DocConfig,
+        catalog: &'a Catalog,
+        stats: &'a Stats,
+        failures: &'a Failures,
+    ) -> Self {
+        Self {
+            cfg,
+            catalog,
+            stats,
+            failures,
+            decoder: WireDecoder::default(),
         }
-        let block_num = u32::from_be_bytes(hdr[8..12].try_into().unwrap());
-        let block_id = hex::encode(&hdr[8..40]);
-        let payload_size = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
-        if payload_size > log_len {
-            bail!(
-                "payload_size {payload_size} at block {block_num} exceeds log length {log_len}: format/offset error"
-            );
-        }
-        let mut payload = vec![0u8; payload_size as usize];
-        log.read_exact(&mut payload)?;
-        let entry_end = pos + 48 + payload_size;
-        let mut suf = [0u8; 8];
-        pos = if log.read_exact(&mut suf).is_ok() && u64::from_le_bytes(suf) == pos {
-            entry_end + 8
-        } else {
-            log.seek_relative(-(suf.len() as i64)).ok();
-            entry_end
-        };
-        // A fork leaves the superseded entry in the log; only the entry the index points to counts.
-        if block_num < cs || block_num > ce || offsets[(block_num - cs) as usize] != entry_pos {
-            stats.stale.fetch_add(1, Relaxed);
-            continue;
-        }
+    }
+
+    /// One block's documents, from its canonical chain-state entry (`id` from the entry header)
+    /// and its block-log header (`(producer, slot)`).
+    pub fn block(
+        &mut self,
+        block_num: u32,
+        id: &[u8; 32],
+        payload: &[u8],
+        header: Option<(u64, u32)>,
+        mut sink: Option<&mut Vec<Doc>>,
+    ) {
+        let (cfg, catalog, stats, failures) = (self.cfg, self.catalog, self.stats, self.failures);
+        let decoder = &mut self.decoder;
+        let block_id = hex::encode(id);
         stats.blocks.fetch_add(1, Relaxed);
 
         let mark_unreadable = || {
             stats.unreadable.fetch_add(1, Relaxed);
-            let mut l = unreadable.lock().unwrap();
+            let mut l = stats.unreadable_blocks.lock().unwrap();
             if l.len() < 20 {
                 l.push(block_num);
             }
         };
-        let deltas = match decode_payload(&payload) {
+        let deltas = match decode_payload(payload) {
             Ok(d) if !d.is_empty() => d,
-            Ok(_) => continue,
+            Ok(_) => return,
             Err(_) => {
                 mark_unreadable();
-                continue;
+                return;
             }
         };
-        let Some((_, slot)) = blocklog.header(block_num) else {
+        let Some((_, slot)) = header else {
             stats.no_header.fetch_add(1, Relaxed);
-            continue;
+            return;
         };
         let timestamp = cfg.timestamps.slot_to_iso(slot);
 
@@ -945,9 +988,9 @@ fn worker(
                 stats.index_docs.fetch_add(1, Relaxed);
             }
             stats.docs.fetch_add(1, Relaxed);
-            if let Some(tx) = sink {
+            if let Some(out) = sink.as_deref_mut() {
                 let id = document_id(chain_id, &identity, &block_id, block_num, this);
-                let _ = tx.send(Doc {
+                out.push(Doc {
                     block_num,
                     id,
                     body: Value::Object(doc).to_string(),
@@ -958,7 +1001,6 @@ fn worker(
             mark_unreadable();
         }
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -998,13 +1040,13 @@ fn es_poster(rx: &Mutex<mpsc::Receiver<Doc>>, cfg: &Config, url: &str, stats: &E
         }
         body.clear();
         for d in &batch {
-            let partition = (d.block_num as u64).div_ceil(cfg.partition_size).max(1);
-            body.push_str(&format!(
-                "{{\"index\":{{\"_index\":\"{}-delta-{}-{partition:06}\",\"_id\":\"{}\"}}}}\n",
-                cfg.chain, cfg.index_version, d.id
-            ));
-            body.push_str(&d.body);
-            body.push('\n');
+            push_bulk(
+                &mut body,
+                &cfg.chain,
+                &cfg.index_version,
+                cfg.partition_size,
+                d,
+            );
         }
         let result = minreq::post(url)
             .with_header("Content-Type", "application/x-ndjson")
@@ -1041,8 +1083,9 @@ fn es_poster(rx: &Mutex<mpsc::Receiver<Doc>>, cfg: &Config, url: &str, stats: &E
 }
 
 pub fn run(cfg: Config) -> Result<()> {
-    if cfg.chain_id.len() != 64
-        || !cfg
+    let docs = &cfg.docs;
+    if docs.chain_id.len() != 64
+        || !docs
             .chain_id
             .bytes()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
@@ -1057,27 +1100,41 @@ pub fn run(cfg: Config) -> Result<()> {
     eprintln!(
         "[delta-proto] {} contracts, {} block-final ABI states",
         catalog.len(),
-        catalog.values().map(Vec::len).sum::<usize>()
+        catalog.states()
     );
-    let block_log_last = BlockLog::open(&cfg.blocks_dir)?.last_block();
+    let state = ShipFile::open(Path::new(&cfg.state_dir), "chain_state_history")?;
+    let blocks = BlockFile::open(Path::new(&cfg.blocks_dir))?;
+    let block_log_last = blocks.last_block()?.context("the block log is empty")?;
     if cfg.end > block_log_last {
         eprintln!(
             "[delta-proto] block log ends at {block_log_last}; clamping the range so every document has its @timestamp"
         );
     }
-    let (start, end, threads) = (cfg.start, cfg.end.min(block_log_last), cfg.threads.max(1));
+    let (first, last) = (
+        state.first_block(),
+        state
+            .last_block()?
+            .context("the state-history index is empty")?,
+    );
+    let (start, end) = (cfg.start.max(first), cfg.end.min(last));
+    if start > end {
+        bail!("empty range after clamp to [{first}..{last}]");
+    }
+    let (start, end, threads) = (
+        start.max(blocks.first_block()),
+        end.min(block_log_last),
+        cfg.threads.max(1) as usize,
+    );
     if start > end {
         bail!("empty range after clamping to the block log");
     }
     let total = (end - start + 1) as u64;
-    let chunk = total.div_ceil(threads as u64) as u32;
     eprintln!(
         "[delta-proto] decoding Wire KV deltas [{start}..{end}] ({total} blocks) with {threads} threads"
     );
 
     let stats = Stats::default();
     let failures = Failures::default();
-    let unreadable = Mutex::new(Vec::new());
     let es_stats = EsStats::default();
     let es_url = cfg
         .es
@@ -1088,7 +1145,7 @@ pub fn run(cfg: Config) -> Result<()> {
     let rx = Mutex::new(rx);
     let t0 = Instant::now();
 
-    std::thread::scope(|s| -> Result<()> {
+    let run = std::thread::scope(|s| -> Result<()> {
         let mut consumers = Vec::new();
         if let Some(url) = es_url.as_deref() {
             eprintln!(
@@ -1110,40 +1167,46 @@ pub fn run(cfg: Config) -> Result<()> {
                 let _ = w.flush();
             }));
         }
-        let mut workers = Vec::new();
-        for i in 0..threads {
-            let cs = start.saturating_add(i.saturating_mul(chunk));
-            if cs > end {
-                break;
-            }
-            let ce = ((cs as u64 + chunk as u64 - 1).min(end as u64)) as u32;
-            let txc = emit.then(|| tx.clone());
-            let (cfg, catalog, stats, failures, unreadable) =
-                (&cfg, &catalog, &stats, &failures, &unreadable);
-            workers.push(s.spawn(move || {
-                if let Err(e) = worker(
-                    cfg,
-                    catalog,
-                    cs,
-                    ce,
-                    stats,
-                    failures,
-                    unreadable,
-                    txc.as_ref(),
-                ) {
-                    eprintln!("[delta-proto] worker {i} [{cs}..{ce}] FAILED: {e:#}");
+        let result = ordered_chunks(
+            Chunks {
+                from: start,
+                to: end,
+                size: CHUNK,
+                threads,
+                window: threads + 2,
+                limit: None,
+            },
+            || Ok(DeltaWorker::new(docs, &catalog, &stats, &failures)),
+            |worker, cs, ce| -> Result<Vec<Doc>> {
+                let mut out = Vec::new();
+                let headers = blocks.slab(cs, ce)?;
+                let slab = state.slab(cs, ce)?;
+                stats.stale.fetch_add(slab.skipped(), Relaxed);
+                for block_num in cs..=ce {
+                    let entry = slab.entry(block_num)?;
+                    worker.block(
+                        block_num,
+                        entry.id(),
+                        entry.payload,
+                        headers.header(block_num),
+                        emit.then_some(&mut out),
+                    );
                 }
-            }));
-        }
+                Ok(out)
+            },
+            |_, _, chunk| {
+                for doc in chunk {
+                    tx.send(doc).context("the document sink stopped")?;
+                }
+                Ok(())
+            },
+        );
         drop(tx);
-        for w in workers {
-            let _ = w.join();
-        }
         for c in consumers {
             let _ = c.join();
         }
-        Ok(())
-    })?;
+        result
+    });
 
     let secs = t0.elapsed().as_secs_f64();
     let b = stats.blocks.load(Relaxed);
@@ -1177,14 +1240,14 @@ pub fn run(cfg: Config) -> Result<()> {
     let stale = stats.stale.load(Relaxed);
     if stale > 0 {
         eprintln!(
-            "[delta-proto] skipped {stale} superseded log entries (forked blocks the index no longer points to)"
+            "[delta-proto] skipped {stale} bytes of superseded log entries (forked blocks the index no longer points to)"
         );
     }
     let n_unreadable = stats.unreadable.load(Relaxed);
     if n_unreadable > 0 {
         eprintln!(
             "[delta-proto] WARNING: {n_unreadable} state-history entries could not be read; first blocks: {:?}",
-            unreadable.lock().unwrap()
+            stats.unreadable_blocks.lock().unwrap()
         );
     }
     let f = failures.lock().unwrap();
@@ -1196,7 +1259,7 @@ pub fn run(cfg: Config) -> Result<()> {
             eprintln!("  {cnt:>8}  {reason:<16} {code}/{tid}  {sample}");
         }
     }
-    Ok(())
+    run
 }
 
 #[cfg(test)]
@@ -1242,6 +1305,7 @@ mod tests {
 
     #[test]
     fn canonical_offsets_bound_the_walk() {
+        use hyperion_ship::disk::canonical_offsets;
         let dir = std::env::temp_dir().join(format!("delta-proto-idx-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let idx = dir.join("chain_state_history.index");

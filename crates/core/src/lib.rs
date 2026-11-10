@@ -30,6 +30,10 @@
 //! encoding, the vendored Spring SHiP ABI). Feature `testkit` adds `testkit`, synthetic
 //! fixture writers for tests. Feature `chain-api` adds `chainapi`, the nodeos-compatible
 //! `/v1/chain` block endpoint bodies rendered from stored blocks.
+//!
+//! [`slab`] reads block ranges of a node's logs in one read per log and hands chunks of a range
+//! to worker threads in order; the doc producers and the range service build on it. With
+//! `archive`, `wire_catalog` verifies a chain of sealed Wire ABI history catalogs.
 
 pub mod abi;
 #[cfg(feature = "archive")]
@@ -50,9 +54,13 @@ pub mod provider;
 pub mod ship;
 #[cfg(feature = "archive")]
 pub mod shiplog;
+pub mod slab;
 #[cfg(feature = "testkit")]
 pub mod testkit;
 pub mod trace;
+#[cfg(feature = "archive")]
+pub mod wire_catalog;
 pub mod wire_codec;
 #[cfg(feature = "archive")]
 pub mod wire_history;
+pub mod wire_walk;

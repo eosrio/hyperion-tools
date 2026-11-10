@@ -35,6 +35,7 @@ Every crate has its own README with full usage, benchmarks, and internals — fo
 | [**antelope-ship-archive**](crates/ship-archive) | preview | Serves frozen state-history and block logs over the SHiP WebSocket protocol exactly as a Spring node does, without nodeos, so a SHiP-aware router or proxy can stitch archived ranges and live nodes into one history. Strict, read-only, fail-closed readers; bounded memory; `check` and `index` for preparing archives. |
 | [**action-proto**](crates/action-proto) | experimental | Direct-from-disk action reader: decodes `action_traces` into Hyperion-shaped action NDJSON (or straight to Elasticsearch). Next-gen indexer read path. |
 | [**delta-proto**](crates/delta-proto) | experimental | Direct-from-disk delta reader: decodes `contract_row` table deltas into Hyperion-shaped delta NDJSON. |
+| [**range-server**](crates/range-server) | engineering | Read-only disk range service next to a Wire node's logs: Hyperion's master pulls sealed block ranges of 4.5 block, action and delta documents as framed `_bulk` NDJSON with a verified range manifest, credit-based backpressure and follow mode. |
 | [**protocol-replay**](crates/protocol-replay) | engineering | Replay complete source-pinned Wire SHiP frames and ABI/value/KV records through the coordinated package's Rust provider, retaining raw bytes and deployment context. |
 
 Wire engineering profiles are explicit `--protocol` selections. The
