@@ -206,7 +206,8 @@ impl ShipFile {
             "block {to} in {} has a {size}-byte payload",
             self.0.log_path.display()
         );
-        let end = last + SHIP_HEADER as u64 + size;
+        // Through the last entry's 8-byte position trailer.
+        let end = last + SHIP_HEADER as u64 + size + 8;
         let bytes = self.0.read(base, end - base)?;
         Ok(ShipSlab {
             first: from,
@@ -232,11 +233,106 @@ pub struct ShipEntry<'a> {
     /// The 48-byte header: magic, block id, payload size.
     pub header: &'a [u8; SHIP_HEADER],
     pub payload: &'a [u8],
+    /// The entry's offset in its log, and the 8 bytes after its payload.
+    offset: u64,
+    trailer: Option<&'a [u8]>,
 }
 
 impl ShipEntry<'_> {
     pub fn id(&self) -> &[u8; 32] {
         self.header[8..40].try_into().unwrap()
+    }
+
+    /// Inflate the payload into `out` (replacing it) with the checks the strict archive reader
+    /// applies: exact magic, the position trailer, a Type A size that is declared and met or a
+    /// Type B size field that is 0 or the stream's length, a stream that ends exactly at the end
+    /// of the payload, and at most `limit` inflated bytes.
+    pub fn inflate_into(&self, limit: u64, out: &mut Vec<u8>) -> Result<()> {
+        use flate2::{Decompress, FlushDecompress, Status};
+        out.clear();
+        let block = u32::from_be_bytes(self.header[8..12].try_into().unwrap());
+        let what = || format!("block {block} at offset {}", self.offset);
+        let magic = u64::from_le_bytes(self.header[0..8].try_into().unwrap());
+        ensure!(
+            magic == SHIP_MAGIC,
+            "{}: unsupported entry magic {magic:#x}",
+            what()
+        );
+        ensure!(
+            self.trailer
+                .is_some_and(|t| u64::from_le_bytes(t.try_into().unwrap()) == self.offset),
+            "{}: the position trailer does not name the entry",
+            what()
+        );
+        let p = self.payload;
+        ensure!(
+            p.len() >= 4,
+            "{}: the payload is shorter than its preamble",
+            what()
+        );
+        let field = u32::from_le_bytes(p[0..4].try_into().unwrap());
+        let (stream, expected) = if field == 1 {
+            ensure!(
+                p.len() >= 12,
+                "{}: the payload is shorter than its sized preamble",
+                what()
+            );
+            let size = u64::from_le_bytes(p[4..12].try_into().unwrap());
+            ensure!(
+                size <= limit,
+                "{}: the payload declares {size} bytes, over the {limit}-byte limit",
+                what()
+            );
+            (&p[12..], Some(size))
+        } else {
+            let zlen = (p.len() - 4) as u64;
+            ensure!(
+                field == 0 || u64::from(field) == zlen,
+                "{}: the legacy size field holds {field}, the stream has {zlen} bytes",
+                what()
+            );
+            (&p[4..], None)
+        };
+        let mut z = Decompress::new(true);
+        let mut cap = expected.map_or(stream.len().saturating_mul(4).max(4096), |e| e as usize);
+        loop {
+            out.reserve(cap.saturating_sub(out.len()).max(1));
+            let room = out.capacity();
+            let status = z
+                .decompress_vec(
+                    &stream[z.total_in() as usize..],
+                    out,
+                    FlushDecompress::Finish,
+                )
+                .map_err(|e| anyhow::anyhow!("{}: invalid zlib payload: {e}", what()))?;
+            ensure!(
+                out.len() as u64 <= limit && expected.is_none_or(|e| out.len() as u64 <= e),
+                "{}: the payload inflates past its bound",
+                what()
+            );
+            match status {
+                Status::StreamEnd => break,
+                _ if out.len() < room && z.total_in() as usize == stream.len() => {
+                    bail!("{}: the zlib stream stops without ending", what())
+                }
+                _ => cap = (cap * 2).min(limit as usize + 1),
+            }
+        }
+        ensure!(
+            z.total_in() as usize == stream.len(),
+            "{}: {} bytes of the payload follow the end of its zlib stream",
+            what(),
+            stream.len() - z.total_in() as usize
+        );
+        if let Some(e) = expected {
+            ensure!(
+                out.len() as u64 == e,
+                "{}: the payload inflates to {} bytes, its header declares {e}",
+                what(),
+                out.len()
+            );
+        }
+        Ok(())
     }
 }
 
@@ -298,7 +394,13 @@ impl ShipSlab {
                     self.path.display()
                 )
             })?;
-        Ok(ShipEntry { header, payload })
+        let end = start + payload.len();
+        Ok(ShipEntry {
+            header,
+            payload,
+            offset: self.offsets[(block - first) as usize],
+            trailer: self.bytes.get(end..end + 8),
+        })
     }
 }
 

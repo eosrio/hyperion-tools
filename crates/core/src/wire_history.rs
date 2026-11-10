@@ -14,6 +14,11 @@
 //! catalog's members, rebuilds the state its records describe, checks that the logs still hold
 //! the base's last block, scans only the blocks after it and writes the base members followed by
 //! the new records and block ids.
+//!
+//! A [`Sealer`] extends a chain incrementally instead: it keeps the fold's state between seals,
+//! reads a running node's logs as slabs up to an irreversible block ([`LiveLogs`]), and writes
+//! [`SEGMENT_FORMAT`] segments that hold only the blocks they add. A chain's records and block
+//! ids, concatenated link by link, are what a complete scan to the same end writes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -32,6 +37,7 @@ use crate::binio::{FcReader, FileCache};
 use crate::catalog::{Catalog, discover, ship_catalog_within};
 use crate::provider::{ProtocolProvider, WIRE_SOURCE_REVISION};
 use crate::shiplog::{LogKind, ShipLog};
+use crate::slab::ShipFile;
 use crate::wire_walk::{self, name_string, name_value};
 
 pub const FORMAT: &str = "hyperion-wire-abi-history-v1";
@@ -279,14 +285,110 @@ fn committed(
     Ok(())
 }
 
+/// Receives one block: its number, id, inflated chain-state payload and (from the trace log's
+/// first block) inflated trace payload.
+type BlockVisit<'a> = dyn FnMut(u32, [u8; 32], &[u8], Option<&[u8]>) -> Result<()> + 'a;
+
+/// Sees a segment's first block and block ids before the segment is published.
+pub type IdCheck<'a> = dyn FnMut(u32, &[[u8; 32]]) -> Result<()> + 'a;
+
+/// Where a scan reads its blocks.
+trait ChunkSource: Sync {
+    /// Call `f(block, id, state, trace)` for every block of `start..=end`, in order, with the
+    /// inflated chain-state payload and (from the trace start) the inflated trace payload.
+    fn read(&self, start: u32, end: u32, f: &mut BlockVisit<'_>) -> Result<()>;
+}
+
+/// A frozen, validated catalog of log files.
 struct Sources<'a> {
     states: &'a Catalog<ShipLog>,
     traces: &'a Catalog<ShipLog>,
     trace_start: u32,
 }
 
+impl ChunkSource for Sources<'_> {
+    fn read(&self, start: u32, end: u32, f: &mut BlockVisit<'_>) -> Result<()> {
+        let (mut state, mut trace) = (Vec::new(), Vec::new());
+        for block in start..=end {
+            let id = payload(self.states, block, &mut state)?;
+            if block >= self.trace_start {
+                let trace_id = payload(self.traces, block, &mut trace)?;
+                ensure!(
+                    trace_id == id,
+                    "trace/state block identity mismatch at {block}"
+                );
+                f(block, id, &state, Some(&trace))?;
+            } else {
+                f(block, id, &state, None)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A running node's logs, read as slabs up to an irreversible block: entries at or below it are
+/// never rewritten, so the growing files need no frozen view.
+pub struct LiveLogs {
+    states: ShipFile,
+    traces: ShipFile,
+}
+
+impl LiveLogs {
+    /// The `chain_state_history` and `trace_history` logs in `dir`.
+    pub fn open(dir: &Path) -> Result<Self> {
+        Ok(Self {
+            states: ShipFile::open(dir, "chain_state_history")?,
+            traces: ShipFile::open(dir, "trace_history")?,
+        })
+    }
+
+    /// The last block both logs index now.
+    pub fn last_block(&self) -> Result<Option<u32>> {
+        Ok(
+            match (self.states.last_block()?, self.traces.last_block()?) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                _ => None,
+            },
+        )
+    }
+
+    /// The chain-state log's id for `block`.
+    pub fn id(&self, block: u32) -> Result<[u8; 32]> {
+        Ok(*self.states.slab(block, block)?.entry(block)?.id())
+    }
+}
+
+impl ChunkSource for LiveLogs {
+    fn read(&self, start: u32, end: u32, f: &mut BlockVisit<'_>) -> Result<()> {
+        let states = self.states.slab(start, end)?;
+        let trace_from = start.max(self.traces.first_block());
+        let traces = (trace_from <= end)
+            .then(|| self.traces.slab(trace_from, end))
+            .transpose()?;
+        let (mut state, mut trace) = (Vec::new(), Vec::new());
+        for block in start..=end {
+            let entry = states.entry(block)?;
+            entry.inflate_into(MAX_PAYLOAD, &mut state)?;
+            let id = *entry.id();
+            match &traces {
+                Some(t) if block >= trace_from => {
+                    let entry = t.entry(block)?;
+                    ensure!(
+                        entry.id() == &id,
+                        "trace/state block identity mismatch at {block}"
+                    );
+                    entry.inflate_into(MAX_PAYLOAD, &mut trace)?;
+                    f(block, id, &state, Some(&trace))?;
+                }
+                _ => f(block, id, &state, None)?,
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Read blocks `start..=end` and keep what the fold must see.
-fn extract(sources: &Sources<'_>, start: u32, end: u32) -> Result<Chunk> {
+fn extract(source: &dyn ChunkSource, start: u32, end: u32) -> Result<Chunk> {
     let mut chunk = Chunk {
         start,
         ids: Vec::with_capacity((end - start + 1) as usize),
@@ -294,25 +396,18 @@ fn extract(sources: &Sources<'_>, start: u32, end: u32) -> Result<Chunk> {
         first_sequence: None,
         last_sequence: None,
     };
-    let (mut state_bytes, mut trace_bytes) = (Vec::new(), Vec::new());
     let mut receipts = Vec::new();
     // The account's previous row in this chunk, and its last ABI sequence observation since its
     // last deployment in this chunk.
     let mut previous: HashMap<u64, (bool, Vec<u8>)> = HashMap::new();
     let mut observed: HashMap<u64, u64> = HashMap::new();
-    for block in start..=end {
-        let id = payload(sources.states, block, &mut state_bytes)?;
+    source.read(start, end, &mut |block, id, state_bytes, trace_bytes| {
         chunk.ids.push(id);
         let mut events = Vec::new();
         let mut deployed = HashSet::new();
-        if block >= sources.trace_start {
-            let trace_id = payload(sources.traces, block, &mut trace_bytes)?;
-            ensure!(
-                trace_id == id,
-                "trace/state block identity mismatch at {block}"
-            );
+        if let Some(trace_bytes) = trace_bytes {
             let (mut txs, mut actions) = (Vec::new(), Vec::new());
-            wire_walk::transactions(&trace_bytes, &mut txs, &mut actions)
+            wire_walk::transactions(trace_bytes, &mut txs, &mut actions)
                 .map_err(anyhow::Error::from)
                 .and_then(|()| committed(&txs, &actions, &mut receipts))
                 .with_context(|| format!("Wire trace block {block}"))?;
@@ -350,7 +445,7 @@ fn extract(sources: &Sources<'_>, start: u32, end: u32) -> Result<Chunk> {
         }
         // Wire emits deltas in a schema-selected order; the walk never assumes `account` is first.
         let mut rows = Vec::new();
-        wire_walk::account_rows(&state_bytes, &mut rows)
+        wire_walk::account_rows(state_bytes, &mut rows)
             .with_context(|| format!("Wire state block {block}"))?;
         let mut seen = HashSet::new();
         let mut kept = Vec::new();
@@ -392,7 +487,8 @@ fn extract(sources: &Sources<'_>, start: u32, end: u32) -> Result<Chunk> {
                 rows: kept,
             });
         }
-    }
+        Ok(())
+    })?;
     Ok(chunk)
 }
 
@@ -407,7 +503,7 @@ fn abi_fields(record: &mut Value, provider: &ProtocolProvider, state: &AccountSt
 }
 
 /// The running history state, applied in block order.
-struct Fold<'a> {
+struct Fold<'a, R: Write, I: Write> {
     provider: &'a ProtocolProvider,
     revisions: BTreeMap<String, u64>,
     current: BTreeMap<String, AccountState>,
@@ -416,10 +512,10 @@ struct Fold<'a> {
     partial_current: bool,
     last_sequence: Option<u64>,
     record_count: u64,
-    records: BufWriter<File>,
-    ids: BufWriter<File>,
+    records: R,
+    ids: I,
 }
-impl Fold<'_> {
+impl<R: Write, I: Write> Fold<'_, R, I> {
     fn emit(&mut self, record: &Value) -> Result<()> {
         serde_json::to_writer(&mut self.records, record)?;
         self.records.write_all(b"\n")?;
@@ -517,12 +613,13 @@ impl Fold<'_> {
 }
 
 /// Read `from..=to` on `threads` threads and fold the chunks in block order.
-fn scan_range(
-    sources: &Sources<'_>,
+fn scan_range<R: Write, I: Write>(
+    sources: &dyn ChunkSource,
     from: u32,
     to: u32,
     threads: usize,
-    fold: &mut Fold<'_>,
+    fold: &mut Fold<'_, R, I>,
+    quiet: bool,
 ) -> Result<()> {
     let cursor = AtomicU64::new(u64::from(from));
     let stop = AtomicBool::new(false);
@@ -561,7 +658,7 @@ fn scan_range(
                     next += chunk.ids.len() as u64;
                     fold.apply(chunk)?;
                     let done = next - u64::from(from);
-                    if done / 250_000 > reported / 250_000 || done == total {
+                    if !quiet && (done / 250_000 > reported / 250_000 || done == total) {
                         reported = done;
                         let seconds = started.elapsed().as_secs_f64().max(1e-9);
                         eprintln!(
@@ -657,6 +754,50 @@ fn copy_base_ids(ids: &mut BaseIds, out: &mut impl Write) -> Result<()> {
         "base block membership differs from its boundary ids"
     );
     Ok(())
+}
+
+/// The state a catalog's records describe at its end: each account's revision and last state,
+/// and the record count. Accounts whose ABI was always empty have no records; the fold refuses
+/// what that leaves unproven.
+#[allow(clippy::type_complexity)]
+fn base_state(
+    deployments: &[u8],
+    end: u32,
+) -> Result<(BTreeMap<String, u64>, BTreeMap<String, AccountState>, u64)> {
+    let text = |value: &Value, field: &str| -> Result<String> {
+        Ok(value
+            .as_str()
+            .with_context(|| format!("base record lacks {field}"))?
+            .to_owned())
+    };
+    let mut revisions = BTreeMap::new();
+    let mut current = BTreeMap::new();
+    let mut records = 0u64;
+    for line in deployments.split(|b| *b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let row: Value = serde_json::from_slice(line).context("invalid base ABI record")?;
+        let account = text(&row["account"], "record account")?;
+        ensure!(
+            row["blockNum"]
+                .as_u64()
+                .is_some_and(|b| b >= 1 && b <= u64::from(end)),
+            "base record lies outside the base range"
+        );
+        let abi_sequence = text(&row["abiSequence"], "record ABI sequence")?
+            .parse::<u64>()
+            .context("invalid base record ABI sequence")?;
+        let present = row["present"]
+            .as_bool()
+            .context("invalid base record presence")?;
+        let abi = hex::decode(text(&row["abiHex"], "record ABI")?)?;
+        let revision = revisions.entry(account.clone()).or_insert(0);
+        *revision = (*revision).max(abi_sequence);
+        current.insert(account, AccountState { present, abi });
+        records += 1;
+    }
+    Ok((revisions, current, records))
 }
 
 fn load_base(base: &BaseCatalog, options: &ScanOptions, node_revision: &str) -> Result<Base> {
@@ -760,35 +901,7 @@ fn load_base(base: &BaseCatalog, options: &ScanOptions, node_revision: &str) -> 
         first: hex_id(&first_block_id)?,
         last,
     };
-    // The last record of each account is its state at the base's end. Accounts whose ABI was
-    // always empty have no records; the fold refuses what that leaves unproven.
-    let mut revisions = BTreeMap::new();
-    let mut current = BTreeMap::new();
-    let mut records = 0u64;
-    for line in deployments.split(|b| *b == b'\n') {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        let row: Value = serde_json::from_slice(line).context("invalid base ABI record")?;
-        let account = text(&row["account"], "record account")?;
-        ensure!(
-            row["blockNum"]
-                .as_u64()
-                .is_some_and(|b| b >= 1 && b <= u64::from(end)),
-            "base record lies outside the base range"
-        );
-        let abi_sequence = text(&row["abiSequence"], "record ABI sequence")?
-            .parse::<u64>()
-            .context("invalid base record ABI sequence")?;
-        let present = row["present"]
-            .as_bool()
-            .context("invalid base record presence")?;
-        let abi = hex::decode(text(&row["abiHex"], "record ABI")?)?;
-        let revision = revisions.entry(account.clone()).or_insert(0);
-        *revision = (*revision).max(abi_sequence);
-        current.insert(account, AccountState { present, abi });
-        records += 1;
-    }
+    let (revisions, current, records) = base_state(&deployments, end)?;
     ensure!(
         m["deployments"]["records"] == records,
         "base record count differs from its manifest"
@@ -950,7 +1063,7 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
         traces: &traces,
         trace_start: traces.range().0,
     };
-    scan_range(&sources, from, options.end, threads, &mut fold)?;
+    scan_range(&sources, from, options.end, threads, &mut fold, false)?;
     ensure!(
         options.end == 1 || fold.last_sequence.is_some(),
         "history has no committed action receipts"
@@ -1011,6 +1124,211 @@ pub fn scan(options: &ScanOptions) -> Result<Value> {
         manifest_path.display()
     );
     Ok(manifest)
+}
+
+/// Format of an incremental catalog segment: the records and block ids of `startBlock..=endBlock`
+/// only, naming the catalog (complete or segment) it extends. A complete catalog's records and
+/// block ids are the concatenation of its chain's members, oldest first.
+pub const SEGMENT_FORMAT: &str = "hyperion-abi-history-segment-v1";
+
+/// The newest catalog of a sealed chain: what the next segment names as its base.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tip {
+    pub manifest_sha256: String,
+    pub end_block: u32,
+    pub last_block_id: [u8; 32],
+    pub last_global_sequence: Option<u64>,
+    pub ship_abi_sha256: String,
+    /// Records in the whole chain.
+    pub total_records: u64,
+}
+
+/// Seals a running node's irreversible history as incremental segments, keeping the fold's
+/// state between seals, so each seal reads only the blocks after the previous one.
+pub struct Sealer {
+    provider: ProtocolProvider,
+    chain_id: String,
+    node_revision: String,
+    logs: LiveLogs,
+    threads: usize,
+    tip: Tip,
+    revisions: BTreeMap<String, u64>,
+    current: BTreeMap<String, AccountState>,
+}
+
+/// One sealed segment.
+#[derive(Clone, Debug)]
+pub struct Sealed {
+    pub manifest: PathBuf,
+    pub start_block: u32,
+    pub end_block: u32,
+    pub records: u64,
+}
+
+impl Sealer {
+    /// Continue the chain whose newest catalog is `tip`, with `deployments` the records of the
+    /// whole chain. The SHiP `schema` must be the one the chain was sealed with, and the logs in
+    /// `state_history` must still hold the tip's last block.
+    pub fn open(
+        provider: &ProtocolProvider,
+        schema: &str,
+        chain_id: &str,
+        state_history: &Path,
+        tip: Tip,
+        deployments: &[u8],
+        threads: usize,
+    ) -> Result<Self> {
+        provider.validate()?;
+        let ProtocolProvider::Wire(profile) = provider else {
+            bail!("sealing ABI history needs a protocol walk; only Wire has one so far");
+        };
+        hex_id(chain_id)?;
+        ensure!(
+            hash(schema.as_bytes()) == tip.ship_abi_sha256,
+            "the SHiP schema differs from the one the catalog chain was sealed with"
+        );
+        let parsed: Value = serde_json::from_str(schema).context("invalid Wire SHiP schema")?;
+        provider
+            .decode_value(&parsed, "table_delta[]", &[0])
+            .context("invalid Wire SHiP schema")?;
+        wire_walk::check_ship_schema(&parsed).map_err(anyhow::Error::msg)?;
+        let logs = LiveLogs::open(state_history)?;
+        ensure!(
+            logs.id(tip.end_block)? == tip.last_block_id,
+            "the logs no longer hold the catalog's last block {}; the chain forked past it",
+            tip.end_block
+        );
+        let (revisions, current, records) = base_state(deployments, tip.end_block)?;
+        ensure!(
+            records == tip.total_records,
+            "the chain's records ({records}) differ from its newest manifest ({})",
+            tip.total_records
+        );
+        Ok(Self {
+            provider: provider.clone(),
+            chain_id: chain_id.to_owned(),
+            node_revision: profile.upstream_revision.clone(),
+            logs,
+            threads: match threads {
+                0 => std::thread::available_parallelism().map_or(1, usize::from),
+                n => n,
+            },
+            tip,
+            revisions,
+            current,
+        })
+    }
+
+    pub fn tip(&self) -> &Tip {
+        &self.tip
+    }
+
+    /// The last block both state-history logs index now.
+    pub fn logs_end(&self) -> Result<Option<u32>> {
+        self.logs.last_block()
+    }
+
+    /// Seal the blocks after the tip through `end` (irreversible, with id `end_id`) as one
+    /// segment in `dir`. `check(start, ids)` sees the segment's block ids before anything is
+    /// published, so a caller can hold them against another log. Nothing changes on an error.
+    pub fn seal(
+        &mut self,
+        end: u32,
+        end_id: [u8; 32],
+        dir: &Path,
+        check: &mut IdCheck<'_>,
+    ) -> Result<Sealed> {
+        let start = self.tip.end_block + 1;
+        ensure!(end >= start, "block {end} is already sealed");
+        ensure!(
+            u32::from_be_bytes(end_id[..4].try_into()?) == end,
+            "irreversible id does not identify end block"
+        );
+        let indexed = self.logs.last_block()?.unwrap_or(0);
+        ensure!(
+            end <= indexed,
+            "the logs index blocks up to {indexed}, not {end}"
+        );
+        ensure!(
+            self.logs.id(end)? == end_id,
+            "the logs name another block {end} than the irreversible one"
+        );
+        let mut fold = Fold {
+            provider: &self.provider,
+            revisions: self.revisions.clone(),
+            current: self.current.clone(),
+            partial_current: true,
+            last_sequence: self.tip.last_global_sequence,
+            record_count: self.tip.total_records,
+            records: Vec::new(),
+            ids: Vec::new(),
+        };
+        scan_range(&self.logs, start, end, self.threads, &mut fold, true)?;
+        let (ids, _) = fold.ids.as_chunks::<32>();
+        ensure!(
+            ids.len() == (end - start + 1) as usize && ids.last() == Some(&end_id),
+            "segment block membership does not end at the irreversible block"
+        );
+        check(start, ids)?;
+        let added = fold.record_count - self.tip.total_records;
+        let stem = format!("abi-history.{start:010}-{end:010}");
+        let paths = [
+            dir.join(format!("{stem}.ndjson")),
+            dir.join(format!("{stem}.ndjson.blocks.bin")),
+            dir.join(format!("{stem}.ndjson.manifest.json")),
+        ];
+        for path in &paths {
+            ensure!(!path.exists(), "output already exists: {}", path.display());
+        }
+        let member = |path: &Path, bytes: &[u8]| -> Result<Value> {
+            let partial = suffix(path, ".partial");
+            let mut f = fresh(&partial)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            Ok(json!({"name":basename(path)?,"bytes":bytes.len(),"sha256":hash(bytes)}))
+        };
+        let mut deployments = member(&paths[0], &fold.records)?;
+        deployments["records"] = json!(added);
+        let mut block_ids = member(&paths[1], &fold.ids)?;
+        block_ids["count"] = json!(end - start + 1);
+        let end_hex = hex::encode(end_id);
+        let manifest = json!({"format":SEGMENT_FORMAT,"chainId":self.chain_id,"nodeRevision":self.node_revision,
+            "producerProfileId":self.provider.id(),"producerRevision":WIRE_SOURCE_REVISION,"shipAbiSha256":self.tip.ship_abi_sha256,
+            "base":{"manifestSha256":self.tip.manifest_sha256,"endBlock":self.tip.end_block,"lastBlockId":hex::encode(self.tip.last_block_id)},
+            "startBlock":start,"endBlock":end,"startBlockId":hex::encode(ids[0]),"lastBlockId":end_hex,
+            "irreversibleBoundary":{"blockNum":end,"blockId":end_hex},"complete":true,
+            "lastGlobalSequence":fold.last_sequence.map(|v| v.to_string()),"totalRecords":fold.record_count,
+            "deployments":deployments,"blockIds":block_ids});
+        let text = format!("{}\n", serde_json::to_string(&manifest)?);
+        member(&paths[2], text.as_bytes())?;
+        // Members first, the manifest last: a manifest names only complete members.
+        for path in &paths {
+            publish(&suffix(path, ".partial"), path)?;
+        }
+        let Fold {
+            revisions,
+            current,
+            last_sequence,
+            record_count,
+            ..
+        } = fold;
+        self.revisions = revisions;
+        self.current = current;
+        self.tip = Tip {
+            manifest_sha256: hash(text.as_bytes()),
+            end_block: end,
+            last_block_id: end_id,
+            last_global_sequence: last_sequence,
+            ship_abi_sha256: self.tip.ship_abi_sha256.clone(),
+            total_records: record_count,
+        };
+        Ok(Sealed {
+            manifest: paths[2].clone(),
+            start_block: start,
+            end_block: end,
+            records: added,
+        })
+    }
 }
 
 #[cfg(test)]

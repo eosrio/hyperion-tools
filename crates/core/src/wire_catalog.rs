@@ -1,20 +1,27 @@
-//! A verified chain of sealed Wire ABI history catalogs.
+//! A verified chain of sealed ABI history catalogs.
 //!
-//! [`crate::wire_history`] seals a catalog as a manifest plus two members: the sparse deployment
-//! records and the block membership sidecar (32 bytes per block). An extension is a complete
-//! catalog again, but its manifest names its base: the base manifest's SHA-256, end block and
-//! last block id. Consumers pin the genesis catalog (the one without a base) and accept any
-//! extension whose chain of bases reaches it.
+//! [`crate::wire_history`] seals a **complete** catalog as a manifest plus two members: the sparse
+//! deployment records and the block membership sidecar (32 bytes per block). An extension is a
+//! complete catalog again, whose manifest names its base: the base manifest's SHA-256, end block
+//! and last block id. A **segment** ([`SEGMENT_FORMAT`]) names its base the same way but holds
+//! only what it adds: the records and block ids of `startBlock..=endBlock`. Consumers pin the
+//! genesis catalog (the one without a base) and accept any chain of links that reaches it.
 //!
 //! [`load`] applies the checks the 4.5 API applies to a pinned catalog (`disk-abi-history.ts`):
 //! bounded manifest, source and profile identity, irreversible coverage, member descriptors and
 //! digests, every record's shape and position, and every record's block id against the
-//! membership. [`verify_extension`] adds what makes a segment an extension of its base: it names
-//! the base's digest, end and last id; it starts at the base's end + 1; the base's records and
-//! block ids are a byte prefix of its own; and its global sequence does not go back.
+//! membership. Every link must also keep its base: it names the base's digest, end and last id,
+//! its new records start at the base's end + 1, its global sequence does not go back, and a
+//! complete extension holds the chain's records and block ids as a byte prefix while a segment
+//! starts right after the chain and counts the chain's records.
 //!
-//! The member files are pinned by identity when they are loaded. [`Loaded::revalidate`] checks
-//! that no path now names another file, so a replaced member is never read as the verified one.
+//! A [`Loaded`] chain view answers for the whole chain: its records are the concatenation of
+//! its links', and a block id is read from the link that holds it. The member files are pinned
+//! by identity when they are loaded; [`Loaded::revalidate`] checks that no path now names
+//! another file, so a replaced member is never read as the verified one.
+//!
+//! The format is the same for every protocol (the manifest names the producer profile); only
+//! the walk that seals it is protocol-specific, and Wire is the one implemented.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
@@ -26,7 +33,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::wire_history::FORMAT;
+use crate::wire_history::{FORMAT, SEGMENT_FORMAT, Tip};
 
 /// Bounds the 4.5 API puts on a catalog.
 const MAX_MANIFEST: u64 = 65_536;
@@ -76,7 +83,7 @@ fn identity(meta: &fs::Metadata) -> Identity {
     }
 }
 
-/// One sealed catalog: its manifest and what was checked about its members.
+/// One sealed catalog link: a complete catalog or an incremental segment.
 #[derive(Clone, Debug)]
 pub struct Segment {
     pub manifest_sha256: String,
@@ -84,22 +91,38 @@ pub struct Segment {
     /// The manifest exactly as sealed.
     pub manifest_text: String,
     pub manifest: Value,
+    /// A segment holds only `start_block..=end_block`; a complete catalog starts at 1.
+    pub incremental: bool,
+    pub start_block: u32,
     pub end_block: u32,
-    pub first_block_id: String,
+    /// The id of `start_block` (block 1 for a complete catalog).
+    pub start_block_id: String,
     pub last_block_id: String,
     pub last_global_sequence: Option<u64>,
     pub ship_abi_sha256: String,
     pub base: Option<BaseRef>,
+    /// Records this link holds, and records in the chain through it.
     pub records: u64,
+    pub total_records: u64,
     pub deployments_sha256: String,
     pub block_ids_sha256: String,
 }
 
-/// A segment with its members open: the deployment records in memory, the membership on disk.
+/// One membership file and the blocks it covers.
+struct Piece {
+    start: u32,
+    end: u32,
+    file: Arc<File>,
+}
+
+/// A verified chain through its newest link: the records of the whole chain in memory, the block
+/// membership as the files of its links.
 pub struct Loaded {
+    /// The newest link.
     pub segment: Segment,
+    /// The records of the whole chain, oldest first: what a complete catalog to the same end holds.
     pub deployments: Arc<Vec<u8>>,
-    ids: File,
+    pieces: Vec<Piece>,
     pinned: Vec<Pinned>,
 }
 
@@ -131,7 +154,7 @@ fn uint(v: &Value, min: u64) -> Option<u64> {
 }
 
 /// Read `path` whole, at most `bound` bytes, and pin its identity.
-fn pin_read(path: &Path, bound: u64, expected_len: Option<u64>) -> Result<(Vec<u8>, Pinned, File)> {
+fn pin_read(path: &Path, bound: u64, expected_len: Option<u64>) -> Result<(Vec<u8>, Pinned)> {
     let meta = fs::symlink_metadata(path).with_context(|| format!("stat {}", path.display()))?;
     ensure!(
         meta.is_file(),
@@ -161,11 +184,11 @@ fn pin_read(path: &Path, bound: u64, expected_len: Option<u64>) -> Result<(Vec<u
             path: path.to_path_buf(),
             identity: opened,
         },
-        file,
     ))
 }
 
-/// Hash a file of `len` bytes (and pin it) without holding it in memory.
+/// Hash a file of `len` bytes (and pin it) without holding it in memory. With `prefix`, also
+/// return the digest of its first `prefix` bytes.
 fn pin_hash(
     path: &Path,
     len: u64,
@@ -248,9 +271,17 @@ fn pread(file: &File, mut off: u64, mut buf: &mut [u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+fn hex_field(m: &Value, field: &str) -> Result<String> {
+    m[field]
+        .as_str()
+        .filter(|s| is_hex64(s))
+        .map(str::to_owned)
+        .with_context(|| format!("invalid {field}"))
+}
+
 /// The manifest's own checks, without opening its members.
 fn read_manifest(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<(Segment, Pinned)> {
-    let (raw, pinned, _) = pin_read(path, MAX_MANIFEST, None)?;
+    let (raw, pinned) = pin_read(path, MAX_MANIFEST, None)?;
     ensure!(!raw.is_empty(), "{} is empty", path.display());
     let manifest_sha256 = sha(&raw);
     if let Some(expected) = expected_sha {
@@ -262,81 +293,84 @@ fn read_manifest(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<(
     }
     let manifest_text = String::from_utf8(raw).context("manifest is not UTF-8")?;
     let m: Value = serde_json::from_str(&manifest_text).context("invalid catalog manifest")?;
+    let incremental = m["format"] == SEGMENT_FORMAT;
     ensure!(
-        m["format"] == FORMAT
+        (incremental || m["format"] == FORMAT)
             && m["complete"] == true
             && m["chainId"] == pin.chain_id.as_str()
             && m["nodeRevision"] == pin.node_revision.as_str()
             && m["producerProfileId"] == pin.producer_profile_id.as_str(),
         "manifest source/profile mismatch"
     );
-    let ship_abi_sha256 = m["shipAbiSha256"]
-        .as_str()
-        .filter(|s| is_hex64(s))
-        .context("invalid shipAbiSha256")?
-        .to_owned();
+    let ship_abi_sha256 = hex_field(&m, "shipAbiSha256")?;
     let end_block = uint(&m["endBlock"], 1)
         .and_then(|e| u32::try_from(e).ok())
         .context("invalid irreversible coverage")?;
-    let first_block_id = m["firstBlockId"].as_str().unwrap_or("").to_owned();
-    let last_block_id = m["lastBlockId"].as_str().unwrap_or("").to_owned();
+    let start_block = uint(&m["startBlock"], 1)
+        .and_then(|s| u32::try_from(s).ok())
+        .filter(|s| *s <= end_block && (incremental || *s == 1) && (!incremental || *s > 1))
+        .context("invalid irreversible coverage")?;
+    let start_block_id = hex_field(
+        &m,
+        if incremental {
+            "startBlockId"
+        } else {
+            "firstBlockId"
+        },
+    )?;
+    let last_block_id = hex_field(&m, "lastBlockId")?;
     ensure!(
-        m["startBlock"] == 1
-            && is_hex64(&first_block_id)
-            && is_hex64(&last_block_id)
-            && m["irreversibleBoundary"]["blockNum"] == end_block
+        m["irreversibleBoundary"]["blockNum"] == end_block
             && m["irreversibleBoundary"]["blockId"] == last_block_id.as_str()
             && (m["lastGlobalSequence"].is_null()
                 || decimal(&m["lastGlobalSequence"], None).is_some()),
         "invalid irreversible coverage"
     );
     let last_global_sequence = decimal(&m["lastGlobalSequence"], None);
+    let count = end_block - start_block + 1;
     ensure!(
-        m["blockIds"]["count"] == end_block
-            && m["blockIds"]["bytes"] == u64::from(end_block) * 32
+        m["blockIds"]["count"] == count
+            && m["blockIds"]["bytes"] == u64::from(count) * 32
             && uint(&m["deployments"]["records"], 0).is_some_and(|r| r <= MAX_RECORDS),
         "invalid coverage/member count"
     );
     let base = match &m["base"] {
         Value::Null => None,
         b => Some(BaseRef {
-            manifest_sha256: b["manifestSha256"]
-                .as_str()
-                .filter(|s| is_hex64(s))
-                .context("invalid base manifest digest")?
-                .to_owned(),
+            manifest_sha256: hex_field(b, "manifestSha256")?,
             end_block: uint(&b["endBlock"], 1)
                 .and_then(|e| u32::try_from(e).ok())
                 .context("invalid base end block")?,
-            last_block_id: b["lastBlockId"]
-                .as_str()
-                .filter(|s| is_hex64(s))
-                .context("invalid base last block id")?
-                .to_owned(),
+            last_block_id: hex_field(b, "lastBlockId")?,
         }),
     };
+    ensure!(
+        !incremental || base.is_some(),
+        "a catalog segment must name its base"
+    );
     let records = m["deployments"]["records"].as_u64().unwrap();
-    let digest = |member: &Value| -> Result<String> {
-        Ok(member["sha256"]
-            .as_str()
-            .filter(|s| is_hex64(s))
-            .context("invalid member descriptor")?
-            .to_owned())
+    let total_records = if incremental {
+        uint(&m["totalRecords"], records).context("invalid total record count")?
+    } else {
+        records
     };
     Ok((
         Segment {
             manifest_sha256,
             manifest_path: path.to_path_buf(),
-            deployments_sha256: digest(&m["deployments"])?,
-            block_ids_sha256: digest(&m["blockIds"])?,
+            deployments_sha256: hex_field(&m["deployments"], "sha256")?,
+            block_ids_sha256: hex_field(&m["blockIds"], "sha256")?,
             manifest_text,
+            incremental,
+            start_block,
             end_block,
-            first_block_id,
+            start_block_id,
             last_block_id,
             last_global_sequence,
             ship_abi_sha256,
             base,
             records,
+            total_records,
             manifest: m,
         },
         pinned,
@@ -361,19 +395,20 @@ fn member_path(manifest: &Path, member: &Value, bound: u64) -> Result<(PathBuf, 
     Ok((dir.join(name), bytes))
 }
 
-/// Load and verify one sealed catalog. With `expected_sha`, its manifest must hash to it.
-pub fn load(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<Loaded> {
-    load_inner(path, expected_sha, pin, None).map(|(loaded, _)| loaded)
+/// A link's members, verified against its manifest.
+struct Members {
+    deployments: Vec<u8>,
+    ids: File,
+    ids_head: Option<String>,
+    pinned: Vec<Pinned>,
 }
 
-fn load_inner(
-    path: &Path,
-    expected_sha: Option<&str>,
-    pin: &Pin,
+fn open_members(
+    segment: &Segment,
+    manifest_pin: Pinned,
     ids_prefix: Option<u64>,
-) -> Result<(Loaded, Option<String>)> {
-    let (segment, manifest_pin) = read_manifest(path, expected_sha, pin)?;
-    let m = &segment.manifest;
+) -> Result<Members> {
+    let (path, m) = (&segment.manifest_path, &segment.manifest);
     let (ids_path, ids_bytes) = member_path(path, &m["blockIds"], 128 * 1024 * 1024 * 1024)?;
     let (rows_path, rows_bytes) = member_path(path, &m["deployments"], MAX_DEPLOYMENTS)?;
     let (ids_sha, ids_head, ids_pin, ids) = pin_hash(&ids_path, ids_bytes, ids_prefix)?;
@@ -381,34 +416,59 @@ fn load_inner(
         ids_sha == segment.block_ids_sha256,
         "block membership differs from its manifest"
     );
-    let (deployments, rows_pin, _) = pin_read(&rows_path, MAX_DEPLOYMENTS, Some(rows_bytes))?;
+    let (deployments, rows_pin) = pin_read(&rows_path, MAX_DEPLOYMENTS, Some(rows_bytes))?;
     ensure!(
         sha(&deployments) == segment.deployments_sha256,
         "deployment records differ from their manifest"
     );
-    let loaded = Loaded {
-        segment,
-        deployments: Arc::new(deployments),
+    Ok(Members {
+        deployments,
         ids,
+        ids_head,
         pinned: vec![manifest_pin, ids_pin, rows_pin],
-    };
-    check_records(&loaded, 0)?;
-    let end = loaded.segment.end_block;
-    ensure!(
-        hex::encode(loaded.block_id(1)?) == loaded.segment.first_block_id
-            && hex::encode(loaded.block_id(end)?) == loaded.segment.last_block_id,
-        "coverage boundary identity mismatch"
-    );
-    Ok((loaded, ids_head))
+    })
 }
 
-/// Check every record from byte `from` of the deployments member; return how many there were
-/// and the lowest block they name.
-fn check_records(loaded: &Loaded, from: usize) -> Result<(u64, Option<u32>)> {
+/// Load and verify one complete catalog. With `expected_sha`, its manifest must hash to it.
+pub fn load(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<Loaded> {
+    load_complete(path, expected_sha, pin, None).map(|(loaded, _)| loaded)
+}
+
+fn load_complete(
+    path: &Path,
+    expected_sha: Option<&str>,
+    pin: &Pin,
+    ids_prefix: Option<u64>,
+) -> Result<(Loaded, Option<String>)> {
+    let (segment, manifest_pin) = read_manifest(path, expected_sha, pin)?;
+    ensure!(
+        !segment.incremental,
+        "{} is a segment, not a complete catalog",
+        path.display()
+    );
+    let members = open_members(&segment, manifest_pin, ids_prefix)?;
+    let end = segment.end_block;
+    let loaded = Loaded {
+        pieces: vec![Piece {
+            start: 1,
+            end,
+            file: Arc::new(members.ids),
+        }],
+        deployments: Arc::new(members.deployments),
+        pinned: members.pinned,
+        segment,
+    };
+    check_records(&loaded, 0, 1)?;
+    loaded.check_boundary()?;
+    Ok((loaded, members.ids_head))
+}
+
+/// Check every record from byte `from` of the chain's records: shape, a unique position, a block
+/// in `lowest..=end` and its id. Returns how many there were.
+fn check_records(loaded: &Loaded, from: usize, lowest: u32) -> Result<u64> {
     let end = loaded.segment.end_block;
     let mut positions = HashSet::new();
     let mut count = 0u64;
-    let mut lowest: Option<u32> = None;
     for line in loaded.deployments[from..].split(|b| *b == b'\n') {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -432,6 +492,12 @@ fn check_records(loaded: &Loaded, from: usize) -> Result<(u64, Option<u32>)> {
             })
             && decimal(&row["abiSequence"], Some(0xffff_ffff)).is_some();
         ensure!(valid, "invalid sparse ABI row");
+        let block = block.unwrap();
+        ensure!(
+            block >= lowest,
+            "catalog {} adds a record at block {block}, before its start {lowest}",
+            loaded.segment.manifest_sha256
+        );
         let position = if phase == "deployment" {
             let action = &row["action"];
             ensure!(
@@ -442,27 +508,24 @@ fn check_records(loaded: &Loaded, from: usize) -> Result<(u64, Option<u32>)> {
                 "invalid deployment action"
             );
             format!(
-                "{account}:{}:deployment:{}",
-                block.unwrap(),
+                "{account}:{block}:deployment:{}",
                 action["globalSequence"].as_str().unwrap()
             )
         } else {
             let ordinal = uint(&row["deltaOrdinal"], 0).context("invalid final-state ordinal")?;
-            format!("{account}:{}:block-final:{ordinal}", block.unwrap())
+            format!("{account}:{block}:block-final:{ordinal}")
         };
         ensure!(positions.insert(position), "duplicate sparse ABI position");
-        let block = block.unwrap();
         ensure!(
             hex::encode(loaded.block_id(block)?) == row["blockId"].as_str().unwrap(),
             "ABI row differs from covered block identity at block {block}"
         );
-        lowest = Some(lowest.map_or(block, |l| l.min(block)));
         count += 1;
     }
     if from == 0 {
         ensure!(count == loaded.segment.records, "ABI row count mismatch");
     }
-    Ok((count, lowest))
+    Ok(count)
 }
 
 impl std::fmt::Debug for Loaded {
@@ -470,36 +533,84 @@ impl std::fmt::Debug for Loaded {
         f.debug_struct("Loaded")
             .field("segment", &self.segment.manifest_sha256)
             .field("end_block", &self.segment.end_block)
+            .field("pieces", &self.pieces.len())
             .finish()
     }
 }
 
 impl Loaded {
-    /// The membership's id for `block`.
-    pub fn block_id(&self, block: u32) -> Result<[u8; 32]> {
+    fn piece(&self, block: u32) -> Result<&Piece> {
         ensure!(
             block >= 1 && block <= self.segment.end_block,
             "block {block} is outside the catalog's coverage 1..={}",
             self.segment.end_block
         );
+        let i = self.pieces.partition_point(|p| p.end < block);
+        Ok(&self.pieces[i])
+    }
+
+    /// The membership's id for `block`.
+    pub fn block_id(&self, block: u32) -> Result<[u8; 32]> {
+        let p = self.piece(block)?;
         let mut id = [0u8; 32];
-        pread(&self.ids, u64::from(block - 1) * 32, &mut id)
+        pread(&p.file, u64::from(block - p.start) * 32, &mut id)
             .context("truncated block identity index")?;
         Ok(id)
     }
 
-    /// The membership's ids for `from..=to`, in one read.
+    /// The membership's ids for `from..=to`: one read per link file the range spans.
     pub fn block_ids(&self, from: u32, to: u32) -> Result<Vec<[u8; 32]>> {
         ensure!(
             from >= 1 && from <= to && to <= self.segment.end_block,
             "blocks {from}..={to} are outside the catalog's coverage 1..={}",
             self.segment.end_block
         );
-        let mut buf = vec![0u8; (to - from + 1) as usize * 32];
-        pread(&self.ids, u64::from(from - 1) * 32, &mut buf)
-            .context("truncated block identity index")?;
-        let (ids, _) = buf.as_chunks::<32>();
-        Ok(ids.to_vec())
+        let mut out = Vec::with_capacity((to - from + 1) as usize);
+        let mut at = from;
+        while at <= to {
+            let p = self.piece(at)?;
+            let last = to.min(p.end);
+            let mut buf = vec![0u8; (last - at + 1) as usize * 32];
+            pread(&p.file, u64::from(at - p.start) * 32, &mut buf)
+                .context("truncated block identity index")?;
+            out.extend_from_slice(buf.as_chunks::<32>().0);
+            at = last + 1;
+        }
+        Ok(out)
+    }
+
+    /// SHA-256 of the membership of blocks `1..=end_block`, over every link file.
+    fn ids_digest(&self) -> Result<String> {
+        if let [p] = self.pieces.as_slice()
+            && p.start == 1
+            && !self.segment.incremental
+        {
+            return Ok(self.segment.block_ids_sha256.clone());
+        }
+        let mut h = Sha256::new();
+        let mut buf = vec![0u8; 1 << 20];
+        for p in &self.pieces {
+            let len = u64::from(p.end - p.start + 1) * 32;
+            let mut off = 0u64;
+            while off < len {
+                let n = ((len - off) as usize).min(buf.len());
+                pread(&p.file, off, &mut buf[..n])?;
+                h.update(&buf[..n]);
+                off += n as u64;
+            }
+        }
+        Ok(hex::encode(h.finalize()))
+    }
+
+    /// The newest link's first and last block ids must be the membership's.
+    fn check_boundary(&self) -> Result<()> {
+        let s = &self.segment;
+        ensure!(
+            hex::encode(self.block_id(s.start_block)?) == s.start_block_id
+                && hex::encode(self.block_id(s.end_block)?) == s.last_block_id,
+            "coverage boundary identity mismatch"
+        );
+        Ok(())
     }
 
     /// Fail if any member path now names another file than the one verified.
@@ -516,36 +627,71 @@ impl Loaded {
         Ok(())
     }
 
-    /// The member files, by their names in the manifest.
-    pub fn members(&self) -> Vec<(String, PathBuf)> {
-        self.pinned
-            .iter()
-            .filter_map(|p| Some((p.path.file_name()?.to_str()?.to_owned(), p.path.clone())))
-            .collect()
+    /// The newest link as the tip a [`crate::wire_history::Sealer`] continues.
+    pub fn tip(&self) -> Result<Tip> {
+        let s = &self.segment;
+        Ok(Tip {
+            manifest_sha256: s.manifest_sha256.clone(),
+            end_block: s.end_block,
+            last_block_id: hex::decode(&s.last_block_id)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("invalid last block id"))?,
+            last_global_sequence: s.last_global_sequence,
+            ship_abi_sha256: s.ship_abi_sha256.clone(),
+            total_records: s.total_records,
+        })
     }
 }
 
-/// Check that `next` extends `prev`. `next_ids_head` is the digest of `next`'s first
-/// `prev.end_block * 32` membership bytes.
-fn check_extension(prev: &Loaded, next: &Loaded, next_ids_head: Option<&str>) -> Result<()> {
-    let (p, n) = (&prev.segment, &next.segment);
+/// What every link must keep from the one before it.
+fn check_link(prev: &Loaded, next: &Segment) -> Result<()> {
+    let p = &prev.segment;
     let expected = BaseRef {
         manifest_sha256: p.manifest_sha256.clone(),
         end_block: p.end_block,
         last_block_id: p.last_block_id.clone(),
     };
     ensure!(
-        n.base.as_ref() == Some(&expected),
+        next.base.as_ref() == Some(&expected),
         "catalog {} does not name {} (end {}) as its base",
-        n.manifest_sha256,
+        next.manifest_sha256,
         p.manifest_sha256,
         p.end_block
     );
     ensure!(
-        n.end_block > p.end_block
-            && n.first_block_id == p.first_block_id
-            && n.ship_abi_sha256 == p.ship_abi_sha256,
+        next.end_block > p.end_block && next.ship_abi_sha256 == p.ship_abi_sha256,
         "catalog {} does not extend its base's coverage",
+        next.manifest_sha256
+    );
+    match (p.last_global_sequence, next.last_global_sequence) {
+        (Some(a), Some(b)) => ensure!(
+            b >= a,
+            "catalog {} goes back in global sequence",
+            next.manifest_sha256
+        ),
+        (Some(_), None) => bail!(
+            "catalog {} lost its last global sequence",
+            next.manifest_sha256
+        ),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Load `path` as a complete catalog extending the chain `prev` and verify it: its records and
+/// block ids start with the chain's, byte for byte.
+pub fn load_extension(prev: &Loaded, path: &Path, pin: &Pin) -> Result<Loaded> {
+    let (next, head) = load_complete(
+        path,
+        None,
+        pin,
+        Some(u64::from(prev.segment.end_block) * 32),
+    )?;
+    let n = &next.segment;
+    check_link(prev, n)?;
+    ensure!(
+        n.start_block_id == hex::encode(prev.block_id(1)?),
+        "catalog {} starts at another genesis block",
         n.manifest_sha256
     );
     ensure!(
@@ -553,72 +699,94 @@ fn check_extension(prev: &Loaded, next: &Loaded, next_ids_head: Option<&str>) ->
         "catalog {} does not keep its base's records byte for byte",
         n.manifest_sha256
     );
-    let (added, lowest) = check_records(next, prev.deployments.len())?;
+    let added = check_records(&next, prev.deployments.len(), prev.segment.end_block + 1)?;
     ensure!(
-        added == n.records - p.records,
+        added == n.total_records - prev.segment.total_records,
         "catalog {} adds {added} records but counts {}",
         n.manifest_sha256,
-        n.records - p.records
+        n.total_records - prev.segment.total_records
     );
-    if let Some(lowest) = lowest {
-        ensure!(
-            lowest > p.end_block,
-            "catalog {} adds a record at block {lowest}, inside its base (start must be {})",
-            n.manifest_sha256,
-            p.end_block + 1
-        );
-    }
     ensure!(
-        next_ids_head == Some(p.block_ids_sha256.as_str()),
+        head == Some(prev.ids_digest()?),
         "catalog {} does not keep its base's block ids",
         n.manifest_sha256
     );
-    match (p.last_global_sequence, n.last_global_sequence) {
-        (Some(a), Some(b)) => ensure!(
-            b >= a,
-            "catalog {} goes back in global sequence",
-            n.manifest_sha256
-        ),
-        (Some(_), None) => bail!(
-            "catalog {} lost its last global sequence",
-            n.manifest_sha256
-        ),
-        _ => {}
-    }
-    Ok(())
-}
-
-/// Load `path` as an extension of `prev` and verify it.
-pub fn load_extension(prev: &Loaded, path: &Path, pin: &Pin) -> Result<Loaded> {
-    let (next, head) = load_inner(
-        path,
-        None,
-        pin,
-        Some(u64::from(prev.segment.end_block) * 32),
-    )?;
-    check_extension(prev, &next, head.as_deref())?;
     Ok(next)
 }
 
-/// Verify that `next` extends `prev` (both already loaded).
-pub fn verify_extension(prev: &Loaded, next: &Loaded) -> Result<()> {
-    let head = {
-        let len = u64::from(prev.segment.end_block) * 32;
-        let mut h = Sha256::new();
-        let mut off = 0u64;
-        let mut buf = vec![0u8; 1 << 20];
-        while off < len {
-            let n = ((len - off) as usize).min(buf.len());
-            pread(&next.ids, off, &mut buf[..n])?;
-            h.update(&buf[..n]);
-            off += n as u64;
-        }
-        hex::encode(h.finalize())
+/// Load `path` as a segment of the chain `prev` and verify it: it starts right after the chain,
+/// its block ids and records cover only its blocks, and its counts add up.
+pub fn load_segment(prev: &Loaded, path: &Path, pin: &Pin) -> Result<Loaded> {
+    let (segment, manifest_pin) = read_manifest(path, None, pin)?;
+    ensure!(
+        segment.incremental,
+        "{} is a complete catalog, not a segment",
+        path.display()
+    );
+    check_link(prev, &segment)?;
+    ensure!(
+        segment.start_block == prev.segment.end_block + 1,
+        "segment {} starts at {}, not right after its base's end {}",
+        segment.manifest_sha256,
+        segment.start_block,
+        prev.segment.end_block
+    );
+    ensure!(
+        segment.total_records == prev.segment.total_records + segment.records,
+        "segment {} counts {} records in its chain, its base has {} and it adds {}",
+        segment.manifest_sha256,
+        segment.total_records,
+        prev.segment.total_records,
+        segment.records
+    );
+    let members = open_members(&segment, manifest_pin, None)?;
+    let mut deployments = Vec::with_capacity(prev.deployments.len() + members.deployments.len());
+    deployments.extend_from_slice(&prev.deployments);
+    deployments.extend_from_slice(&members.deployments);
+    let mut pieces: Vec<Piece> = prev
+        .pieces
+        .iter()
+        .map(|p| Piece {
+            start: p.start,
+            end: p.end,
+            file: p.file.clone(),
+        })
+        .collect();
+    pieces.push(Piece {
+        start: segment.start_block,
+        end: segment.end_block,
+        file: Arc::new(members.ids),
+    });
+    let mut pinned = prev.pinned.clone();
+    pinned.extend(members.pinned);
+    let from = prev.deployments.len();
+    let next = Loaded {
+        segment,
+        deployments: Arc::new(deployments),
+        pieces,
+        pinned,
     };
-    check_extension(prev, next, Some(&head))
+    let added = check_records(&next, from, next.segment.start_block)?;
+    ensure!(
+        added == next.segment.records,
+        "segment {} holds {added} records but counts {}",
+        next.segment.manifest_sha256,
+        next.segment.records
+    );
+    next.check_boundary()?;
+    Ok(next)
 }
 
-/// The pinned genesis and the verified segments that extend it, oldest first.
+/// Load `path` as the next link of `prev`, whichever kind its manifest names.
+fn load_link(prev: &Loaded, path: &Path, pin: &Pin, incremental: bool) -> Result<Loaded> {
+    if incremental {
+        load_segment(prev, path, pin)
+    } else {
+        load_extension(prev, path, pin)
+    }
+}
+
+/// The pinned genesis and the verified links that extend it, oldest first.
 pub struct Chain {
     pub pin: Pin,
     pub segments: Vec<Segment>,
@@ -652,37 +820,52 @@ fn manifests(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-/// Quick look at a manifest: its digest and base digest, or `None` if it is not one.
-fn peek(path: &Path) -> Option<(String, Option<String>, u32)> {
+/// What a quick look at a manifest gives: its path, base digest, end and whether it is a segment.
+#[derive(Clone)]
+struct Peek {
+    path: PathBuf,
+    base: Option<String>,
+    end: u32,
+    incremental: bool,
+}
+
+/// Quick look at a manifest: its digest and what [`Peek`] holds, or `None` if it is not one.
+fn peek(path: &Path) -> Option<(String, Peek)> {
     let meta = fs::symlink_metadata(path).ok()?;
     if !meta.is_file() || meta.len() > MAX_MANIFEST {
         return None;
     }
     let raw = fs::read(path).ok()?;
     let m: Value = serde_json::from_slice(&raw).ok()?;
-    if m["format"] != FORMAT {
+    let incremental = m["format"] == SEGMENT_FORMAT;
+    if !incremental && m["format"] != FORMAT {
         return None;
     }
-    let base = m["base"]["manifestSha256"].as_str().map(str::to_owned);
     Some((
         sha(&raw),
-        base,
-        u32::try_from(m["endBlock"].as_u64()?).ok()?,
+        Peek {
+            path: path.to_path_buf(),
+            base: m["base"]["manifestSha256"].as_str().map(str::to_owned),
+            end: u32::try_from(m["endBlock"].as_u64()?).ok()?,
+            incremental,
+        },
     ))
 }
 
+type Children = BTreeMap<String, Vec<(u32, String)>>;
+
 impl Chain {
     /// Find the genesis catalog by its digest under `dir`, then the longest verified chain of
-    /// extensions from it. A manifest that does not verify is reported and left out.
+    /// extensions and segments from it. A manifest that does not verify is reported and left out.
     pub fn discover(dir: &Path, genesis_sha256: &str, pin: Pin) -> Result<Self> {
         let paths = manifests(dir)?;
-        let mut by_sha: HashMap<String, (PathBuf, Option<String>, u32)> = HashMap::new();
+        let mut by_sha: HashMap<String, Peek> = HashMap::new();
         for path in &paths {
-            if let Some((sha, base, end)) = peek(path) {
-                by_sha.entry(sha).or_insert((path.clone(), base, end));
+            if let Some((sha, p)) = peek(path) {
+                by_sha.entry(sha).or_insert(p);
             }
         }
-        let (genesis_path, _, _) = by_sha
+        let genesis_path = by_sha
             .get(genesis_sha256)
             .with_context(|| {
                 format!(
@@ -690,6 +873,7 @@ impl Chain {
                     dir.display()
                 )
             })?
+            .path
             .clone();
         let genesis = load(&genesis_path, Some(genesis_sha256), &pin)?;
         ensure!(
@@ -702,25 +886,25 @@ impl Chain {
             newest: Arc::new(genesis),
             seen: paths.into_iter().collect(),
         };
-        let mut children: BTreeMap<String, Vec<(u32, String)>> = BTreeMap::new();
-        for (sha, (_, base, end)) in &by_sha {
-            if let Some(base) = base {
+        let mut children = Children::new();
+        for (sha, p) in &by_sha {
+            if let Some(base) = &p.base {
                 children
                     .entry(base.clone())
                     .or_default()
-                    .push((*end, sha.clone()));
+                    .push((p.end, sha.clone()));
             }
         }
         chain.adopt_descendants(&by_sha, &children)?;
         Ok(chain)
     }
 
-    /// Extend the chain greedily: among the newest segment's verified children, the one reaching
+    /// Extend the chain greedily: among the newest link's verified children, the one reaching
     /// furthest (then the lowest digest) is adopted, until none is left.
     fn adopt_descendants(
         &mut self,
-        by_sha: &HashMap<String, (PathBuf, Option<String>, u32)>,
-        children: &BTreeMap<String, Vec<(u32, String)>>,
+        by_sha: &HashMap<String, Peek>,
+        children: &Children,
     ) -> Result<bool> {
         let mut grew = false;
         loop {
@@ -731,16 +915,17 @@ impl Chain {
             candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             let mut adopted = false;
             for (_, sha) in candidates {
-                let path = &by_sha[&sha].0;
-                match load_extension(&self.newest, path, &self.pin) {
+                let p = &by_sha[&sha];
+                match load_link(&self.newest, &p.path, &self.pin, p.incremental) {
                     Ok(next) => {
-                        self.segments.push(next.segment.clone());
-                        self.newest = Arc::new(next);
+                        self.adopt(next);
                         adopted = true;
                         grew = true;
                         break;
                     }
-                    Err(e) => eprintln!("[wire-catalog] {} is not adopted: {e:#}", path.display()),
+                    Err(e) => {
+                        eprintln!("[wire-catalog] {} is not adopted: {e:#}", p.path.display())
+                    }
                 }
             }
             if !adopted {
@@ -749,8 +934,15 @@ impl Chain {
         }
     }
 
+    /// Make an already verified link the newest (a sealer's own segment).
+    pub fn adopt(&mut self, next: Loaded) {
+        self.seen.insert(next.segment.manifest_path.clone());
+        self.segments.push(next.segment.clone());
+        self.newest = Arc::new(next);
+    }
+
     /// Look for manifests added under `dir` since the last look and adopt the ones that extend
-    /// the newest segment. Returns whether the chain grew.
+    /// the newest link. Returns whether the chain grew.
     pub fn follow(&mut self, dir: &Path) -> Result<bool> {
         let fresh: Vec<PathBuf> = manifests(dir)?
             .into_iter()
@@ -760,21 +952,18 @@ impl Chain {
             return Ok(false);
         }
         let mut by_sha = HashMap::new();
-        let mut children: BTreeMap<String, Vec<(u32, String)>> = BTreeMap::new();
+        let mut children = Children::new();
         for path in fresh {
             // A manifest is published last, so one that does not parse yet is looked at again.
-            match peek(&path) {
-                Some((sha, base, end)) => {
-                    if let Some(base) = &base {
-                        children
-                            .entry(base.clone())
-                            .or_default()
-                            .push((end, sha.clone()));
-                    }
-                    by_sha.entry(sha).or_insert((path.clone(), base, end));
-                    self.seen.insert(path);
+            if let Some((sha, p)) = peek(&path) {
+                if let Some(base) = &p.base {
+                    children
+                        .entry(base.clone())
+                        .or_default()
+                        .push((p.end, sha.clone()));
                 }
-                None => continue,
+                by_sha.entry(sha).or_insert(p);
+                self.seen.insert(path);
             }
         }
         self.adopt_descendants(&by_sha, &children)
@@ -784,12 +973,12 @@ impl Chain {
         &self.segments[0]
     }
 
-    /// The oldest segment whose coverage reaches `block`: the catalog that sealed it.
+    /// The oldest link whose coverage reaches `block`: the catalog that sealed it.
     pub fn sealing(&self, block: u32) -> Option<&Segment> {
         self.segments.iter().find(|s| s.end_block >= block)
     }
 
-    /// The segments after the one with digest `after` (all of them for `None`).
+    /// The links after the one with digest `after` (all of them for `None`).
     pub fn after(&self, after: Option<&str>) -> Result<&[Segment]> {
         match after {
             None => Ok(&self.segments),
@@ -949,6 +1138,110 @@ mod tests {
             ..pin()
         };
         assert!(load(&gp, Some(&g), &other).is_err());
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// Write a segment of blocks `start..=end` extending the link `(sha, base_end)`.
+    fn segment(
+        dir: &Path,
+        name: &str,
+        (start, end): (u32, u32),
+        records: &[String],
+        base: (&str, u32),
+        total: usize,
+    ) -> (PathBuf, String) {
+        std::fs::create_dir_all(dir.join(name)).unwrap();
+        let d = dir.join(name);
+        let rows: String = records
+            .iter()
+            .map(|r| {
+                format!(
+                    "{r}
+"
+                )
+            })
+            .collect();
+        let ids: Vec<u8> = (start..=end).flat_map(id).collect();
+        std::fs::write(d.join("s.ndjson"), &rows).unwrap();
+        std::fs::write(d.join("s.blocks.bin"), &ids).unwrap();
+        let m = json!({"format":SEGMENT_FORMAT,"chainId":CHAIN,"nodeRevision":"rev","producerProfileId":"profile",
+            "shipAbiSha256":"22".repeat(32),"base":{"manifestSha256":base.0,"endBlock":base.1,"lastBlockId":hex::encode(id(base.1))},
+            "startBlock":start,"endBlock":end,"startBlockId":hex::encode(id(start)),"lastBlockId":hex::encode(id(end)),
+            "irreversibleBoundary":{"blockNum":end,"blockId":hex::encode(id(end))},"complete":true,
+            "lastGlobalSequence":(end * 10).to_string(),"totalRecords":total,
+            "deployments":{"name":"s.ndjson","bytes":rows.len(),"sha256":sha(rows.as_bytes()),"records":records.len()},
+            "blockIds":{"name":"s.blocks.bin","bytes":ids.len(),"sha256":sha(&ids),"count":end - start + 1}});
+        let text = format!(
+            "{m}
+"
+        );
+        let path = d.join("s.manifest.json");
+        std::fs::write(&path, &text).unwrap();
+        (path, sha(text.as_bytes()))
+    }
+
+    #[test]
+    fn segments_extend_the_chain_with_only_what_they_add() {
+        let d = tmp("segments");
+        let r1 = vec![record("sysio", 3, "block-final", 0)];
+        let (_, g) = seal(&d, "a", 10, &r1, None);
+        let r2 = vec![record("token", 12, "block-final", 0)];
+        let (_, s1) = segment(&d, "b", (11, 20), &r2, (&g, 10), 2);
+        let (_, s2) = segment(&d, "c", (21, 25), &[], (&s1, 20), 2);
+        let mut chain = Chain::discover(&d, &g, pin()).unwrap();
+        assert_eq!(chain.segments.len(), 3);
+        let view = chain.newest.clone();
+        assert_eq!(
+            (
+                view.segment.manifest_sha256.as_str(),
+                view.segment.end_block
+            ),
+            (s2.as_str(), 25)
+        );
+        assert_eq!(
+            view.block_ids(9, 22).unwrap(),
+            (9..=22).map(id).collect::<Vec<_>>()
+        );
+        assert_eq!(view.block_id(25).unwrap(), id(25));
+        let rows = String::from_utf8(view.deployments.to_vec()).unwrap();
+        assert_eq!(
+            rows,
+            format!(
+                "{}
+{}
+",
+                r1[0], r2[0]
+            )
+        );
+        assert_eq!(view.tip().unwrap().total_records, 2);
+        assert_eq!(chain.sealing(15).unwrap().manifest_sha256, s1);
+
+        // A complete extension after segments must hold the whole chain as its prefix.
+        let mut all = r1.clone();
+        all.extend(r2.clone());
+        all.push(record("token", 27, "block-final", 0));
+        seal(&d, "d", 30, &all, Some(&(s2.clone(), 25)));
+        // Segments that skip a block, miscount the chain or hold a record before their start.
+        segment(&d, "e", (32, 35), &[], (&s2, 25), 2);
+        segment(&d, "f", (26, 28), &[], (&s2, 25), 3);
+        segment(
+            &d,
+            "g",
+            (26, 28),
+            &[record("token", 24, "block-final", 0)],
+            (&s2, 25),
+            3,
+        );
+        assert!(chain.follow(&d).unwrap());
+        assert_eq!(
+            chain.newest.segment.end_block, 30,
+            "only the complete extension is adopted"
+        );
+        assert!(!chain.newest.segment.incremental);
+        assert_eq!(
+            chain.newest.block_ids(1, 30).unwrap(),
+            (1..=30).map(id).collect::<Vec<_>>()
+        );
         std::fs::remove_dir_all(d).ok();
     }
 
