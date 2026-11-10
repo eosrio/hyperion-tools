@@ -10,6 +10,9 @@
 //! * The **sealed LIB** is the newest catalog's end, bounded by what the logs hold. Every block a
 //!   range serves is a catalog member: its trace-log, chain-state and block-log ids must equal the
 //!   catalog's id for it, and its header must chain to the block before.
+//! * With `--seal`, the service extends the chain itself: every `--seal-blocks` irreversible
+//!   blocks (or after `--seal-max-wait-ms`) it seals them as one incremental segment, verifies it
+//!   like any consumer and serves it ([`seal`]).
 //! * The logs' indexes are re-measured on every request, so a node's growing logs are followed;
 //!   only blocks up to the sealed LIB are served, and `blocks.log` holds irreversible blocks only.
 //! * Documents are exactly what `action-proto` and `delta-proto` write (the same producers), as
@@ -25,6 +28,7 @@
 //! * `DELETE /v1/ranges/<stream>`: cancel a stream.
 
 mod range;
+mod seal;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -33,7 +37,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
 use hyperion_ship::provider::{ProtocolProvider, TimestampProfile};
 use hyperion_ship::slab::{BlockFile, ShipFile};
@@ -81,6 +85,27 @@ struct Args {
     /// How often --follow looks for new catalogs, in milliseconds.
     #[arg(long, default_value_t = 1000)]
     poll_ms: u64,
+    /// Seal the node's new irreversible blocks as incremental catalog segments while running.
+    #[arg(long, default_value_t = false, requires = "ship_abi")]
+    seal: bool,
+    /// The node's SHiP ABI (handshake JSON), as the catalog chain was sealed with it.
+    #[arg(long)]
+    ship_abi: Option<PathBuf>,
+    /// Where segments are written (default: `segments` under --catalog-dir).
+    #[arg(long)]
+    seal_dir: Option<PathBuf>,
+    /// Seal once this many irreversible blocks follow the chain.
+    #[arg(long, default_value_t = 120)]
+    seal_blocks: u32,
+    /// Seal fewer blocks once the oldest unsealed one has waited this long, in milliseconds.
+    #[arg(long, default_value_t = 60_000)]
+    seal_max_wait_ms: u64,
+    /// How often the sealer looks at the block log, in milliseconds.
+    #[arg(long, default_value_t = 500)]
+    seal_poll_ms: u64,
+    /// Threads one seal reads with.
+    #[arg(long, default_value_t = 4)]
+    seal_threads: usize,
     /// How long a credited stream waits for a grant before it fails, in seconds.
     #[arg(long, default_value_t = 60)]
     credit_timeout: u64,
@@ -134,10 +159,14 @@ pub struct Service {
     pub range_threads: usize,
     pub max_range: u32,
     pub credit_timeout: Duration,
+    pub state_history: PathBuf,
     catalog_dir: PathBuf,
     follow: bool,
-    chain: Mutex<Chain>,
-    current: RwLock<Arc<Sealed>>,
+    pub chain: Mutex<Chain>,
+    pub current: RwLock<Arc<Sealed>>,
+    /// `(every blocks, max wait ms)` when the service seals its own chain.
+    sealing: Option<(u32, u64)>,
+    pub seal_status: Mutex<seal::Status>,
     /// One permit per worker thread that may produce a chunk at a time, over all ranges.
     pub permits: range::Permits,
     /// Ranges streaming now, and the window each may run ahead of its fold: the budget's share,
@@ -191,7 +220,7 @@ impl Service {
 
     /// Build what requests are served from, after checking that the logs still hold the newest
     /// catalog's last block (when they reach it).
-    fn seal(&self, chain: &Chain) -> Result<Sealed> {
+    pub fn view(&self, chain: &Chain) -> Result<Sealed> {
         check_logs(&self.trace, &self.state, &chain.newest)?;
         build(chain)
     }
@@ -214,6 +243,12 @@ impl Service {
             "logs":{"trace":[b.trace.0,b.trace.1],"chainState":[b.state.0,b.state.1],"blocks":[b.blocks.0,b.blocks.1]},
             "kinds":range::KINDS,"chunkBlocks":range::CHUNK,"maxRangeBlocks":self.max_range,
             "threads":self.threads,"follow":self.follow,
+            "seal":self.sealing.map(|(blocks, wait)| {
+                let st = self.seal_status.lock().unwrap();
+                json!({"everyBlocks":blocks,"maxWaitMs":wait,"segmentsSealed":st.segments,
+                    "lastSealMs":st.last_seal_ms,"lastError":st.last_error,
+                    "unsealedBlocks":b.blocks.1.saturating_sub(newest.end_block)})
+            }),
             "index":{"prefix":self.defaults.index_prefix,"version":self.defaults.index_version,
                 "partitionSize":self.defaults.partition_size},
         }))
@@ -527,8 +562,13 @@ fn main() -> Result<()> {
         },
         max_range: args.max_range.max(1),
         credit_timeout: Duration::from_secs(args.credit_timeout.max(1)),
+        state_history: args.state_history.clone(),
         catalog_dir: args.catalog_dir.clone(),
         follow: args.follow,
+        sealing: args
+            .seal
+            .then_some((args.seal_blocks.max(1), args.seal_max_wait_ms)),
+        seal_status: Mutex::new(seal::Status::default()),
         chain: Mutex::new(chain),
         current: RwLock::new(Arc::new(sealed)),
         permits: range::Permits::new(threads),
@@ -547,7 +587,7 @@ fn main() -> Result<()> {
                 let mut chain = svc.chain.lock().unwrap();
                 match chain.follow(&svc.catalog_dir) {
                     Ok(false) => {}
-                    Ok(true) => match svc.seal(&chain) {
+                    Ok(true) => match svc.view(&chain) {
                         Ok(sealed) => {
                             eprintln!(
                                 "[range-server] adopted catalog {}: sealed through block {}",
@@ -565,6 +605,22 @@ fn main() -> Result<()> {
                 }
             }
         });
+    }
+
+    if args.seal {
+        let cfg = seal::Config {
+            schema: std::fs::read_to_string(args.ship_abi.as_deref().unwrap())
+                .context("read --ship-abi")?,
+            dir: seal::dir(&args.catalog_dir, args.seal_dir.as_deref()),
+            blocks: args.seal_blocks.max(1),
+            max_wait: Duration::from_millis(args.seal_max_wait_ms),
+            poll: Duration::from_millis(args.seal_poll_ms.max(10)),
+            threads: args.seal_threads.max(1),
+        };
+        std::fs::create_dir_all(&cfg.dir)
+            .with_context(|| format!("create {}", cfg.dir.display()))?;
+        let svc = svc.clone();
+        std::thread::spawn(move || seal::run(svc, cfg));
     }
 
     let server = Server::http(&args.listen)
