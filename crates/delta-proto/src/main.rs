@@ -27,7 +27,7 @@ use rs_abieos::{AbiHandle, Abieos, AbieosError};
 
 use hyperion_ship::delta::read_varuint;
 
-mod wire;
+use delta_proto::wire;
 use hyperion_ship::disk::{canonical_offsets, decode_payload, is_ship_magic};
 
 #[derive(Parser, Debug)]
@@ -463,6 +463,39 @@ fn main() -> Result<()> {
             _ => bail!("Wire deltas need --chain-id as 64 lowercase hex characters"),
         }
     }
+    if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
+        return wire::run(wire::Config {
+            state_dir: args.from_disk.clone(),
+            start: args.start,
+            end: args.end,
+            threads: args.threads,
+            abi_catalog: args.abi_index.clone(),
+            blocks_dir: args
+                .blocks_dir
+                .clone()
+                .context("Wire deltas need --blocks-dir for @timestamp")?,
+            out: args.out.clone(),
+            es: args.es.clone(),
+            chain: args.chain.clone(),
+            index_version: args.index_version.clone(),
+            partition_size: args.partition_size,
+            es_batch: args.es_batch,
+            es_workers: args.es_workers,
+            docs: wire::DocConfig {
+                profile: profile.clone(),
+                timestamps: args.protocol.timestamp_profile()?,
+                doc_profile_id: args
+                    .doc_profile_id
+                    .clone()
+                    .unwrap_or_else(|| profile.id.clone()),
+                chain_id: args
+                    .chain_id
+                    .clone()
+                    .context("Wire deltas need --chain-id")?,
+                system_contract: args.system_contract.clone(),
+            },
+        });
+    }
     let log_path = format!("{}/chain_state_history.log", args.from_disk);
     let idx_path = format!("{}/chain_state_history.index", args.from_disk);
     let mut f = File::open(&log_path).with_context(|| format!("open {log_path}"))?;
@@ -478,39 +511,6 @@ fn main() -> Result<()> {
     let end = args.end.min(last_block);
     if start > end {
         bail!("empty range after clamp to [{first_block}..{last_block}]");
-    }
-    if let hyperion_ship::provider::ProtocolProvider::Wire(profile) = &args.protocol {
-        return wire::run(wire::Config {
-            log_path,
-            idx_path,
-            first_block,
-            start,
-            end,
-            threads: args.threads,
-            abi_catalog: args.abi_index.clone(),
-            blocks_dir: args
-                .blocks_dir
-                .clone()
-                .context("Wire deltas need --blocks-dir for @timestamp")?,
-            out: args.out.clone(),
-            es: args.es.clone(),
-            chain: args.chain.clone(),
-            index_version: args.index_version.clone(),
-            partition_size: args.partition_size,
-            es_batch: args.es_batch,
-            es_workers: args.es_workers,
-            profile: profile.clone(),
-            timestamps: args.protocol.timestamp_profile()?,
-            doc_profile_id: args
-                .doc_profile_id
-                .clone()
-                .unwrap_or_else(|| profile.id.clone()),
-            chain_id: args
-                .chain_id
-                .clone()
-                .context("Wire deltas need --chain-id")?,
-            system_contract: args.system_contract.clone(),
-        });
     }
     args.protocol
         .require_antelope("legacy contract_row bulk path")?;

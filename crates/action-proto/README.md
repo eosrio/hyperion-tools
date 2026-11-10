@@ -39,3 +39,12 @@ action-proto --protocol wire-sysio-6508c9e8-engineering-v1 \
 
 Any failure (a log disagreement, an invalid action ancestry, a failed `_bulk` request) is reported and
 makes the run exit nonzero.
+
+## Reading and ordering
+
+A run is cut into 2,048-block chunks that worker threads take one at a time from a shared cursor. Each
+chunk is read as one slab per log (one read of its index slots, one of its bytes) and its blocks are cut
+out of memory by their index slots, so superseded fork entries are never parsed. One fold hands the
+chunks' documents to the sink in block order: `--out` and `--blocks-out` list blocks in order, and two
+runs over the same range write the same bytes. The per-block producer is the crate's library
+(`BlockWorker`), which [`range-server`](../range-server) drives the same way.
