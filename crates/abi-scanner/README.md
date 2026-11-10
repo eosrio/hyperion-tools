@@ -180,6 +180,29 @@ An account that has only ever held an empty ABI has no records, so a base cannot
 state. If such an account is removed after the base, the extension is refused and a scan from
 genesis is needed.
 
+### Sealing incremental segments
+
+A complete extension copies every block ID of the chain again (32 bytes per block), so sealing
+often that way would rewrite the whole sidecar each time. A **segment** holds only what it adds:
+
+```bash
+abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 --segment   --catalog-dir catalogs --genesis-catalog-sha256 "$GENESIS_SHA256"   --from-disk /srv/wire/state-history --start "$((CHAIN_END + 1))" --end "$LIB"   --ship-abi wire-ship-schema.json --chain-id "$CHAIN_ID" --irreversible-block-id "$LIB_ID"   --out catalogs/segments
+```
+
+- The chain is found under `--catalog-dir` from its pinned genesis and verified link by link.
+  `--start` must be the chain's end + 1.
+- The output is `abi-history.<start>-<end>.ndjson` with its `.blocks.bin` and `.manifest.json`.
+  The manifest format is `hyperion-abi-history-segment-v1`. It names its base like an
+  extension, and adds `startBlock`, `startBlockId` and `totalRecords` (the chain's records
+  through it). Its members hold only the new records and the block IDs of `startBlock..=endBlock`.
+- Genesis records followed by every segment's records, and the same for block IDs, are
+  byte for byte what a complete scan to the same end writes.
+- The logs may be a running node's. Only entries at or below the irreversible end block are
+  read, and they are checked as strictly as frozen logs (magic, position trailers, payload
+  framing and sizes).
+
+`range-server --seal` runs the same sealer continuously.
+
 ## Ingest into Elasticsearch
 
 Each line is a complete abi-index doc (`_id = block + account`). A minimal bulk ingest:
