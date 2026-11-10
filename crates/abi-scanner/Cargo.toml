@@ -16,6 +16,7 @@ hyperion-ship = { workspace = true, features = ["ship", "archive"] }
 tokio = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 hyperion-ship = { workspace = true, features = ["testkit"] }

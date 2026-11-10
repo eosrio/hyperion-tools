@@ -705,3 +705,71 @@ fn extension_refuses_a_removal_the_base_cannot_prove() {
     );
     assert!(!out.with_file_name("abis.ndjson.manifest.json").exists());
 }
+
+/// `--segment` args extending the chain under `catalog`.
+fn segment_args<'a>(catalog: &'a Path, genesis: &'a str) -> [&'a str; 5] {
+    [
+        "--segment",
+        "--catalog-dir",
+        catalog.to_str().unwrap(),
+        "--genesis-catalog-sha256",
+        genesis,
+    ]
+}
+
+#[test]
+fn segments_concatenate_to_a_full_scan() {
+    let mut f = Fixture::new();
+    let end = 3 * 2048 + 5;
+    long_history(&mut f, end);
+    let full = f.output("full");
+    success(f.scan(1, end, 0, &full, &[]));
+    let catalog = f.directory.join("chain");
+    fs::create_dir_all(catalog.join("genesis")).unwrap();
+    let genesis = catalog.join("genesis/abis.ndjson");
+    success(f.scan(1, 2048, 0, &genesis, &[]));
+    let genesis_sha = sha256_file(&genesis.with_file_name("abis.ndjson.manifest.json"));
+    let segments = catalog.join("segments");
+    fs::create_dir_all(&segments).unwrap();
+    // A deployment block right after the base, a range across two chunks, and one block.
+    let mut records = members(&genesis)[0].clone();
+    let mut ids = members(&genesis)[1].clone();
+    for (start, stop) in [(2049, 4100), (4101, end - 1), (end, end)] {
+        let args = segment_args(&catalog, &genesis_sha);
+        success(f.scan(start, stop, 0, &segments, &args));
+        let records_path = segments.join(format!("abi-history.{start:010}-{stop:010}.ndjson"));
+        let [rows, blocks, manifest] = members(&records_path);
+        let m: Value = serde_json::from_slice(&manifest).unwrap();
+        assert_eq!(m["format"], "hyperion-abi-history-segment-v1");
+        assert_eq!(
+            (m["startBlock"].as_u64(), m["endBlock"].as_u64()),
+            (Some(start.into()), Some(stop.into()))
+        );
+        assert_eq!(m["startBlockId"], hex::encode(synthetic_id(start, 0)));
+        assert_eq!(m["blockIds"]["count"], stop - start + 1);
+        records.extend(rows);
+        ids.extend(blocks);
+        assert_eq!(
+            m["totalRecords"],
+            records.iter().filter(|b| **b == b'\n').count()
+        );
+    }
+    let want = members(&full);
+    assert_eq!(records, want[0], "the chain's records are a full scan's");
+    assert_eq!(ids, want[1], "the chain's block ids are a full scan's");
+    let last = manifest_of(&segments.join(format!("abi-history.{end:010}-{end:010}.ndjson")));
+    assert_eq!(
+        last["lastGlobalSequence"],
+        manifest_of(&full)["lastGlobalSequence"]
+    );
+
+    // A segment that does not start right after the chain, or names another end block, is refused.
+    let args = segment_args(&catalog, &genesis_sha);
+    let gap = f.scan(end + 2, end + 2, 0, &segments, &args);
+    assert!(!gap.status.success());
+    assert!(
+        stderr(&gap).contains("a segment must start at"),
+        "{}",
+        stderr(&gap)
+    );
+}
