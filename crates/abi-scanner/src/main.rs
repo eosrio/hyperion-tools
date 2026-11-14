@@ -59,6 +59,17 @@ struct Args {
     /// Wire: the base manifest's SHA-256, as pinned by its consumers.
     #[arg(long, requires = "base_manifest")]
     base_manifest_sha256: Option<String>,
+    /// Wire: seal --start..=--end as an incremental segment of the catalog chain found under
+    /// --catalog-dir (the records and block ids of those blocks only), into the --out directory.
+    /// --start must be the chain's end + 1. The logs may be a running node's.
+    #[arg(long, default_value_t = false, requires_all = ["catalog_dir", "genesis_catalog_sha256"])]
+    segment: bool,
+    /// Wire: the directory holding the catalog chain a segment extends.
+    #[arg(long)]
+    catalog_dir: Option<String>,
+    /// Wire: SHA-256 of the chain's genesis catalog manifest.
+    #[arg(long)]
+    genesis_catalog_sha256: Option<String>,
     /// Request irreversible blocks only (safe for historical ranges)
     #[arg(long, default_value_t = true)]
     irreversible_only: bool,
@@ -119,6 +130,69 @@ fn open_resumable_out(path: &str) -> Result<File> {
     Ok(f)
 }
 
+/// Seal one incremental segment of a catalog chain from the logs in `directory`.
+fn seal_segment(args: &Args, directory: &str, schema: &str) -> Result<()> {
+    use hyperion_ship::wire_catalog::{Chain, Pin};
+    use hyperion_ship::wire_history::Sealer;
+    let ProtocolProvider::Wire(profile) = &args.protocol else {
+        anyhow::bail!("segments are sealed with a Wire walk; select a Wire --protocol");
+    };
+    anyhow::ensure!(
+        args.base_manifest.is_none(),
+        "a segment extends the chain under --catalog-dir; --base-manifest seals a complete catalog"
+    );
+    let chain_id = args
+        .chain_id
+        .clone()
+        .context("Wire disk history requires --chain-id")?;
+    let pin = Pin {
+        chain_id: chain_id.clone(),
+        node_revision: profile.upstream_revision.clone(),
+        producer_profile_id: args.protocol.id().to_owned(),
+    };
+    let chain = Chain::discover(
+        std::path::Path::new(args.catalog_dir.as_deref().unwrap_or_default()),
+        args.genesis_catalog_sha256.as_deref().unwrap_or_default(),
+        pin,
+    )?;
+    let tip = chain.newest.tip()?;
+    anyhow::ensure!(
+        args.start == tip.end_block + 1,
+        "the chain ends at {}; a segment must start at {}",
+        tip.end_block,
+        tip.end_block + 1
+    );
+    let id = args
+        .irreversible_block_id
+        .as_deref()
+        .context("Wire disk history requires --irreversible-block-id")?;
+    let id: [u8; 32] = hex::decode(id)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("--irreversible-block-id must be 32 bytes of hex"))?;
+    let mut sealer = Sealer::open(
+        &args.protocol,
+        schema,
+        &chain_id,
+        std::path::Path::new(directory),
+        tip,
+        &chain.newest.deployments,
+        args.threads.map_or(0, |n| n as usize),
+    )?;
+    let out = args
+        .out
+        .as_deref()
+        .context("a segment needs --out, the directory it is written to")?;
+    let sealed = sealer.seal(args.end, id, std::path::Path::new(out), &mut |_, _| Ok(()))?;
+    eprintln!(
+        "[wire-disk] sealed segment {}..={} ({} records): {}",
+        sealed.start_block,
+        sealed.end_block,
+        sealed.records,
+        sealed.manifest.display()
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -141,6 +215,9 @@ async fn main() -> Result<()> {
                 .as_deref()
                 .context("Wire disk history requires --ship-abi")?,
         )?;
+        if args.segment {
+            return seal_segment(&args, directory, &schema);
+        }
         hyperion_ship::wire_history::scan(&hyperion_ship::wire_history::ScanOptions {
             directory: directory.into(),
             schema,
