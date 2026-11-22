@@ -64,10 +64,21 @@ struct Args {
     /// --start must be the chain's end + 1. The logs may be a running node's.
     #[arg(long, default_value_t = false, requires_all = ["catalog_dir", "genesis_catalog_sha256"])]
     segment: bool,
-    /// Wire: the directory holding the catalog chain a segment extends.
+    /// Wire: write the catalog chain found under --catalog-dir as one complete catalog (a
+    /// compaction) into the --out directory: the chain through its newest link that ends at or
+    /// below --end, byte for byte. It can be pinned in place of the chain's start, and the links
+    /// after it continue unchanged. Only the chain's files are read. --start must be 1.
+    #[arg(long, default_value_t = false, requires_all = ["catalog_dir", "genesis_catalog_sha256"],
+        conflicts_with_all = ["segment", "from_disk", "ship", "base_manifest"])]
+    compact: bool,
+    /// Wire: with --compact, the lineage the compaction records: the manifest SHA-256 of the
+    /// complete catalog its consumers first pinned. Defaults to the lineage of the chain's start.
+    #[arg(long, requires = "compact")]
+    lineage: Option<String>,
+    /// Wire: the directory holding the catalog chain a segment extends or a compaction reads.
     #[arg(long)]
     catalog_dir: Option<String>,
-    /// Wire: SHA-256 of the chain's genesis catalog manifest.
+    /// Wire: SHA-256 of the manifest the chain starts at: its genesis catalog or a compaction.
     #[arg(long)]
     genesis_catalog_sha256: Option<String>,
     /// Request irreversible blocks only (safe for historical ranges)
@@ -128,6 +139,59 @@ fn open_resumable_out(path: &str) -> Result<File> {
     }
     f.seek(SeekFrom::End(0))?;
     Ok(f)
+}
+
+/// Write the catalog chain as one complete catalog that stands in for it.
+fn compact_chain(args: &Args) -> Result<()> {
+    use hyperion_ship::wire_catalog::{Chain, CompactOptions, Pin, compact};
+    let ProtocolProvider::Wire(profile) = &args.protocol else {
+        anyhow::bail!("only a Wire catalog chain can be compacted; select a Wire --protocol");
+    };
+    anyhow::ensure!(
+        args.start == 1,
+        "a compaction is a complete catalog; --start must be 1"
+    );
+    let pin = Pin {
+        chain_id: args
+            .chain_id
+            .clone()
+            .context("a compaction requires --chain-id")?,
+        node_revision: profile.upstream_revision.clone(),
+        producer_profile_id: args.protocol.id().to_owned(),
+    };
+    let started = std::time::Instant::now();
+    let chain = Chain::discover(
+        std::path::Path::new(args.catalog_dir.as_deref().unwrap_or_default()),
+        args.genesis_catalog_sha256.as_deref().unwrap_or_default(),
+        pin,
+    )?;
+    let out = args
+        .out
+        .as_deref()
+        .context("a compaction needs --out, the directory it is written to")?;
+    let loaded = compact(
+        &chain,
+        &CompactOptions {
+            through: Some(args.end),
+            lineage: args.lineage.as_deref(),
+            out: std::path::Path::new(out),
+        },
+    )?;
+    let s = &loaded.segment;
+    eprintln!(
+        "[wire-disk] compacted {} links through block {} ({} records) in {:.1} s: {}",
+        s.manifest["compaction"]["links"],
+        s.end_block,
+        s.total_records,
+        started.elapsed().as_secs_f64(),
+        s.manifest_path.display()
+    );
+    println!(
+        "{}",
+        serde_json::json!({"manifest":s.manifest_path,"manifestSha256":s.manifest_sha256,"endBlock":s.end_block,
+            "lastBlockId":s.last_block_id,"compacts":s.link_sha256(),"lineage":s.lineage})
+    );
+    Ok(())
 }
 
 /// Seal one incremental segment of a catalog chain from the logs in `directory`.
@@ -201,6 +265,9 @@ async fn main() -> Result<()> {
         args.start > 0 && args.start <= args.end && args.end < u32::MAX,
         "invalid block range"
     );
+    if args.compact {
+        return compact_chain(&args);
+    }
     if let (Some(directory), ProtocolProvider::Wire(_)) = (&args.from_disk, &args.protocol) {
         anyhow::ensure!(
             args.ship.is_none(),
