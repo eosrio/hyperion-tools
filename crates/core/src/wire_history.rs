@@ -126,19 +126,19 @@ fn hex_id(value: &str) -> Result<[u8; 32]> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("invalid id length"))
 }
-fn suffix(path: &Path, tail: &str) -> PathBuf {
+pub(crate) fn suffix(path: &Path, tail: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(tail);
     name.into()
 }
-fn fresh(path: &Path) -> Result<File> {
+pub(crate) fn fresh(path: &Path) -> Result<File> {
     OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .with_context(|| format!("create fresh output {}", path.display()))
 }
-fn publish(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn publish(from: &Path, to: &Path) -> Result<()> {
     // Unlike rename on Unix, hard_link cannot overwrite another run's completed artifact.
     fs::hard_link(from, to).with_context(|| format!("publish fresh output {}", to.display()))?;
     fs::remove_file(from)?;
@@ -159,7 +159,7 @@ fn file_hash(path: &Path) -> Result<(u64, String)> {
     }
     Ok((bytes, hex::encode(state.finalize())))
 }
-fn basename(path: &Path) -> Result<&str> {
+pub(crate) fn basename(path: &Path) -> Result<&str> {
     path.file_name()
         .and_then(|v| v.to_str())
         .context("output filename must be UTF-8")

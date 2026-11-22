@@ -15,6 +15,13 @@
 //! complete extension holds the chain's records and block ids as a byte prefix while a segment
 //! starts right after the chain and counts the chain's records.
 //!
+//! A long chain of segments costs every reader a file and a verification per link. A
+//! **compaction** ([`compact`]) is the chain through one of its links as a single complete
+//! catalog: the same records and block ids, byte for byte. It names the link it stands in for
+//! (`compacts`) instead of a base, so the links after that one continue from it unchanged, and
+//! the lineage it belongs to (`lineage`): the complete catalog its consumers first pinned. A
+//! consumer may pin a compaction in place of the genesis; nothing else in the chain changes.
+//!
 //! A [`Loaded`] chain view answers for the whole chain: its records are the concatenation of
 //! its links', and a block id is read from the link that holds it. The member files are pinned
 //! by identity when they are loaded; [`Loaded::revalidate`] checks that no path now names
@@ -25,15 +32,15 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::wire_history::{FORMAT, SEGMENT_FORMAT, Tip};
+use crate::wire_history::{FORMAT, SEGMENT_FORMAT, Tip, basename, fresh, publish, suffix};
 
 /// Bounds the 4.5 API puts on a catalog.
 const MAX_MANIFEST: u64 = 65_536;
@@ -101,11 +108,25 @@ pub struct Segment {
     pub last_global_sequence: Option<u64>,
     pub ship_abi_sha256: String,
     pub base: Option<BaseRef>,
+    /// A compaction: the link this complete catalog stands in for.
+    pub compacts: Option<BaseRef>,
+    /// A compaction: the manifest digest of the complete catalog its lineage started at.
+    pub lineage: Option<String>,
     /// Records this link holds, and records in the chain through it.
     pub records: u64,
     pub total_records: u64,
     pub deployments_sha256: String,
     pub block_ids_sha256: String,
+}
+
+impl Segment {
+    /// The digest the next link names as its base: the link a compaction stands in for, or
+    /// this manifest's own.
+    pub fn link_sha256(&self) -> &str {
+        self.compacts
+            .as_ref()
+            .map_or(&self.manifest_sha256, |c| &c.manifest_sha256)
+    }
 }
 
 /// One membership file and the blocks it covers.
@@ -348,6 +369,33 @@ fn read_manifest(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<(
         !incremental || base.is_some(),
         "a catalog segment must name its base"
     );
+    let compacts = match &m["compacts"] {
+        Value::Null => None,
+        c => Some(BaseRef {
+            manifest_sha256: hex_field(c, "manifestSha256")?,
+            end_block: uint(&c["endBlock"], 1)
+                .and_then(|e| u32::try_from(e).ok())
+                .context("invalid compacted end block")?,
+            last_block_id: hex_field(c, "lastBlockId")?,
+        }),
+    };
+    if let Some(c) = &compacts {
+        ensure!(
+            !incremental
+                && base.is_none()
+                && c.end_block == end_block
+                && c.last_block_id == last_block_id,
+            "a compaction is a complete catalog without a base that ends where the link it stands in for ends"
+        );
+    }
+    let lineage = match &m["lineage"] {
+        Value::Null => None,
+        l => Some(hex_field(l, "manifestSha256")?),
+    };
+    ensure!(
+        lineage.is_none() || compacts.is_some(),
+        "only a compaction names a lineage"
+    );
     let records = m["deployments"]["records"].as_u64().unwrap();
     let total_records = if incremental {
         uint(&m["totalRecords"], records).context("invalid total record count")?
@@ -369,6 +417,8 @@ fn read_manifest(path: &Path, expected_sha: Option<&str>, pin: &Pin) -> Result<(
             last_global_sequence,
             ship_abi_sha256,
             base,
+            compacts,
+            lineage,
             records,
             total_records,
             manifest: m,
@@ -631,7 +681,7 @@ impl Loaded {
     pub fn tip(&self) -> Result<Tip> {
         let s = &self.segment;
         Ok(Tip {
-            manifest_sha256: s.manifest_sha256.clone(),
+            manifest_sha256: s.link_sha256().to_owned(),
             end_block: s.end_block,
             last_block_id: hex::decode(&s.last_block_id)?
                 .try_into()
@@ -647,7 +697,7 @@ impl Loaded {
 fn check_link(prev: &Loaded, next: &Segment) -> Result<()> {
     let p = &prev.segment;
     let expected = BaseRef {
-        manifest_sha256: p.manifest_sha256.clone(),
+        manifest_sha256: p.link_sha256().to_owned(),
         end_block: p.end_block,
         last_block_id: p.last_block_id.clone(),
     };
@@ -655,7 +705,7 @@ fn check_link(prev: &Loaded, next: &Segment) -> Result<()> {
         next.base.as_ref() == Some(&expected),
         "catalog {} does not name {} (end {}) as its base",
         next.manifest_sha256,
-        p.manifest_sha256,
+        p.link_sha256(),
         p.end_block
     );
     ensure!(
@@ -786,7 +836,8 @@ fn load_link(prev: &Loaded, path: &Path, pin: &Pin, incremental: bool) -> Result
     }
 }
 
-/// The pinned genesis and the verified links that extend it, oldest first.
+/// The pinned start (the genesis or a compaction) and the verified links that extend it,
+/// oldest first.
 pub struct Chain {
     pub pin: Pin,
     pub segments: Vec<Segment>,
@@ -855,8 +906,9 @@ fn peek(path: &Path) -> Option<(String, Peek)> {
 type Children = BTreeMap<String, Vec<(u32, String)>>;
 
 impl Chain {
-    /// Find the genesis catalog by its digest under `dir`, then the longest verified chain of
-    /// extensions and segments from it. A manifest that does not verify is reported and left out.
+    /// Find the pinned catalog (the genesis or a compaction) by its digest under `dir`, then the
+    /// longest verified chain of extensions and segments from it. A manifest that does not verify
+    /// is reported and left out.
     pub fn discover(dir: &Path, genesis_sha256: &str, pin: Pin) -> Result<Self> {
         let paths = manifests(dir)?;
         let mut by_sha: HashMap<String, Peek> = HashMap::new();
@@ -878,7 +930,7 @@ impl Chain {
         let genesis = load(&genesis_path, Some(genesis_sha256), &pin)?;
         ensure!(
             genesis.segment.base.is_none(),
-            "the pinned genesis catalog is itself an extension"
+            "the pinned catalog is an extension; pin the genesis or a compaction"
         );
         let mut chain = Chain {
             pin,
@@ -909,7 +961,7 @@ impl Chain {
         let mut grew = false;
         loop {
             let mut candidates = children
-                .get(&self.newest.segment.manifest_sha256)
+                .get(self.newest.segment.link_sha256())
                 .cloned()
                 .unwrap_or_default();
             candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -992,6 +1044,150 @@ impl Chain {
             }
         }
     }
+}
+
+/// What [`compact`] is asked for.
+pub struct CompactOptions<'a> {
+    /// Compact through the newest link that ends at or below this block; the newest link if `None`.
+    pub through: Option<u32>,
+    /// The lineage to record: the manifest digest of a complete catalog of the chain at or before
+    /// the compacted link, or the pinned start's own lineage. `None` keeps the start's lineage,
+    /// or starts one at the pinned start.
+    pub lineage: Option<&'a str>,
+    /// The directory the three files are written to. It is created if needed and must not hold them.
+    pub out: &'a Path,
+}
+
+/// Write the verified `chain` through one of its links as a single complete catalog and return
+/// it as loaded back from disk. The chain's own files are only read.
+pub fn compact(chain: &Chain, options: &CompactOptions<'_>) -> Result<Loaded> {
+    let through = options.through.unwrap_or(u32::MAX);
+    let at = chain
+        .segments
+        .iter()
+        .rposition(|s| s.end_block <= through)
+        .filter(|at| *at >= 1)
+        .with_context(|| {
+            format!(
+                "nothing to compact: no link after the pinned catalog (end {}) ends at or below block {through}",
+                chain.segments[0].end_block
+            )
+        })?;
+    let (start, link) = (&chain.segments[0], &chain.segments[at]);
+    let lineage = match options.lineage {
+        None => start
+            .lineage
+            .clone()
+            .unwrap_or_else(|| start.manifest_sha256.clone()),
+        Some(sha) => {
+            ensure!(
+                start.lineage.as_deref() == Some(sha)
+                    || chain.segments[..=at]
+                        .iter()
+                        .any(|s| !s.incremental && s.manifest_sha256 == sha),
+                "lineage {sha} is neither the pinned catalog's lineage nor a complete catalog of the chain through block {}",
+                link.end_block
+            );
+            sha.to_owned()
+        }
+    };
+    // A complete catalog holds the chain's records so far; a segment adds its own.
+    let mut bytes = 0u64;
+    for s in &chain.segments[..=at] {
+        let own =
+            uint(&s.manifest["deployments"]["bytes"], 0).context("invalid member descriptor")?;
+        bytes = if s.incremental { bytes + own } else { own };
+    }
+    let records = chain
+        .newest
+        .deployments
+        .get(..bytes as usize)
+        .context("the chain's records are shorter than its links count")?;
+    let rows = records
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.iter().all(u8::is_ascii_whitespace))
+        .count() as u64;
+    ensure!(
+        rows == link.total_records && records.last().is_none_or(|b| *b == b'\n'),
+        "the chain holds {rows} records through block {}, its link counts {}",
+        link.end_block,
+        link.total_records
+    );
+    fs::create_dir_all(options.out).with_context(|| format!("create {}", options.out.display()))?;
+    let paths = [
+        options.out.join("abi-history.ndjson"),
+        options.out.join("abi-history.ndjson.blocks.bin"),
+        options.out.join("abi-history.ndjson.manifest.json"),
+    ];
+    for path in &paths {
+        ensure!(!path.exists(), "output already exists: {}", path.display());
+    }
+    let mut file = fresh(&suffix(&paths[0], ".partial"))?;
+    file.write_all(records)?;
+    file.sync_all()?;
+    let mut file = std::io::BufWriter::new(fresh(&suffix(&paths[1], ".partial"))?);
+    let mut digest = Sha256::new();
+    let mut from = 1u32;
+    while from <= link.end_block {
+        let to = link.end_block.min(from.saturating_add(65_535));
+        let ids = chain.newest.block_ids(from, to)?;
+        let flat = ids.as_flattened();
+        digest.update(flat);
+        file.write_all(flat)?;
+        from = to + 1;
+    }
+    file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    let mut manifest = json!({"format":FORMAT,"chainId":chain.pin.chain_id,"nodeRevision":chain.pin.node_revision,
+        "producerProfileId":chain.pin.producer_profile_id});
+    if !link.manifest["producerRevision"].is_null() {
+        manifest["producerRevision"] = link.manifest["producerRevision"].clone();
+    }
+    for (key, value) in [
+        ("shipAbiSha256", json!(link.ship_abi_sha256)),
+        ("startBlock", json!(1)),
+        ("endBlock", json!(link.end_block)),
+        (
+            "firstBlockId",
+            json!(hex::encode(chain.newest.block_id(1)?)),
+        ),
+        ("lastBlockId", json!(link.last_block_id)),
+        (
+            "irreversibleBoundary",
+            json!({"blockNum":link.end_block,"blockId":link.last_block_id}),
+        ),
+        ("complete", json!(true)),
+        (
+            "lastGlobalSequence",
+            json!(link.last_global_sequence.map(|v| v.to_string())),
+        ),
+    ] {
+        manifest[key] = value;
+    }
+    if !start.manifest["nativeBaseline"].is_null() {
+        manifest["nativeBaseline"] = start.manifest["nativeBaseline"].clone();
+    }
+    manifest["deployments"] = json!({"name":basename(&paths[0])?,"bytes":bytes,"sha256":sha(records),"records":link.total_records});
+    manifest["blockIds"] = json!({"name":basename(&paths[1])?,"bytes":u64::from(link.end_block) * 32,
+        "sha256":hex::encode(digest.finalize()),"count":link.end_block});
+    manifest["compacts"] = json!({"manifestSha256":link.link_sha256(),"endBlock":link.end_block,"lastBlockId":link.last_block_id});
+    manifest["lineage"] = json!({"manifestSha256":lineage});
+    manifest["compaction"] = json!({"from":start.manifest_sha256,"links":at});
+    let text = format!("{}\n", serde_json::to_string(&manifest)?);
+    let mut file = fresh(&suffix(&paths[2], ".partial"))?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()?;
+    // The chain was read while it may be followed by others: it must still be the verified one.
+    chain.newest.revalidate()?;
+    // Members first, the manifest last: a manifest names only complete members.
+    for path in &paths {
+        publish(&suffix(path, ".partial"), path)?;
+    }
+    let loaded = load(&paths[2], Some(&sha(text.as_bytes())), &chain.pin)?;
+    ensure!(
+        loaded.deployments.as_slice() == records,
+        "the compaction read back differs from the chain"
+    );
+    Ok(loaded)
 }
 
 #[cfg(test)]
@@ -1242,6 +1438,139 @@ mod tests {
             chain.newest.block_ids(1, 30).unwrap(),
             (1..=30).map(id).collect::<Vec<_>>()
         );
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn a_compaction_stands_in_for_the_chain_through_its_link() {
+        let d = tmp("compact");
+        let chain_dir = d.join("chain");
+        let r1 = vec![record("sysio", 3, "block-final", 0)];
+        let (_, g) = seal(&chain_dir, "a", 10, &r1, None);
+        let r2 = vec![record("token", 12, "block-final", 0)];
+        let (_, s1) = segment(&chain_dir, "b", (11, 20), &r2, (&g, 10), 2);
+        let (_, s2) = segment(&chain_dir, "c", (21, 25), &[], (&s1, 20), 2);
+        let chain = Chain::discover(&chain_dir, &g, pin()).unwrap();
+        let run = |chain: &Chain, through: Option<u32>, lineage: Option<&str>, out: &str| {
+            compact(
+                chain,
+                &CompactOptions {
+                    through,
+                    lineage,
+                    out: &chain_dir.join(out),
+                },
+            )
+        };
+        // Nothing after the pinned catalog ends at or below block 15, and a lineage must be a
+        // complete catalog of the chain.
+        assert!(
+            format!("{:#}", run(&chain, Some(15), None, "x0").unwrap_err())
+                .contains("nothing to compact")
+        );
+        assert!(run(&chain, Some(20), Some(&"77".repeat(32)), "x0").is_err());
+        assert!(
+            run(&chain, Some(20), Some(&s1), "x0").is_err(),
+            "a segment is not a lineage"
+        );
+        // Through block 22 is through the link that ends at 20.
+        let x = run(&chain, Some(22), None, "x").unwrap();
+        let xs = x.segment.clone();
+        assert_eq!(
+            (xs.end_block, xs.incremental, xs.total_records),
+            (20, false, 2)
+        );
+        assert_eq!(
+            xs.compacts,
+            Some(BaseRef {
+                manifest_sha256: s1.clone(),
+                end_block: 20,
+                last_block_id: hex::encode(id(20))
+            })
+        );
+        assert_eq!(xs.lineage.as_deref(), Some(g.as_str()));
+        assert_eq!(xs.link_sha256(), s1);
+        assert_eq!(xs.last_global_sequence, Some(200));
+        assert_eq!(
+            x.block_ids(1, 20).unwrap(),
+            (1..=20).map(id).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            String::from_utf8(x.deployments.to_vec()).unwrap(),
+            format!("{}\n{}\n", r1[0], r2[0])
+        );
+        assert!(
+            run(&chain, Some(22), None, "x").is_err(),
+            "an output is never overwritten"
+        );
+
+        // The old chain does not see the compaction as a link; pinned, it is continued by the
+        // same segment.
+        assert_eq!(
+            Chain::discover(&chain_dir, &g, pin())
+                .unwrap()
+                .segments
+                .len(),
+            3
+        );
+        let mut from_x = Chain::discover(&chain_dir, &xs.manifest_sha256, pin()).unwrap();
+        assert_eq!(
+            from_x
+                .segments
+                .iter()
+                .map(|s| s.manifest_sha256.as_str())
+                .collect::<Vec<_>>(),
+            [xs.manifest_sha256.as_str(), s2.as_str()]
+        );
+        assert_eq!(
+            from_x.newest.block_ids(1, 25).unwrap(),
+            (1..=25).map(id).collect::<Vec<_>>()
+        );
+        assert_eq!(from_x.newest.deployments, chain.newest.deployments);
+        assert_eq!(
+            from_x.sealing(7).unwrap().manifest_sha256,
+            xs.manifest_sha256
+        );
+        let tip = from_x.newest.tip().unwrap();
+        assert_eq!(
+            (
+                tip.manifest_sha256.as_str(),
+                tip.end_block,
+                tip.total_records
+            ),
+            (s2.as_str(), 25, 2)
+        );
+        // A sealer that starts at the compaction alone names the compacted link as its base.
+        let alone = Chain::discover(&chain_dir.join("x"), &xs.manifest_sha256, pin()).unwrap();
+        assert_eq!(alone.newest.tip().unwrap().manifest_sha256, s1);
+
+        // A later segment and a second compaction: the lineage is kept, the newest link is compacted.
+        let r3 = vec![record("token", 27, "block-final", 0)];
+        let (_, s3) = segment(&chain_dir, "d", (26, 30), &r3, (&s2, 25), 3);
+        assert!(from_x.follow(&chain_dir).unwrap());
+        let y = run(&from_x, None, None, "y").unwrap();
+        assert_eq!(y.segment.end_block, 30);
+        assert_eq!(y.segment.link_sha256(), s3);
+        assert_eq!(y.segment.lineage.as_deref(), Some(g.as_str()));
+        assert_eq!(y.segment.manifest["compaction"]["links"], 2);
+        let whole = Chain::discover(&chain_dir, &g, pin()).unwrap();
+        assert_eq!(y.deployments, whole.newest.deployments);
+        assert_eq!(
+            y.block_ids(1, 30).unwrap(),
+            whole.newest.block_ids(1, 30).unwrap()
+        );
+
+        // A manifest that stands in for a link that ends elsewhere, or names a lineage without
+        // standing in for one, is refused.
+        let (p, _) = seal(&d, "bad", 10, &r1, None);
+        let mut m: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        m["compacts"] =
+            json!({"manifestSha256":s1,"endBlock":20,"lastBlockId":hex::encode(id(20))});
+        std::fs::write(&p, format!("{m}\n")).unwrap();
+        assert!(format!("{:#}", load(&p, None, &pin()).unwrap_err()).contains("compaction"));
+        m["compacts"] = Value::Null;
+        m["lineage"] = json!({"manifestSha256":g});
+        std::fs::write(&p, format!("{m}\n")).unwrap();
+        assert!(format!("{:#}", load(&p, None, &pin()).unwrap_err()).contains("lineage"));
         std::fs::remove_dir_all(d).ok();
     }
 

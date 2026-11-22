@@ -20,6 +20,9 @@ range-server --protocol wire-sysio-6508c9e8-engineering-v1 \
   catalog is pinned by its manifest's SHA-256; every extension is verified against its base and the
   longest verified chain is served. The sealed LIB is the newest catalog's end, bounded by what the logs
   hold. A range whose `to` is past it is refused (`409 beyond_sealed_lib`).
+  `--genesis-catalog-sha256` may instead name a compaction (`abi-scanner --compact`): the chain
+  through one of its links as a single catalog. The service then opens that one catalog and the
+  links after it, and continues sealing from the same tip.
 - **Catalog verification** applies the checks the 4.5 API applies to a pinned catalog (bounded manifest;
   chain, node revision, profile and SHiP schema identity; irreversible coverage; member sizes and
   digests; every record's shape, position and block id), plus what makes a segment an extension: it

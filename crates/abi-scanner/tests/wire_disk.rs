@@ -772,4 +772,82 @@ fn segments_concatenate_to_a_full_scan() {
         "{}",
         stderr(&gap)
     );
+
+    // A compaction through the link that ends at end - 1 is a full scan to that block, and the
+    // chain pinned at it is continued by the last segment.
+    let compact = |pinned: &str, through: u32, out: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_abi-scanner"))
+            .args(["--protocol", f.provider.id(), "--compact", "--catalog-dir"])
+            .arg(&catalog)
+            .args([
+                "--genesis-catalog-sha256",
+                pinned,
+                "--chain-id",
+                &f.chain_id,
+            ])
+            .args(["--start", "1", "--end", &through.to_string(), "--out"])
+            .arg(out)
+            .output()
+            .unwrap()
+    };
+    let compacted = catalog.join("compacted");
+    let output = compact(&genesis_sha, end - 1, &compacted);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let printed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let got = members(&compacted.join("abi-history.ndjson"));
+    let shorter = f.output("shorter");
+    success(f.scan(1, end - 1, 0, &shorter, &[]));
+    let want = members(&shorter);
+    assert_eq!(
+        got[..2],
+        want[..2],
+        "the compaction's members are a full scan's"
+    );
+    let m: Value = serde_json::from_slice(&got[2]).unwrap();
+    let compacted_link =
+        manifest_of(&segments.join(format!("abi-history.{:010}-{:010}.ndjson", 4101, end - 1)));
+    assert_eq!(m["compacts"]["endBlock"], end - 1);
+    assert_eq!(m["compacts"]["lastBlockId"], compacted_link["lastBlockId"]);
+    assert_eq!(m["lineage"]["manifestSha256"], genesis_sha);
+    assert_eq!(m["compaction"], json!({"from":genesis_sha,"links":2}));
+    assert_eq!(m["base"], Value::Null);
+    for key in [
+        "endBlock",
+        "lastBlockId",
+        "lastGlobalSequence",
+        "firstBlockId",
+        "shipAbiSha256",
+        "nativeBaseline",
+    ] {
+        assert_eq!(m[key], manifest_of(&shorter)[key], "{key}");
+    }
+    assert_eq!(
+        printed["manifestSha256"],
+        sha256_file(&compacted.join("abi-history.ndjson.manifest.json"))
+    );
+    assert_eq!(printed["compacts"], m["compacts"]["manifestSha256"]);
+    let again = compact(
+        printed["manifestSha256"].as_str().unwrap(),
+        end,
+        &catalog.join("again"),
+    );
+    assert!(again.status.success(), "{}", stderr(&again));
+    let whole = members(&catalog.join("again/abi-history.ndjson"));
+    assert_eq!(
+        whole[..2],
+        members(&full)[..2],
+        "a compaction of a compacted chain is a full scan's"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&whole[2]).unwrap()["lineage"]["manifestSha256"],
+        genesis_sha
+    );
+    // Nothing to compact below the first link, and a compaction starts at block 1.
+    let nothing = compact(&genesis_sha, 2048, &catalog.join("nothing"));
+    assert!(
+        stderr(&nothing).contains("nothing to compact"),
+        "{}",
+        stderr(&nothing)
+    );
+    assert!(!catalog.join("nothing").exists());
 }

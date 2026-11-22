@@ -203,6 +203,35 @@ abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 --segment   --catalog-
 
 `range-server --seal` runs the same sealer continuously.
 
+### Compacting a chain
+
+Every reader of a chain opens and verifies each of its links, so a chain that grows by a segment
+a minute gets slower to start from. A **compaction** is the chain through one of its links as a
+single complete catalog:
+
+```bash
+abi-scanner --protocol wire-sysio-6508c9e8-engineering-v1 --compact \
+  --catalog-dir catalogs --genesis-catalog-sha256 "$PINNED_SHA256" --chain-id "$CHAIN_ID" \
+  --start 1 --end "$THROUGH_BLOCK" --out catalogs/compacted-"$THROUGH_BLOCK"
+```
+
+- The chain is found and verified from the pinned manifest, as for a segment. No logs are read.
+- The chain is compacted through its newest link that ends at or below `--end`. The output is
+  `abi-history.ndjson` with its `.blocks.bin` and `.manifest.json`, in a directory that must not
+  hold them yet. Its records and block IDs are byte for byte what a complete scan to that
+  link's end writes.
+- The manifest is a complete catalog's, without a `base`. It adds:
+  - `compacts`: the digest, end block and last block ID of the link it stands in for. The links
+    after that one name it as their base, so they continue the compaction unchanged.
+  - `lineage`: the manifest digest of the complete catalog the chain's consumers first pinned.
+    It defaults to the lineage of the pinned manifest, or to that manifest's own digest, and
+    `--lineage` names another complete catalog of the chain.
+  - `compaction`: the manifest the chain was read from and how many links were folded in.
+- Nothing else changes. A chain read from its old start does not see the compaction, and the
+  old links stay valid. A consumer or a sealer that pins the compaction's digest instead reads
+  one file where it read every link before, then the links after it.
+- The command prints the new manifest's path and digest as one JSON line.
+
 ## Ingest into Elasticsearch
 
 Each line is a complete abi-index doc (`_id = block + account`). A minimal bulk ingest:
