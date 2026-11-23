@@ -3,363 +3,1354 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="description" content="Hyperion 4.5 architecture vision: one stack serves Hyperion v2, the Light API, AtomicAssets, and chain v1, with each datum stored once." />
 <title>Hyperion 4.5 — Unified Multi-API Serving</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500;1,9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect x='1.5' y='1.5' width='25' height='25' rx='8' fill='%2310110f' stroke='%23e4a04a' stroke-width='1.5'/%3E%3Ccircle cx='13' cy='14' r='6' fill='none' stroke='%23e4a04a' stroke-width='1.6'/%3E%3Ccircle cx='18' cy='10' r='2' fill='%23e4a04a'/%3E%3C/svg%3E" />
 <style>
-  :root{
-    --bg:#0a0e1a; --bg2:#0e1424; --card:#131a2c; --card2:#172037; --line:#243049;
-    --ink:#e7ecf5; --dim:#9fb0cc; --faint:#6b7a99;
-    --node:#f5a623; --ship:#22d3ee; --state:#34d399; --hist:#a78bfa; --cold:#94a3b8; --api:#fb7185;
-    --proven:#34d399; --planned:#f5a623;
-    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  :root {
+    --bg: #10110f;
+    --card: #1a1c17;
+    --card-hover: #21241c;
+    --line: #2e3129;
+    --line-2: #43483c;
+    --ink: #f4f1ea;
+    --dim: #c9c4b8;
+    --faint: #a8a294;
+    --amber: #e4a04a;
+    --amber-2: #f3d19a;
+    --state: #8fc97a;
+    --hist: #b4bbf5;
+    --node: #e4a04a;
+    --cold: #d2cbbd;
+    --api: #e39a7d;
+    --wire: #4a4e43;
+    --serif: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+    --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 800px at 70% -10%,#16203a 0%,var(--bg) 55%);
-       color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
-  a{color:var(--ship);text-decoration:none}
-  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
-  header.hero{padding:64px 0 30px;border-bottom:1px solid var(--line)}
-  .eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--ship)}
-  h1{font-size:clamp(30px,5vw,52px);line-height:1.06;margin:14px 0 10px;font-weight:800;letter-spacing:-.02em}
-  h1 .grad{background:linear-gradient(90deg,#34d399,#22d3ee 45%,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent}
-  .lede{font-size:18.5px;color:var(--dim);max-width:820px}
-  .lede b{color:var(--ink);font-weight:600}
-  .tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px}
-  .tag{font-family:var(--mono);font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;color:var(--dim);background:var(--bg2)}
-  section{padding:46px 0;border-bottom:1px solid var(--line)}
-  h2{font-size:13px;font-family:var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin:0 0 6px}
-  h2 + .h2sub{font-size:24px;font-weight:700;margin:0 0 26px;letter-spacing:-.01em}
-  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-top:14px}
-  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
-  .badge{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 7px;border-radius:5px;text-transform:uppercase;vertical-align:middle}
-  .b-proven{color:#062b1c;background:var(--proven)}
-  .b-planned{color:#2b1d05;background:var(--planned)}
-
-  /* layered architecture */
-  .stack{display:flex;flex-direction:column;gap:0;position:relative}
-  .flowlabel{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:center;padding:7px 0}
-  .row{display:grid;gap:14px}
-  .r-api{grid-template-columns:repeat(4,1fr)}
-  .r-tier{grid-template-columns:1.05fr 1.5fr 1.15fr 0.95fr}
-  .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 16px 15px;position:relative;overflow:hidden}
-  .box::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,#3a4a6b)}
-  .box h3{margin:0 0 4px;font-size:15.5px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .box .role{font-family:var(--mono);font-size:11px;color:var(--accent,#7d8db0);letter-spacing:.04em;text-transform:uppercase}
-  .box p{margin:7px 0 0;font-size:13px;color:var(--dim)}
-  .box ul{margin:8px 0 0;padding-left:16px;font-size:12.5px;color:var(--dim)}
-  .box ul li{margin:2px 0}
-  .api .box{background:linear-gradient(180deg,#1a1426,#141022);border-color:#3a2740}
-  .gateway{margin:14px 0;background:linear-gradient(90deg,#181f33,#1c2540);border:1px dashed #34507a;border-radius:12px;
-           text-align:center;padding:14px;font-weight:600;font-size:15px}
-  .gateway span{font-family:var(--mono);font-size:12px;color:var(--ship);display:block;margin-top:3px;font-weight:400;letter-spacing:.03em}
-  .spine{margin-top:14px;background:linear-gradient(90deg,rgba(34,211,238,.12),rgba(34,211,238,.05));
-         border:1px solid #1d566b;border-radius:12px;padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-  .spine .s-ic{font-size:22px}
-  .spine b{color:var(--ship)}
-  .arrow{color:var(--faint);text-align:center;font-size:15px;padding:2px 0}
-
-  .grid{display:grid;gap:16px}
-  .g2{grid-template-columns:1fr 1fr}
-  .g3{grid-template-columns:repeat(3,1fr)}
-  .g4{grid-template-columns:repeat(4,1fr)}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
-  .stat .n{font-size:25px;font-weight:800;letter-spacing:-.01em}
-  .stat .n.s{color:var(--state)}
-  .stat .l{font-size:12.5px;color:var(--dim);margin-top:3px}
-  .stat .k{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
-
-  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
-  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
-  th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)}
-  td .pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:6px;white-space:nowrap}
-  .t-state{color:#06291c;background:var(--state)}
-  .t-hist{color:#1a1430;background:var(--hist)}
-  .t-node{color:#2b1d05;background:var(--node)}
-  .t-cold{color:#0c1320;background:var(--cold)}
-  tr:hover td{background:rgba(255,255,255,.015)}
-
-  /* state-tier zoom */
-  .zoom{background:linear-gradient(180deg,#0f1729,#0c1322);border:1px solid #1d3a30;border-radius:16px;padding:22px}
-  .seg{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:stretch}
-  .panel{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:15px}
-  .panel h4{margin:0 0 9px;font-size:14px;display:flex;align-items:center;gap:8px}
-  .ns{display:flex;flex-direction:column;gap:7px;margin-top:4px}
-  .nsrow{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;background:#0e1626;border:1px solid var(--line);
-         border-radius:8px;padding:8px 11px}
-  .nsrow .ids{font-family:var(--mono);color:var(--faint);font-size:11px}
-  .nsrow .nm{font-weight:600}
-  .loop{display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--dim)}
-  .loop .step{display:flex;gap:9px;align-items:flex-start}
-  .loop .step b{color:var(--ink)}
-  .loop .num{font-family:var(--mono);font-size:11px;color:var(--state);border:1px solid #1d3a30;border-radius:6px;
-             padding:1px 6px;flex:none;margin-top:1px}
-
-  .note{font-size:12.5px;color:var(--faint);margin-top:14px}
-  footer{padding:34px 0 60px;color:var(--faint);font-size:12.5px}
-  .kbd{font-family:var(--mono);background:var(--bg2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11.5px;color:var(--dim)}
-  @media(max-width:880px){
-    .r-api{grid-template-columns:1fr 1fr}.r-tier{grid-template-columns:1fr}.g2,.g3,.g4{grid-template-columns:1fr 1fr}
-    .seg{grid-template-columns:1fr}
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 480px at 100% -10%, rgba(228, 160, 74, .13), transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
-  @media(max-width:560px){.g2,.g3,.g4,.r-api{grid-template-columns:1fr}}
+  ::selection { background: var(--amber); color: #1c1408; }
+  a { color: var(--amber-2); text-underline-offset: .18em; }
+  a:hover { color: var(--ink); }
+  code, kbd {
+    font-family: var(--mono);
+    font-size: .86em;
+  }
+  code {
+    color: var(--amber-2);
+    overflow-wrap: anywhere;
+  }
+  .codes code {
+    color: var(--ink);
+    background: rgba(255, 255, 255, .045);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: .12em .42em;
+  }
+  kbd {
+    border: 1px solid var(--line-2);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: .02em .38em;
+    background: rgba(255, 255, 255, .03);
+    color: var(--ink);
+  }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .skip {
+    position: absolute;
+    left: 16px;
+    top: -48px;
+    z-index: 40;
+    background: var(--amber);
+    color: #1c1408;
+    padding: 8px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .skip:focus { top: 10px; }
+  .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+  #top:focus { outline: none; }
+
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: rgba(16, 17, 15, .88);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--line);
+  }
+  .progress { height: 2px; background: transparent; }
+  .progress span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--amber), #f3d19a);
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+  }
+  .top-inner {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-height: 62px;
+    padding: 8px 0;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    flex: none;
+  }
+  .brand svg { color: var(--amber); }
+  .brand-sub {
+    margin: 0;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .trace-chip:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .trace-chip p {
+    margin: 0;
+    color: var(--amber-2);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  #clear-trace, .filters button {
+    font: inherit;
+    cursor: pointer;
+  }
+  #clear-trace {
+    border: 1px solid var(--line-2);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  #clear-trace:hover { border-color: var(--amber); color: var(--amber-2); }
+  .top nav {
+    display: flex;
+    gap: 2px;
+    margin-left: auto;
+  }
+  .top-inner:has(.trace-chip:not([hidden])) nav { margin-left: 0; }
+  .top nav a {
+    color: var(--dim);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: none;
+  }
+  .top nav a:hover { color: var(--ink); }
+  .top nav a[aria-current="true"] {
+    color: var(--ink);
+    background: rgba(255, 255, 255, .06);
+  }
+
+  .hero { padding: 58px 0 18px; position: relative; }
+  .kicker {
+    margin: 0 0 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  h1, h2, .num { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.5rem, 5.5vw, 4.35rem);
+    line-height: 1.02;
+    font-weight: 600;
+    max-width: 11.6em;
+  }
+  h1 .deck {
+    display: block;
+    margin-top: .28em;
+    font-style: italic;
+    font-weight: 500;
+    color: var(--amber);
+  }
+  .lede { margin: 22px 0 0; max-width: 44rem; font-size: 1.125rem; color: var(--dim); }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .tags, .legend { display: flex; flex-wrap: wrap; gap: 8px 10px; }
+  .tags { margin-top: 22px; }
+  .tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, .02);
+    border-radius: 999px;
+    padding: 5px 10px;
+  }
+  .legend { margin-top: 16px; color: var(--dim); font-size: 14px; gap: 18px; }
+  .legend p { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    line-height: 1;
+    padding: 4px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .badge.proven { color: #c8efc0; background: rgba(143, 201, 122, .12); border: 1px solid rgba(143, 201, 122, .45); }
+  .badge.planned { color: #f3d19a; background: rgba(228, 160, 74, .1); border: 1px solid rgba(228, 160, 74, .45); }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-top: 36px;
+    border-top: 1px solid var(--line);
+  }
+  .hero-grid article { padding-top: 20px; }
+  .hero-grid article:first-child { padding-right: 36px; }
+  .hero-grid article + article { border-left: 1px solid var(--line); padding-left: 36px; }
+  .hero-grid h2 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 8px;
+  }
+  .hero-grid ul, .tracks, .plan ul, .fanout, .gw-routes, .ns { margin: 0; padding: 0; list-style: none; }
+  .hero-grid li {
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    color: var(--dim);
+  }
+  .hero-grid li strong { color: var(--ink); font-weight: 600; }
+  .hero-grid li .badge { margin-left: 6px; }
+
+  section { padding: 76px 0; scroll-margin-top: 78px; }
+  .band {
+    background: rgba(255, 255, 255, .025);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  h2 {
+    margin: 0 0 12px;
+    font-size: clamp(1.8rem, 3vw, 2.55rem);
+    line-height: 1.12;
+    max-width: 18em;
+  }
+  .intro { margin: 0 0 28px; max-width: 42rem; color: var(--dim); font-size: 1.05rem; }
+  .hint { margin: -12px 0 22px; color: var(--faint); font-size: 14px; }
+
+  .stack { display: flex; flex-direction: column; }
+  .grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .card, .gateway, .spine {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px 16px 15px;
+  }
+  .card { border-top: 2px solid var(--accent, var(--line-2)); cursor: pointer; min-width: 0; }
+  .card:hover, .route:hover { background: var(--card-hover); }
+  .role.accent { --accent: var(--amber); }
+  .em { color: var(--state); font-style: italic; }
+  .role {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent, var(--faint));
+  }
+  .card h3, .gateway h3, .spine h3, .panel h3 {
+    margin: 6px 0 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .card h3 button, .route .family button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .quiet { color: var(--faint); font-weight: 500; }
+  .card p, .gateway p, .spine p { margin: 8px 0 0; color: var(--dim); font-size: 14px; }
+  .card.api { --accent: var(--api); }
+  .card.node { --accent: var(--node); }
+  .card.state { --accent: var(--state); }
+  .card.hist { --accent: var(--hist); }
+  .card.cold { --accent: var(--cold); }
+  .tracks { margin-top: 12px; }
+  .tracks li {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 8px;
+    padding: 8px 0 0;
+    color: var(--dim);
+    font-size: 13px;
+  }
+  .tracks span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--state);
+    padding-top: 2px;
+  }
+  .tracks strong { color: var(--ink); font-weight: 600; }
+
+  .bracket {
+    position: relative;
+    height: 42px;
+    pointer-events: none;
+  }
+  .bracket span { position: relative; display: block; }
+  .bracket span::before,
+  .bracket span::after,
+  .bracket::after {
+    content: "";
+    position: absolute;
+    background: var(--wire);
+  }
+  .bracket span::before {
+    left: 50%;
+    top: 0;
+    height: 16px;
+    width: 1px;
+    transform: translateX(-50%);
+  }
+  .bracket span::after { top: 16px; left: -7px; right: -7px; height: 1px; }
+  .bracket span:first-child::after { left: 50%; }
+  .bracket span:last-child::after { right: 50%; }
+  .bracket::after { left: 50%; top: 16px; bottom: 0; width: 1px; transform: translateX(-50%); }
+  .bracket.down span::before { top: auto; bottom: 0; }
+  .bracket.down span::after { top: auto; bottom: 16px; }
+  .bracket.down::after { top: 0; bottom: 16px; }
+  body.is-tracing .bracket span.is-hot::before { background: var(--amber); width: 2px; }
+  body.is-tracing .bracket span.is-dim::before { opacity: .25; }
+  body.is-tracing .bracket::after { background: var(--amber); }
+
+  .gateway, .spine { border-radius: 18px; }
+  .gateway {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 18px 28px;
+    flex-wrap: wrap;
+    padding: 18px 18px 16px;
+  }
+  .gw-routes, .fanout { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 10px;
+    color: var(--dim);
+    font-size: 12.5px;
+    background: rgba(0, 0, 0, .15);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, var(--faint)); flex: none; }
+  .dot.state { background: var(--state); }
+  .dot.hist { background: var(--hist); }
+  .dot.node { background: var(--node); }
+  .dot.cold { background: var(--cold); }
+  .spine { margin-top: 14px; padding: 18px; }
+  .spine-grid {
+    display: grid;
+    grid-template-columns: 1.5fr .8fr;
+    gap: 22px 32px;
+  }
+  .bootstrap {
+    border-left: 1px solid var(--line);
+    padding-left: 28px;
+  }
+  .fanout { margin-top: 14px; }
+  .fanout .chip { border-radius: 10px; }
+
+  body.is-tracing .is-dim { opacity: .42; }
+  body.is-tracing .card.is-hot,
+  body.is-tracing .gateway.is-hot,
+  body.is-tracing .spine.is-hot {
+    box-shadow: 0 0 0 1px var(--accent, var(--amber));
+  }
+  body.is-tracing .chip.is-hot {
+    opacity: 1;
+    color: var(--ink);
+    border-color: var(--amber);
+    background: rgba(228, 160, 74, .08);
+  }
+  .trace-status {
+    margin: 16px 0 0;
+    min-height: 1.5em;
+    color: var(--dim);
+    font-size: 15px;
+    max-width: 48rem;
+  }
+  body.is-tracing .trace-status { color: var(--ink); }
+
+  .principle { margin-top: 34px; max-width: 40rem; }
+  .principle p {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(1.45rem, 2.2vw, 1.85rem);
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -.02em;
+  }
+
+  .filterbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px 18px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .filters {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .02);
+  }
+  .filters button {
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    font-size: 13.5px;
+    padding: 6px 12px;
+    border-radius: 999px;
+  }
+  .filters button[aria-pressed="true"] { background: var(--ink); color: #16140f; }
+  .filters button:hover { color: var(--ink); }
+  .filters button[aria-pressed="true"]:hover { color: #16140f; }
+  #route-count { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .route-cols, .route {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(168px, .72fr) minmax(0, 1.15fr);
+    column-gap: 28px;
+    align-items: center;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .route-cols {
+    padding-bottom: 8px;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .route {
+    row-gap: 6px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    border-top: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .route .family { margin: 0; font-size: 1rem; font-weight: 600; }
+  .route .codes, .route .why { margin: 0; }
+  .route .codes { grid-column: 1; }
+  .route .tiercell { display: flex; flex-wrap: wrap; gap: 6px; }
+  .route .why { color: var(--dim); font-size: 14.5px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    line-height: 1;
+    padding: 5px 8px;
+    border-radius: 999px;
+  }
+  .pill.state { background: #d7f3cb; color: #143018; }
+  .pill.hist { background: #dee3ff; color: #1b2144; }
+  .pill.node { background: #f8e3c0; color: #2c1e08; }
+  .pill.cold { background: #ece7dc; color: #24221c; }
+  body.is-tracing .route.is-hot {
+    box-shadow: inset 3px 0 0 var(--amber);
+    background: rgba(228, 160, 74, .06);
+    border-radius: 8px;
+  }
+
+  .state-grid {
+    display: grid;
+    grid-template-columns: 1.12fr .88fr;
+    gap: 42px;
+    align-items: start;
+  }
+  .panel h3 { font-family: var(--serif); font-size: 1.55rem; font-weight: 560; letter-spacing: -.02em; display: block; }
+  .panel > p { margin: 10px 0 0; color: var(--dim); }
+  .ns { margin-top: 18px; }
+  .ns li {
+    display: grid;
+    grid-template-columns: 78px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0 12px 12px;
+    border-top: 1px solid var(--line);
+    border-left: 2px solid var(--mark, var(--line));
+  }
+  .ns li.proven { --mark: var(--state); }
+  .ns li.planned { --mark: var(--amber); }
+  .ns .range { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .ns .name { font-weight: 600; }
+  .fine { margin: 14px 0 0; color: var(--dim); font-size: 14.5px; }
+  .steps { list-style: none; margin: 18px 0 0; padding: 0; counter-reset: step; }
+  .steps li { position: relative; padding: 0 0 20px 38px; color: var(--dim); }
+  .steps li:last-child { padding-bottom: 0; }
+  .steps li::before {
+    content: counter(step);
+    counter-increment: step;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(143, 201, 122, .7);
+    border-radius: 50%;
+    color: var(--state);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .steps li::after {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 28px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--line);
+  }
+  .steps li:last-child::after { display: none; }
+  .steps strong { display: block; color: var(--ink); font-weight: 600; }
+  .steps p { margin: 4px 0 0; font-size: 14.5px; }
+
+  .measure { margin-top: 36px; }
+  .measure h3 {
+    margin: 0 0 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 22px 28px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .num {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.6rem);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat p { margin: 8px 0 0; color: var(--dim); font-size: 14px; }
+  .note { margin: 28px 0 0; max-width: 46rem; color: var(--dim); font-size: 15px; }
+  .note strong { color: var(--ink); }
+
+  .plan { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 48px; }
+  .plan h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.15rem;
+  }
+  .plan ul { margin-top: 12px; }
+  .plan li {
+    position: relative;
+    padding: 12px 0 12px 20px;
+    border-top: 1px solid var(--line);
+    color: var(--dim);
+  }
+  .plan li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--state);
+  }
+  .plan .ahead li::before {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--amber);
+  }
+  .plan strong { color: var(--ink); font-weight: 600; }
+
+  footer { padding: 28px 0 64px; color: var(--faint); font-size: 14px; }
+  .foot { border-top: 1px solid var(--line); padding-top: 22px; }
+  .foot p { margin: 0 0 8px; max-width: 46rem; }
+  .totop { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; text-decoration: none; }
+
+  .card, .route, .chip, .gateway, .spine, .progress span, .filters button {
+    transition: opacity .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+  }
+
+  @media (max-width: 980px) {
+    .grid-4 { grid-template-columns: 1fr 1fr; }
+    .bracket { display: none; }
+    .spine-grid, .state-grid, .plan, .hero-grid { grid-template-columns: 1fr; }
+    .hero-grid article + article, .bootstrap {
+      border-left: 0;
+      padding-left: 0;
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+    }
+    .stats { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 720px) {
+    .filterbar { align-items: flex-start; }
+    .filters {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      gap: 6px;
+    }
+    .filters button {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .03);
+    }
+    .filters button[aria-pressed="true"] {
+      background: var(--ink);
+      color: #16140f;
+      border-color: var(--ink);
+    }
+  }
+  @media (max-width: 800px) {
+    .route-cols { display: none; }
+    .route { grid-template-columns: 1fr; align-items: start; }
+    .route .family, .route .codes, .route .tiercell, .route .why { grid-column: 1; grid-row: auto; }
+    .top-inner { flex-wrap: wrap; row-gap: 2px; }
+    .brand { margin-right: auto; }
+    .brand-sub { display: none; }
+    .trace-chip:not([hidden]) { margin-left: 0; }
+    .top nav {
+      order: 2;
+      width: 100%;
+      margin-left: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .top nav::-webkit-scrollbar { display: none; }
+    .top nav a { padding: 6px 8px; }
+    section { scroll-margin-top: 112px; }
+  }
+  @media (max-width: 560px) {
+    .wrap { width: min(1120px, calc(100% - 28px)); }
+    .grid-4, .stats { grid-template-columns: 1fr; }
+    .ns li { grid-template-columns: 64px minmax(0, 1fr); }
+    .ns .badge { grid-column: 2; }
+    h1 { max-width: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .card, .route, .chip, .gateway, .spine, .progress span, .filters button { transition: none; }
+  }
+  @media print {
+    body { background: #fff; color: #1a1a1a; }
+    .top, .bracket, .filters, .trace-chip, .skip, .hint { display: none !important; }
+    .card, .gateway, .spine, .route { break-inside: avoid; border-color: #ccc; }
+    a { color: #1a1a1a; }
+    .band { background: transparent; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-
-  <header class="hero">
-    <div class="eyebrow">Hyperion 4.5 · Architecture Vision</div>
-    <h1>One stack serves <span class="grad">every Antelope API shape</span><br/>— each datum stored once.</h1>
-    <p class="lede">
-      A Hyperion operator already runs <b>nodeos</b>, <b>Elasticsearch</b>, and (since 4.0) <b>MongoDB</b>.
-      Hyperion 4.5's goal: make that same infrastructure answer <b>Hyperion v2 history</b>, the
-      <b>Light API</b>, <b>AtomicAssets</b>, and native <b>chain&nbsp;v1</b> reads — without standing up a
-      second database per app, and without storing any datum twice. State lives in the state tier; history
-      lives in search; one SHiP feed keeps them current.
-    </p>
-    <div class="tags">
-      <span class="tag">nodeos</span><span class="tag">SHiP reader</span><span class="tag">WormDB state tier</span>
-      <span class="tag">Elasticsearch history</span><span class="tag">archive-server</span>
-      <span class="tag">snapshot-load bootstrap</span>
+<a class="skip" href="#top">Skip to content</a>
+<header class="top">
+  <div class="progress" aria-hidden="true"><span id="progress"></span></div>
+  <div class="wrap top-inner">
+    <a class="brand" href="#top">
+      <svg width="22" height="22" viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="25" height="25" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="13" cy="14" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <circle cx="18" cy="10" r="2" fill="currentColor"/>
+      </svg>
+      Hyperion 4.5
+    </a>
+    <p class="brand-sub">Architecture vision</p>
+    <div class="trace-chip" id="trace-chip" hidden>
+      <p id="header-trace"></p>
+      <button type="button" id="clear-trace">Clear</button>
     </div>
-    <div class="legend">
-      <span><span class="badge b-proven">proven</span> built &amp; measured in this repo</span>
-      <span><span class="badge b-planned">planned</span> the 4.5 target — designed, not yet wired</span>
+    <nav aria-label="On this page">
+      <a href="#shape">Shape</a>
+      <a href="#routing">Routing</a>
+      <a href="#state">State tier</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#roadmap">Roadmap</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top" tabindex="-1">
+  <header class="hero">
+    <div class="wrap">
+      <p class="kicker">Hyperion 4.5 · Architecture vision</p>
+      <h1>One stack serves every Antelope API shape. <span class="deck">Each datum stored once.</span></h1>
+      <p class="lede">
+        A Hyperion operator already runs <strong>nodeos</strong>, <strong>Elasticsearch</strong>, and, since 4.0, <strong>MongoDB</strong>.
+        Hyperion 4.5 makes that same infrastructure answer <strong>Hyperion v2 history</strong>, the <strong>Light API</strong>,
+        <strong>AtomicAssets</strong>, and native <strong>chain v1</strong> reads. No second database per app. No datum stored twice.
+        State stays in the state tier. History stays in search. One SHiP feed keeps them current.
+      </p>
+      <div class="tags">
+        <span class="tag">nodeos</span>
+        <span class="tag">SHiP reader</span>
+        <span class="tag">WormDB state tier</span>
+        <span class="tag">Elasticsearch history</span>
+        <span class="tag">archive-server</span>
+        <span class="tag">snapshot-load bootstrap</span>
+      </div>
+      <div class="legend">
+        <p><span class="badge proven">Proven</span> Built and measured in this repo</p>
+        <p><span class="badge planned">Planned</span> The 4.5 target — designed, not yet wired</p>
+      </div>
+
+      <div class="hero-grid">
+        <article>
+          <h2>Already in the stack</h2>
+          <ul>
+            <li><strong>nodeos.</strong> Live head, push transactions, and the authority the SHiP feed streams from.</li>
+            <li><strong>Elasticsearch.</strong> History, search, and time-series aggregations.</li>
+            <li><strong>MongoDB.</strong> Contract-table state since Hyperion 4.0. This stays Track A.</li>
+          </ul>
+        </article>
+        <article>
+          <h2>What 4.5 adds</h2>
+          <ul>
+            <li><strong>WormDB <code>.wseg</code></strong> <span class="badge proven">Proven</span> Track B. One mmap'd file for current state, measured on Light API and AtomicAssets.</li>
+            <li><strong>One SHiP reader</strong> <span class="badge proven">Proven</span> Contract-table deltas are decoded once per block and fanned out.</li>
+            <li><strong>snapshot-load</strong> <span class="badge proven">Proven</span> Bootstraps every tier from a chain snapshot, with no action-trace replay.</li>
+            <li><strong>Gateway and archive-server</strong> <span class="badge planned">Planned</span> One HTTP front for all four shapes, and cold bodies fetched only when asked for.</li>
+          </ul>
+        </article>
+      </div>
     </div>
   </header>
 
-  <!-- ARCHITECTURE -->
-  <section>
-    <h2>The shape of it</h2>
-    <div class="h2sub">Consumers → one gateway → the right tier for each access pattern</div>
+  <section class="band" id="shape">
+    <div class="wrap">
+      <p class="kicker">01 — Shape</p>
+      <h2>One gateway, four tiers.</h2>
+      <p class="intro">Callers keep the API they already speak. The gateway sends each request to the tier built for that access pattern.</p>
+      <p class="hint" id="trace-help">Select a shape, a tier, or a route to trace it. Select it again, or press Escape, to clear.</p>
 
-    <div class="stack">
-      <!-- API shapes -->
-      <div class="row r-api api">
-        <div class="box" style="--accent:var(--api)">
-          <div class="role">API shape</div><h3>Hyperion v2</h3>
-          <p>get_actions, get_deltas, get_transaction, history search &amp; aggregations.</p>
-        </div>
-        <div class="box" style="--accent:var(--api)">
-          <div class="role">API shape</div><h3>Light API</h3>
-          <p>balances, account, topholders, rex, /key, /codehash, sync.</p>
-        </div>
-        <div class="box" style="--accent:var(--api)">
-          <div class="role">API shape</div><h3>AtomicAssets</h3>
-          <p>assets, templates, collections, schemas, market — filtered &amp; sorted.</p>
-        </div>
-        <div class="box" style="--accent:var(--api)">
-          <div class="role">API shape</div><h3>Chain v1</h3>
-          <p>get_table_rows, get_account, get_currency_balance.</p>
-        </div>
-      </div>
-
-      <div class="arrow">▼</div>
-      <div class="gateway">
-        Unified API gateway — routes each request to the tier built for its access pattern
-        <span>state → WormDB/Mongo · history → Elasticsearch · cold → archive-server · head → nodeos</span>
-      </div>
-      <div class="arrow">▼</div>
-
-      <!-- Tiers -->
-      <div class="flowlabel">— SERVING TIERS —</div>
-      <div class="row r-tier">
-        <div class="box" style="--accent:var(--node)">
-          <div class="role">Chain head</div>
-          <h3>nodeos <span class="badge b-proven">proven</span></h3>
-          <p>Live head, push transactions, the authority the SHiP feed streams from.</p>
+      <div class="stack">
+        <h3 class="sr">API shapes</h3>
+        <div class="grid-4">
+          <article class="card api" data-kind="api" data-id="hyperion" data-select-host="api">
+            <p class="role">API shape</p>
+            <h3><button type="button" data-select="api" data-id="hyperion" aria-pressed="false">Hyperion v2</button></h3>
+            <p><code>get_actions</code>, <code>get_deltas</code>, <code>get_transaction</code>, history search and aggregations.</p>
+          </article>
+          <article class="card api" data-kind="api" data-id="light" data-select-host="api">
+            <p class="role">API shape</p>
+            <h3><button type="button" data-select="api" data-id="light" aria-pressed="false">Light API</button></h3>
+            <p>balances, account, topholders, rex, <code>/key</code>, <code>/codehash</code>, sync.</p>
+          </article>
+          <article class="card api" data-kind="api" data-id="atomic" data-select-host="api">
+            <p class="role">API shape</p>
+            <h3><button type="button" data-select="api" data-id="atomic" aria-pressed="false">AtomicAssets</button></h3>
+            <p>assets, templates, collections, schemas, market — filtered and sorted.</p>
+          </article>
+          <article class="card api" data-kind="api" data-id="chain" data-select-host="api">
+            <p class="role">API shape</p>
+            <h3><button type="button" data-select="api" data-id="chain" aria-pressed="false">Chain v1</button></h3>
+            <p><code>get_table_rows</code>, <code>get_account</code>, <code>get_currency_balance</code>.</p>
+          </article>
         </div>
 
-        <div class="box" style="--accent:var(--state)">
-          <div class="role">State tier</div>
-          <h3>WormDB <span style="color:var(--faint);font-weight:400">/ Mongo</span> <span class="badge b-proven">proven</span></h3>
-          <p>Current contract-table <b>state</b>, one mmap'd file with namespaced tables — serves Light API,
-             AtomicAssets state &amp; chain v1 from one store. Live overlay + compaction.</p>
-          <ul>
-            <li>Track A — Mongo (in-stack today)</li>
-            <li>Track B — WormDB <span style="color:var(--state)">.wseg</span> (the speed/size upgrade)</li>
+        <div class="bracket grid-4" aria-hidden="true">
+          <span data-kind="wire" data-id="hyperion"></span>
+          <span data-kind="wire" data-id="light"></span>
+          <span data-kind="wire" data-id="atomic"></span>
+          <span data-kind="wire" data-id="chain"></span>
+        </div>
+
+        <div class="gateway" data-kind="always" data-id="gateway">
+          <div>
+            <p class="role accent">Gateway</p>
+            <h3>Unified API gateway</h3>
+            <p>Routes each request to the tier built for its access pattern.</p>
+          </div>
+          <ul class="gw-routes">
+            <li class="chip" data-kind="chip" data-id="state"><span class="dot state"></span>State · WormDB / Mongo</li>
+            <li class="chip" data-kind="chip" data-id="hist"><span class="dot hist"></span>History · Elasticsearch</li>
+            <li class="chip" data-kind="chip" data-id="cold"><span class="dot cold"></span>Cold · archive-server</li>
+            <li class="chip" data-kind="chip" data-id="node"><span class="dot node"></span>Head · nodeos</li>
           </ul>
         </div>
 
-        <div class="box" style="--accent:var(--hist)">
-          <div class="role">History / search</div>
-          <h3>Elasticsearch <span class="badge b-proven">proven</span></h3>
-          <p>Hyperion v2 actions + deltas, AtomicAssets logs / transfers / sales-history, token transfer
-             history, time-series aggregations.</p>
+        <div class="bracket down grid-4" aria-hidden="true">
+          <span data-kind="wire" data-id="node"></span>
+          <span data-kind="wire" data-id="state"></span>
+          <span data-kind="wire" data-id="hist"></span>
+          <span data-kind="wire" data-id="cold"></span>
         </div>
 
-        <div class="box" style="--accent:var(--cold)">
-          <div class="role">Cold payloads</div>
-          <h3>archive-server <span class="badge b-planned">planned</span></h3>
-          <p>Frozen SHiP-log payloads on demand, behind ES — no DB, fetched only when a cold body is asked for.</p>
-        </div>
-      </div>
-
-      <!-- spine -->
-      <div class="spine">
-        <span class="s-ic">🜂</span>
-        <div style="flex:1;min-width:240px">
-          <b>One shared SHiP reader</b> <span class="badge b-proven">proven</span>
-          &nbsp;— <span style="color:var(--dim)">decodes every block's contract-table deltas once and fans them to each tier:
-          token/system rows → Light-API state · atomicassets rows → AA state · everything historical → ES.
-          <b style="color:var(--ink)">This is what "same state history" means</b> — literally one feed.</span>
-        </div>
-        <div style="font-family:var(--mono);font-size:11.5px;color:var(--faint);min-width:200px">
-          snapshot-load <span class="badge b-proven">proven</span><br/>
-          bootstraps every tier from a chain snapshot (no action-trace replay)
-        </div>
-      </div>
-    </div>
-
-    <p class="note">
-      The one rule that wins on <b>both</b> storage and speed: history is never re-stored in the state tier,
-      and state is never stored in history. Each query routes to the tier built for its access pattern.
-    </p>
-  </section>
-
-  <!-- ROUTING MATRIX -->
-  <section>
-    <h2>Routing</h2>
-    <div class="h2sub">Every endpoint family maps to exactly one tier</div>
-    <table>
-      <thead><tr><th style="width:34%">Request family</th><th style="width:20%">Tier</th><th>Why</th></tr></thead>
-      <tbody>
-        <tr><td>AA <code>/assets</code> <code>/templates</code> <code>/collections</code> (filter+sort)</td>
-            <td><span class="pill t-state">WormDB state</span></td>
-            <td>Faceted point/range/sort over current state — sub-µs, in-process.</td></tr>
-        <tr><td>Light API <code>/balances</code> <code>/account</code> <code>/topholders</code></td>
-            <td><span class="pill t-state">WormDB state</span></td>
-            <td>Token balances + resources are current contract-table state.</td></tr>
-        <tr><td>Chain v1 <code>get_table_rows</code> / <code>get_account</code></td>
-            <td><span class="pill t-state">WormDB state</span> <span class="pill t-node">nodeos</span></td>
-            <td>Generic contract-table reads from the same state store; head from nodeos.</td></tr>
-        <tr><td>Hyperion v2 <code>get_actions</code> / <code>get_deltas</code></td>
-            <td><span class="pill t-hist">Elasticsearch</span></td>
-            <td>History &amp; search — time-ordered, aggregations.</td></tr>
-        <tr><td>AA <code>/logs</code> <code>/transfers</code> <code>/sales-history</code></td>
-            <td><span class="pill t-hist">Elasticsearch</span></td>
-            <td>Event history — already what Hyperion indexes.</td></tr>
-        <tr><td>AA fields like <code>minted_at</code>, sales price history</td>
-            <td><span class="pill t-hist">Elasticsearch</span> <span class="pill t-state">+ state</span></td>
-            <td>State filters/sorts/paginates → one batched ES hydrate per page (cached).</td></tr>
-        <tr><td>Cold raw payloads (old action/delta bodies)</td>
-            <td><span class="pill t-cold">archive-server</span></td>
-            <td>Frozen SHiP logs, fetched on demand — no DB cost.</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- STATE TIER ZOOM -->
-  <section>
-    <h2>The state tier, up close</h2>
-    <div class="h2sub">One WormDB segment, many API namespaces — live from chain head, compacted in place</div>
-
-    <div class="zoom">
-      <div class="seg">
-        <div class="panel">
-          <h4>🗂 One <span style="color:var(--state)">.wseg</span> file — namespaced tables</h4>
-          <p style="font-size:12.5px;color:var(--dim);margin:0 0 6px">
-            A single memory-mapped, columnar file. The table-ID space is partitioned so multiple API
-            domains share one reader — add a namespace, not a database.
-          </p>
-          <div class="ns">
-            <div class="nsrow"><span class="nm" style="color:#7fd1ff">Light API state</span><span class="ids">tables 0–10 · <span class="badge b-proven">proven</span></span></div>
-            <div class="nsrow"><span class="nm" style="color:var(--state)">AtomicAssets state</span><span class="ids">tables 11–21 · <span class="badge b-proven">proven</span></span></div>
-            <div class="nsrow"><span class="nm" style="color:#c9b6ff">Chain-v1 / generic tables</span><span class="ids">reserved · <span class="badge b-planned">planned</span></span></div>
-            <div class="nsrow"><span class="nm" style="color:#ffd9a0">AtomicMarket</span><span class="ids">reserved · <span class="badge b-planned">planned</span></span></div>
-          </div>
-          <p class="note" style="margin-top:12px">
-            Forward store keyed by id + per-dimension inverted posting lists (owner / collection / schema /
-            template / data-facet) + presorted orderings — hybrid roaring postings. Served embedded
-            (no IPC), each datum once.
-          </p>
+        <h3 class="sr">Serving tiers</h3>
+        <div class="grid-4">
+          <article class="card node" data-kind="tier" data-id="node" data-select-host="tier">
+            <p class="role">Chain head</p>
+            <h3>
+              <button type="button" data-select="tier" data-id="node" aria-pressed="false">nodeos</button>
+              <span class="badge proven">Proven</span>
+            </h3>
+            <p>Live head, push transactions, and the authority the SHiP feed streams from.</p>
+          </article>
+          <article class="card state" data-kind="tier" data-id="state" data-select-host="tier">
+            <p class="role">State tier</p>
+            <h3>
+              <button type="button" data-select="tier" data-id="state" aria-pressed="false">WormDB <span class="quiet">/ Mongo</span></button>
+              <span class="badge proven">Proven</span>
+            </h3>
+            <p>Current contract-table state. One mmap'd file, namespaced tables, a live overlay, and compaction. Serves Light API, AtomicAssets state, and chain v1 from one store.</p>
+            <ul class="tracks">
+              <li><span>A</span><div><strong>Mongo.</strong> In the stack today.</div></li>
+              <li><span>B</span><div><strong>WormDB <code>.wseg</code>.</strong> The speed and size upgrade.</div></li>
+            </ul>
+          </article>
+          <article class="card hist" data-kind="tier" data-id="hist" data-select-host="tier">
+            <p class="role">History / search</p>
+            <h3>
+              <button type="button" data-select="tier" data-id="hist" aria-pressed="false">Elasticsearch</button>
+              <span class="badge proven">Proven</span>
+            </h3>
+            <p>Hyperion v2 actions and deltas, AtomicAssets logs, transfers, and sales history, token transfer history, and time-series aggregations.</p>
+          </article>
+          <article class="card cold" data-kind="tier" data-id="cold" data-select-host="tier">
+            <p class="role">Cold payloads</p>
+            <h3>
+              <button type="button" data-select="tier" data-id="cold" aria-pressed="false">archive-server</button>
+              <span class="badge planned">Planned</span>
+            </h3>
+            <p>Frozen SHiP-log payloads on demand, behind Elasticsearch. No database. Fetched only when a cold body is requested.</p>
+          </article>
         </div>
 
-        <div class="panel">
-          <h4>♻️ Live + self-compacting</h4>
-          <div class="loop">
-            <div class="step"><span class="num">1</span><div><b>Frozen base</b> — immutable, mmap'd, read by binary search.</div></div>
-            <div class="step"><span class="num">2</span><div><b>Freshness overlay</b> — the SHiP feed applies mint/transfer/burn/setdata; reads merge base + overlay. The forward record is the sole arbiter, so stale postings are harmless.</div></div>
-            <div class="step"><span class="num">3</span><div><b>Two-phase apply</b> — base reads lock-free, a brief in-RAM commit → freshness lag in <i>hundreds of µs</i>, readers never stalled.</div></div>
-            <div class="step"><span class="num">4</span><div><b>Compaction</b> — fold base + overlay → a fresh segment in the background, then an atomic <span class="kbd">ArcSwap</span> hot-swap. Overlay RAM reclaimed; readers keep serving.</div></div>
+        <div class="spine" data-kind="always" data-id="spine">
+          <div class="spine-grid">
+            <div>
+              <p class="role accent">Ingest</p>
+              <h3>One shared SHiP reader <span class="badge proven">Proven</span></h3>
+              <p>Decodes every block's contract-table deltas once and fans them to each tier. This is what “same state history” means: literally one feed.</p>
+              <ul class="fanout">
+                <li class="chip" data-kind="chip" data-id="light">Token and system rows → Light API state</li>
+                <li class="chip" data-kind="chip" data-id="atomic">atomicassets rows → AtomicAssets state</li>
+                <li class="chip" data-kind="chip" data-id="hist">Everything historical → Elasticsearch</li>
+              </ul>
+            </div>
+            <div class="bootstrap">
+              <p class="role accent">Bootstrap</p>
+              <h3>snapshot-load <span class="badge proven">Proven</span></h3>
+              <p>Bootstraps every tier from a chain snapshot. No action-trace replay.</p>
+            </div>
           </div>
         </div>
       </div>
+
+      <p class="trace-status" id="trace-status" aria-live="polite">Four API shapes enter one gateway. The gateway and the SHiP reader stay on the path for every trace.</p>
+
+      <aside class="principle">
+        <p class="kicker">The rule</p>
+        <p>History is never stored again in the state tier, and state is never stored in history. Each query goes to the tier built for that access pattern.</p>
+      </aside>
     </div>
   </section>
 
-  <!-- PROVEN NUMBERS -->
-  <section>
-    <h2>What we proved possible</h2>
-    <div class="h2sub">Measured on WAX mainnet — the AtomicAssets state tier (richest query surface), end to end</div>
+  <section id="routing">
+    <div class="wrap">
+      <p class="kicker">02 — Routing</p>
+      <h2>Every family has one home.</h2>
+      <p class="intro">Where a response needs two tiers, the state tier filters, sorts, and paginates, then history hydrates that page.</p>
 
-    <div class="grid g4">
-      <div class="stat"><div class="k">on-disk state</div><div class="n s">21 GB</div><div class="l">232M live assets — below Mongo's 24.3 GB, vs ~692 GB on the incumbent Postgres stack</div></div>
-      <div class="stat"><div class="k">read latency</div><div class="n s">sub-µs</div><div class="l">point / facet / collection page-1, embedded mmap; 150k–887k req/s single thread</div></div>
-      <div class="stat"><div class="k">bootstrap</div><div class="n s">38 min</div><div class="l">snapshot → fully indexed; 0 decode errors; 200/200 parity vs the live API</div></div>
-      <div class="stat"><div class="k">stored once</div><div class="n s">~28×</div><div class="l">less storage than eosio-contract-api — no burned rows, no history in the state tier</div></div>
-    </div>
-
-    <div style="height:16px"></div>
-    <h2 style="color:var(--state)">Live serving — the chain head, not a frozen snapshot</h2>
-    <div class="grid g4">
-      <div class="stat"><div class="k">apply rate</div><div class="n s">370k/s</div><div class="l">mutations applied single-thread — ~37× a SHiP burst</div></div>
-      <div class="stat"><div class="k">freshness lag</div><div class="n s">~276 µs</div><div class="l">commit hold (p50); reads stay sub-µs with the overlay active</div></div>
-      <div class="stat"><div class="k">concurrent</div><div class="n s">557k req/s</div><div class="l">readers served while a writer ingested — p50 ~1 µs</div></div>
-      <div class="stat"><div class="k">correctness</div><div class="n s">0 stale</div><div class="l">page-merge invariant across 38,974 page entries at scale</div></div>
-    </div>
-
-    <div style="height:16px"></div>
-    <h2 style="color:var(--state)">Compaction &amp; hot-swap — runs forever</h2>
-    <div class="grid g4">
-      <div class="stat"><div class="k">fold (232M)</div><div class="n s">6.4 min</div><div class="l">base+overlay → fresh segment — ~3× faster than the original build (mmap, not a DB stream)</div></div>
-      <div class="stat"><div class="k">fold equivalence</div><div class="n s">0 / 60k</div><div class="l">the new base alone answers identically — mismatches across 60,000 checks</div></div>
-      <div class="stat"><div class="k">RAM reclaimed</div><div class="n s">396 → 0 MB</div><div class="l">overlay heap freed on swap; the rest is evictable page cache</div></div>
-      <div class="stat"><div class="k">daemon readers</div><div class="n s">3.68M req/s</div><div class="l">lock-free across hot-swaps; reader stall = a brief per-swap tail-replay, not the fold</div></div>
-    </div>
-
-    <p class="note">
-      All of the above is the AtomicAssets instance of a <b>domain-generic</b> mechanism: immutable base +
-      freshness overlay + ArcSwap compaction. The same machinery hosts the Light-API overlay and chain-v1
-      tables in the same segment — that generalization is the remaining 4.5 integration work.
-    </p>
-  </section>
-
-  <!-- ROADMAP -->
-  <section>
-    <h2>From here to the unified server</h2>
-    <div class="h2sub">What's proven, and what closes the loop</div>
-    <div class="grid g2">
-      <div class="panel">
-        <h4 style="color:var(--proven)">✓ Proven</h4>
-        <ul style="font-size:13px;color:var(--dim);line-height:1.7">
-          <li>atomicdata decoder — byte-exact, 77/77 live schemas, 200/200 parity</li>
-          <li>snapshot-load presets (AtomicAssets + AtomicMarket + Light-API shapes)</li>
-          <li>AtomicAssets WormDB store: 21 GB, sub-µs faceted reads</li>
-          <li>live freshness overlay — apply chain head, reads stay sub-µs</li>
-          <li>compaction + ArcSwap hot-swap daemon — runs continuously</li>
-        </ul>
+      <div class="filterbar">
+        <div class="filters" role="group" aria-label="Filter routes by tier">
+          <button type="button" data-filter="all" aria-pressed="true">All</button>
+          <button type="button" data-filter="state" aria-pressed="false">WormDB</button>
+          <button type="button" data-filter="hist" aria-pressed="false">Elasticsearch</button>
+          <button type="button" data-filter="cold" aria-pressed="false">Archive</button>
+          <button type="button" data-filter="node" aria-pressed="false">nodeos</button>
+        </div>
+        <p id="route-count">7 families</p>
       </div>
-      <div class="panel">
-        <h4 style="color:var(--planned)">→ Planned (the 4.5 target)</h4>
-        <ul style="font-size:13px;color:var(--dim);line-height:1.7">
-          <li>one segment carrying both Light-API <i>and</i> AtomicAssets namespaces</li>
-          <li>one applier routing both contract domains off the shared SHiP feed</li>
-          <li>the live overlay generalized to the Light-API domain (token/permission deltas)</li>
-          <li>cursor pagination for deep pages; AtomicMarket + range indexes</li>
-          <li>one HTTP gateway exposing all four API shapes over the same store</li>
-        </ul>
+
+      <div class="route-cols" aria-hidden="true">
+        <span>Request family</span>
+        <span>Tier</span>
+        <span>Why this tier</span>
+      </div>
+      <div class="routes">
+        <article class="route" data-kind="route" data-id="r1" data-api="atomic" data-tiers="state" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r1" aria-pressed="false">AtomicAssets assets, templates, collections</button></h3>
+          <p class="codes"><code>/assets</code> <code>/templates</code> <code>/collections</code></p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill state">WormDB state</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>Faceted point, range, and sort over current state. Sub-µs, in-process.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r2" data-api="light" data-tiers="state" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r2" aria-pressed="false">Light API balances, account, topholders</button></h3>
+          <p class="codes"><code>/balances</code> <code>/account</code> <code>/topholders</code></p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill state">WormDB state</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>Token balances and resources are current contract-table state.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r3" data-api="chain" data-tiers="state node" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r3" aria-pressed="false">Chain v1 table and account reads</button></h3>
+          <p class="codes"><code>get_table_rows</code> <code>get_account</code></p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill state">WormDB state</span><span class="pill node">nodeos</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>Generic contract-table reads come from the same state store. The head comes from nodeos.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r4" data-api="hyperion" data-tiers="hist" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r4" aria-pressed="false">Hyperion v2 actions and deltas</button></h3>
+          <p class="codes"><code>get_actions</code> <code>get_deltas</code></p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill hist">Elasticsearch</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>History and search: time-ordered reads and aggregations.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r5" data-api="atomic" data-tiers="hist" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r5" aria-pressed="false">AtomicAssets logs, transfers, sales history</button></h3>
+          <p class="codes"><code>/logs</code> <code>/transfers</code> <code>/sales-history</code></p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill hist">Elasticsearch</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>Event history. This is already what Hyperion indexes.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r6" data-api="atomic" data-tiers="hist state" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r6" aria-pressed="false">AtomicAssets minted_at and sales price history</button></h3>
+          <p class="codes"><code>minted_at</code> sales price history</p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill hist">Elasticsearch</span><span class="pill state">+ state</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>State filters, sorts, and paginates. One batched Elasticsearch hydrate fills the page, and that hydrate is cached.</p>
+        </article>
+        <article class="route" data-kind="route" data-id="r7" data-api="hyperion" data-tiers="cold" data-select-host="route">
+          <h3 class="family"><button type="button" data-select="route" data-id="r7" aria-pressed="false">Cold raw payloads</button></h3>
+          <p class="codes">old action and delta bodies</p>
+          <div class="tiercell"><span class="sr">Tier</span><span class="pill cold">archive-server</span></div>
+          <p class="why"><span class="sr">Why this tier. </span>Frozen SHiP logs, fetched on demand. No database cost.</p>
+        </article>
       </div>
     </div>
   </section>
 
-  <footer class="wrap">
-    Hyperion 4.5 unified serving — vision page. Proven numbers from
-    <span class="kbd">benchmark/atomicassets/WSEG_RESULTS.md</span> and
-    <span class="kbd">FRESHNESS_OVERLAY_DESIGN.md</span>. State in WormDB/Mongo · history in Elasticsearch ·
-    cold in archive-server · head in nodeos — one SHiP feed, each datum stored once.
-  </footer>
+  <section class="band" id="state">
+    <div class="wrap">
+      <p class="kicker">03 — State tier</p>
+      <h2>One file, many namespaces.</h2>
+      <p class="intro">The state tier is a single memory-mapped <code>.wseg</code>. It stays live at chain head and compacts in place. Another API is another namespace, not another database.</p>
 
-</div>
+      <div class="state-grid">
+        <div class="panel">
+          <p class="kicker">Layout</p>
+          <h3>Namespaced tables in one <span class="em">.wseg</span></h3>
+          <p>A columnar file, memory-mapped. The table-id space is partitioned so several API domains share one reader.</p>
+          <ul class="ns">
+            <li class="proven">
+              <span class="range">0–10</span>
+              <span class="name">Light API state</span>
+              <span class="badge proven">Proven</span>
+            </li>
+            <li class="proven">
+              <span class="range">11–21</span>
+              <span class="name">AtomicAssets state</span>
+              <span class="badge proven">Proven</span>
+            </li>
+            <li class="planned">
+              <span class="range">reserved</span>
+              <span class="name">Chain v1 / generic tables</span>
+              <span class="badge planned">Planned</span>
+            </li>
+            <li class="planned">
+              <span class="range">reserved</span>
+              <span class="name">AtomicMarket</span>
+              <span class="badge planned">Planned</span>
+            </li>
+          </ul>
+          <p class="fine">Forward store keyed by id, plus per-dimension inverted posting lists — owner, collection, schema, template, and data facet — and presorted orderings. Hybrid roaring postings. Served embedded, with no IPC. Each datum once.</p>
+        </div>
+        <div class="panel">
+          <p class="kicker">Runtime</p>
+          <h3>Live, then compacted in place</h3>
+          <p>Reads merge a frozen base with a freshness overlay. Readers keep serving through the swap.</p>
+          <ol class="steps">
+            <li>
+              <strong>Frozen base</strong>
+              <p>Immutable, mmap'd, and read by binary search.</p>
+            </li>
+            <li>
+              <strong>Freshness overlay</strong>
+              <p>The SHiP feed applies mint, transfer, burn, and setdata. Reads merge the base and the overlay. The forward record is the sole arbiter, so stale postings are harmless.</p>
+            </li>
+            <li>
+              <strong>Two-phase apply</strong>
+              <p>Base reads stay lock-free. A brief in-RAM commit holds the freshness lag to hundreds of µs, and readers are never stalled.</p>
+            </li>
+            <li>
+              <strong>Compaction</strong>
+              <p>Fold the base and the overlay into a fresh segment in the background, then an atomic <kbd>ArcSwap</kbd> hot-swap. Overlay RAM is reclaimed. Readers keep serving.</p>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="evidence">
+    <div class="wrap">
+      <p class="kicker">04 — Evidence</p>
+      <h2>Measured on WAX mainnet.</h2>
+      <p class="intro">These figures are the AtomicAssets state tier, the richest query surface, measured end to end. The mechanism under them is domain-generic.</p>
+
+      <div class="measure">
+        <h3>The store</h3>
+        <div class="stats">
+          <article class="stat">
+            <p class="num">21 GB</p>
+            <p>232M live assets on disk. Under Mongo at 24.3 GB, and under the incumbent Postgres stack at about 692 GB.</p>
+          </article>
+          <article class="stat">
+            <p class="num">sub-µs</p>
+            <p>Point, facet, and collection page-1, from embedded mmap. 150k–887k requests/s on one thread.</p>
+          </article>
+          <article class="stat">
+            <p class="num">38 min</p>
+            <p>Snapshot to fully indexed. 0 decode errors. 200/200 parity with the live API.</p>
+          </article>
+          <article class="stat">
+            <p class="num">~28×</p>
+            <p>Less storage than eosio-contract-api. No burned rows, and no history kept in the state tier.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="measure">
+        <h3>Live serving from chain head</h3>
+        <div class="stats">
+          <article class="stat">
+            <p class="num">370k/s</p>
+            <p>Mutations applied on one thread. About 37× a SHiP burst.</p>
+          </article>
+          <article class="stat">
+            <p class="num">~276 µs</p>
+            <p>Commit hold at p50. Reads stay sub-µs with the overlay active.</p>
+          </article>
+          <article class="stat">
+            <p class="num">557k req/s</p>
+            <p>Readers served while a writer ingested. Reader p50 about 1 µs.</p>
+          </article>
+          <article class="stat">
+            <p class="num">0 stale</p>
+            <p>Page-merge invariant held across 38,974 page entries at scale.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="measure">
+        <h3>Compaction and hot-swap</h3>
+        <div class="stats">
+          <article class="stat">
+            <p class="num">6.4 min</p>
+            <p>Fold of the 232M base plus overlay into a fresh segment. About 3× faster than the original build, because the fold reads mmap rather than a database stream.</p>
+          </article>
+          <article class="stat">
+            <p class="num">0 / 60k</p>
+            <p>Fold equivalence. The new base alone answers identically: 0 mismatches across 60,000 checks.</p>
+          </article>
+          <article class="stat">
+            <p class="num">396 → 0 MB</p>
+            <p>Overlay heap freed on swap. What remains is evictable page cache.</p>
+          </article>
+          <article class="stat">
+            <p class="num">3.68M req/s</p>
+            <p>Daemon readers stay lock-free across hot-swaps. A reader stall is a brief per-swap tail-replay. The fold itself does not stall readers.</p>
+          </article>
+        </div>
+      </div>
+
+      <p class="note">All of the above is the AtomicAssets instance of a <strong>domain-generic</strong> mechanism: an immutable base, a freshness overlay, and ArcSwap compaction. The same machinery hosts the Light API overlay and chain v1 tables in the same segment. That generalization is the remaining 4.5 integration work.</p>
+    </div>
+  </section>
+
+  <section class="band" id="roadmap">
+    <div class="wrap">
+      <p class="kicker">05 — Roadmap</p>
+      <h2>What closes the loop.</h2>
+      <p class="intro">The decoder, the store, the overlay, and compaction are measured. What remains is one segment, one applier, and one gateway for every shape.</p>
+      <div class="plan">
+        <div>
+          <h3><span class="badge proven">Proven</span> In this repo</h3>
+          <ul>
+            <li><strong>atomicdata decoder.</strong> Byte-exact across 77/77 live schemas, with 200/200 parity.</li>
+            <li><strong>snapshot-load presets.</strong> AtomicAssets, AtomicMarket, and Light API shapes.</li>
+            <li><strong>AtomicAssets WormDB store.</strong> 21 GB, with sub-µs faceted reads.</li>
+            <li><strong>Live freshness overlay.</strong> Chain head is applied, and reads stay sub-µs.</li>
+            <li><strong>Compaction daemon.</strong> ArcSwap hot-swap, running continuously.</li>
+          </ul>
+        </div>
+        <div>
+          <h3><span class="badge planned">Planned</span> The 4.5 target</h3>
+          <ul class="ahead">
+            <li><strong>One segment, both namespaces.</strong> Light API and AtomicAssets in the same <code>.wseg</code>.</li>
+            <li><strong>One applier.</strong> Both contract domains leave the shared SHiP feed through one router.</li>
+            <li><strong>Light API overlay.</strong> The live overlay extended to token and permission deltas.</li>
+            <li><strong>Deep pages and AtomicMarket.</strong> Cursor pagination, AtomicMarket, and range indexes.</li>
+            <li><strong>One HTTP gateway.</strong> All four API shapes served from the same store.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <p>Hyperion 4.5 unified serving. Proven numbers are from <a href="benchmark/atomicassets/WSEG_RESULTS.md">benchmark/atomicassets/WSEG_RESULTS.md</a> and <a href="benchmark/atomicassets/FRESHNESS_OVERLAY_DESIGN.md">FRESHNESS_OVERLAY_DESIGN.md</a>.</p>
+    <p>State in WormDB or Mongo. History in Elasticsearch. Cold payloads in archive-server. Head in nodeos. One SHiP feed, and each datum stored once.</p>
+    <p><a class="totop" href="#top">Back to top</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var LINKS = {
+    api: {
+      hyperion: ["hist", "cold"],
+      light: ["state"],
+      atomic: ["state", "hist"],
+      chain: ["state", "node"]
+    },
+    tier: {
+      node: ["chain"],
+      state: ["light", "atomic", "chain"],
+      hist: ["hyperion", "atomic"],
+      cold: ["hyperion"]
+    }
+  };
+
+  var ROUTES = {
+    r1: { api: "atomic", tiers: ["state"] },
+    r2: { api: "light", tiers: ["state"] },
+    r3: { api: "chain", tiers: ["state", "node"] },
+    r4: { api: "hyperion", tiers: ["hist"] },
+    r5: { api: "atomic", tiers: ["hist"] },
+    r6: { api: "atomic", tiers: ["hist", "state"] },
+    r7: { api: "hyperion", tiers: ["cold"] }
+  };
+
+  var COPY = {
+    "api:hyperion": "Hyperion v2 stays on the history path. Elasticsearch serves actions, deltas, search, and aggregations. archive-server answers when an old body is requested.",
+    "api:light": "Light API reads current token and account state. Balances, account, topholders, rex, keys, and code hashes are contract-table rows in WormDB or Mongo.",
+    "api:atomic": "AtomicAssets splits by access pattern. Assets, templates, collections, and schemas are WormDB state. Logs, transfers, and sales history stay in Elasticsearch.",
+    "api:chain": "Chain v1 table and account reads come from the state tier. The live head stays on nodeos.",
+    "tier:node": "nodeos is the chain head. It pushes transactions and is the authority the SHiP feed streams from. Chain v1 head reads stay here.",
+    "tier:state": "The state tier answers current rows: Light API, AtomicAssets assets and definitions, and chain v1 table reads.",
+    "tier:hist": "Elasticsearch answers time-ordered history: Hyperion v2 actions and deltas, plus AtomicAssets logs, transfers, and sales history.",
+    "tier:cold": "archive-server returns frozen SHiP payloads on demand. There is no database behind it, and it runs only when a cold body is requested.",
+    "route:r1": "AtomicAssets asset, template, and collection queries are faceted reads of current state. They stay in WormDB, in-process, at sub-µs latency.",
+    "route:r2": "Light API balances, account, and topholders are current contract-table state, served from the state tier.",
+    "route:r3": "get_table_rows and get_account read the state tier. Head state stays on nodeos.",
+    "route:r4": "get_actions and get_deltas are history and search, so they go to Elasticsearch.",
+    "route:r5": "AtomicAssets logs, transfers, and sales history are event history. Elasticsearch already indexes them.",
+    "route:r6": "minted_at and sales price history need both tiers. State filters, sorts, and paginates, then one cached Elasticsearch hydrate fills the page.",
+    "route:r7": "Cold action and delta bodies stay in frozen SHiP logs. archive-server fetches them on demand, with no database cost."
+  };
+
+  var SHORT = {
+    "api:hyperion": "Hyperion v2",
+    "api:light": "Light API",
+    "api:atomic": "AtomicAssets",
+    "api:chain": "Chain v1",
+    "tier:node": "nodeos",
+    "tier:state": "WormDB",
+    "tier:hist": "Elasticsearch",
+    "tier:cold": "archive-server",
+    "route:r1": "AA assets",
+    "route:r2": "Light API balances",
+    "route:r3": "Chain v1 tables",
+    "route:r4": "Hyperion history",
+    "route:r5": "AA history",
+    "route:r6": "AA hydrate",
+    "route:r7": "Cold payloads"
+  };
+
+  var DEFAULT_STATUS = document.getElementById("trace-status").textContent;
+  var current = null;
+
+  function hotSet(sel) {
+    var set = new Set([sel.id, "gateway", "spine"]);
+    if (sel.type === "api") LINKS.api[sel.id].forEach(function (id) { set.add(id); });
+    if (sel.type === "tier") LINKS.tier[sel.id].forEach(function (id) { set.add(id); });
+    if (sel.type === "route") {
+      set.add(ROUTES[sel.id].api);
+      ROUTES[sel.id].tiers.forEach(function (id) { set.add(id); });
+    }
+    return set;
+  }
+
+  function isHot(el, sel, set) {
+    if (el.dataset.kind === "always") return true;
+    if (el.dataset.kind === "route") {
+      if (sel.type === "route") return el.dataset.id === sel.id;
+      if (sel.type === "api") return el.dataset.api === sel.id;
+      return el.dataset.tiers.split(/\s+/).indexOf(sel.id) !== -1;
+    }
+    return set.has(el.dataset.id);
+  }
+
+  function apply(sel) {
+    if (sel && current && current.type === sel.type && current.id === sel.id) sel = null;
+    current = sel;
+    var tracing = !!sel;
+    var set = tracing ? hotSet(sel) : null;
+    document.body.classList.toggle("is-tracing", tracing);
+    document.querySelectorAll("[data-kind]").forEach(function (el) {
+      var hot = tracing && isHot(el, sel, set);
+      el.classList.toggle("is-hot", hot);
+      el.classList.toggle("is-dim", tracing && !hot);
+    });
+    document.querySelectorAll("[data-select]").forEach(function (btn) {
+      var pressed = tracing && btn.dataset.select === sel.type && btn.dataset.id === sel.id;
+      btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    });
+    var key = tracing ? sel.type + ":" + sel.id : "";
+    document.getElementById("trace-status").textContent = tracing ? (COPY[key] || DEFAULT_STATUS) : DEFAULT_STATUS;
+    document.getElementById("header-trace").textContent = tracing ? "Tracing " + (SHORT[key] || "selection") : "";
+    document.getElementById("trace-chip").hidden = !tracing;
+  }
+
+  document.body.addEventListener("click", function (event) {
+    if (event.target.closest("a")) return;
+    var button = event.target.closest("[data-select]");
+    if (button) {
+      apply({ type: button.dataset.select, id: button.dataset.id });
+      return;
+    }
+    var host = event.target.closest("[data-select-host]");
+    if (!host) return;
+    var selected = window.getSelection && window.getSelection();
+    if (selected && !selected.isCollapsed && host.contains(selected.anchorNode)) return;
+    apply({ type: host.dataset.selectHost, id: host.dataset.id });
+  });
+
+  document.getElementById("clear-trace").addEventListener("click", function () { apply(null); });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") apply(null);
+  });
+
+  document.querySelectorAll("[data-filter]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var filter = button.dataset.filter;
+      var shown = 0;
+      document.querySelectorAll("[data-filter]").forEach(function (peer) {
+        peer.setAttribute("aria-pressed", peer === button ? "true" : "false");
+      });
+      document.querySelectorAll(".route").forEach(function (route) {
+        var tiers = route.dataset.tiers.split(/\s+/);
+        var visible = filter === "all" || tiers.indexOf(filter) !== -1;
+        route.hidden = !visible;
+        if (visible) shown += 1;
+      });
+      document.getElementById("route-count").textContent = shown + (shown === 1 ? " family" : " families");
+    });
+  });
+
+  var bar = document.getElementById("progress");
+  function onScroll() {
+    var root = document.documentElement;
+    var max = root.scrollHeight - root.clientHeight;
+    bar.style.transform = "scaleX(" + (max > 0 ? root.scrollTop / max : 0) + ")";
+  }
+  document.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  var links = Array.prototype.slice.call(document.querySelectorAll(".top nav a"));
+  var sections = Array.prototype.slice.call(document.querySelectorAll("main section[id]"));
+  function updateSpy() {
+    var line = document.querySelector(".top").getBoundingClientRect().height + 56;
+    var current = sections[0].id;
+    sections.forEach(function (section) {
+      if (section.getBoundingClientRect().top <= line) current = section.id;
+    });
+    links.forEach(function (link) {
+      link.setAttribute("aria-current", link.getAttribute("href") === "#" + current ? "true" : "false");
+    });
+  }
+  document.addEventListener("scroll", updateSpy, { passive: true });
+  updateSpy();
+})();
+</script>
 </body>
 </html>
